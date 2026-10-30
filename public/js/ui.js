@@ -80,6 +80,8 @@ export function radarSvg({ center, radii = [10, 20, 30], activeStage = null, mar
 // blue dots = volunteers, green = track history. Pure SVG, works offline.
 const NICE = [0.25, 0.5, 1, 2, 3, 5, 8, 10, 15, 20, 30, 50, 100];
 export const niceRange = (km) => NICE.find((n) => n >= km) || Math.ceil(km / 50) * 50;
+// Move `steps` along the nice-range ladder (negative = zoom in / smaller range).
+export function stepRange(km, steps) { const i = Math.max(0, NICE.indexOf(niceRange(km))); return NICE[Math.max(0, Math.min(NICE.length - 1, i + steps))]; }
 const fmtKm = (km) => (km < 1 ? `${Math.round(km * 1000)} m` : `${+km.toFixed(km < 10 ? 1 : 0)} km`);
 
 export function ppiSvg({ center, rangeKm, rings = null, activeRing = null, targets = [], title = 'PPI' }) {

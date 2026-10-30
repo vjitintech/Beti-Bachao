@@ -313,3 +313,12 @@ button.alert { width: 100%; text-align: start; font: inherit; cursor: pointer; }
 .ppi-table td, .ppi-table th { padding: 5px 4px; }
 .ppi-key { color: #2fbf63; font: 10px ui-monospace, Menlo, monospace; margin: 6px 4px 2px; }
 .track-card .track-row { display: block; padding: 8px 0; }
+
+.gmap, .ppi-box { position: relative; }
+.zoom-bar { position: absolute; top: 8px; inset-inline-end: 8px; display: flex; flex-direction: column; gap: 4px; z-index: 2; }
+.zbtn { width: 38px; height: 38px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font-size: 1.25rem; font-weight: 700; cursor: pointer; box-shadow: var(--shadow); line-height: 1; }
+.ppi-box .zbtn { background: #04140a; color: #46e07f; border-color: #1b7a3c; }
+.ppi-title { color: #8dffb4; font: 700 .9rem ui-monospace, Menlo, monospace; margin: 4px 6px 6px; letter-spacing: .5px; }
+.ppi-explain { color: #b9e8c8; font-size: .82rem; line-height: 1.45; margin: 6px 8px 4px; }
+.ppi-explain b { color: #8dffb4; }
+.ppi-legend .l-you { background: #6cc0ff; box-shadow: 0 0 0 2px #fff inset; } .ppi-legend .l-decl { background: #4a5a66; }

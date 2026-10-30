@@ -1,9 +1,9 @@
-import { createApi, uuid } from './api.js?v=mvuiiaym';
-import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mvuiiaym';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange } from './ui.js?v=mvuiiaym';
-import { geo, syntheticLocation, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mvuiiaym';
-import { TRAINING_MODULES } from '../core/engine.js?v=mvuiiaym';
-import { DEMO_BLURBS } from '../core/seed.js?v=mvuiiaym';
+import { createApi, uuid } from './api.js?v=mvuixxhg';
+import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mvuixxhg';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mvuixxhg';
+import { geo, syntheticLocation, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mvuixxhg';
+import { TRAINING_MODULES } from '../core/engine.js?v=mvuixxhg';
+import { DEMO_BLURBS } from '../core/seed.js?v=mvuixxhg';
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'policy', volSel: null };
 const app = () => $('#app');
@@ -35,25 +35,33 @@ const pretty = (s) => String(s || '').replace(/_/g, ' ').toLowerCase().replace(/
 // Google Maps embedded inside the app (no API key, nothing opens externally).
 // Rounded to ~11 m so the frame only reloads when the position really changes.
 const ll = (p) => `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`;
-function googleMap(loc, title) {
+const mapZoom = (key, def) => Math.max(3, Math.min(20, (st.mapZoom ||= {})[key] ?? def));
+const zoomBar = (act, key, label) => `<div class="zoom-bar" role="group" aria-label="${esc(label)} zoom"><button type="button" class="zbtn" data-act="${act}" data-key="${esc(key)}" data-d="1" aria-label="Zoom in">＋</button><button type="button" class="zbtn" data-act="${act}" data-key="${esc(key)}" data-d="-1" aria-label="Zoom out">－</button></div>`;
+function googleMap(loc, title, key = 'map') {
   if (!loc) return '';
-  return `<div class="gmap"><iframe title="${esc(title)}" src="https://maps.google.com/maps?q=${ll(loc)}&z=16&output=embed" loading="lazy" referrerpolicy="no-referrer"></iframe></div>`;
+  return `<div class="gmap"><iframe title="${esc(title)}" src="https://maps.google.com/maps?q=${ll(loc)}&z=${mapZoom(key, 16)}&output=embed" loading="lazy" referrerpolicy="no-referrer"></iframe>${zoomBar('map-zoom', key, title)}</div>`;
 }
-function googleDirections(from, to, title) {
-  if (!from || !to) return googleMap(to, title);
-  return `<div class="gmap"><iframe title="${esc(title)}" src="https://maps.google.com/maps?saddr=${ll(from)}&daddr=${ll(to)}&dirflg=d&output=embed" loading="lazy" referrerpolicy="no-referrer"></iframe></div>`;
+function googleDirections(from, to, title, key = 'route') {
+  if (!from || !to) return googleMap(to, title, key);
+  const z = (st.mapZoom ||= {})[key];
+  return `<div class="gmap"><iframe title="${esc(title)}" src="https://maps.google.com/maps?saddr=${ll(from)}&daddr=${ll(to)}&dirflg=d${z ? `&z=${mapZoom(key, 14)}` : ''}&output=embed" loading="lazy" referrerpolicy="no-referrer"></iframe>${zoomBar('map-zoom', key, title)}</div>`;
 }
+// Radar range with user zoom (each step = next "nice" range).
+function ppiRange(key, autoKm) { const steps = (st.ppiZoom ||= {})[key] || 0; return stepRange(autoKm, -steps); }
 
 // Live tracking of every accepted responder on a PPI radar scope + multi-target readout.
 const trkId = (r) => (r.isYou ? 'YOU' : (r.label.match(/ ([A-Z])$/) || [])[1] || r.label.slice(0, 3).toUpperCase());
-function trackingCard(list, center, radii, { title = 'Live tracking', map = true, note = '' } = {}) {
+function trackingCard(list, center, radii, { title = 'Live tracking', map = true, note = '', key = 'track', viewer = 'her' } = {}) {
   list = list || [];
   const rows = list.map((r) => ({ id: trkId(r), you: r.isYou, km: r.distanceKm, brg: r.bearingDeg, spd: r.speedKmh, eta: r.status === 'ARRIVED' || r.status === 'ASSISTING' ? 0 : r.approxEtaMin, state: pretty(r.status).toUpperCase(), closing: r.status === 'EN_ROUTE' ? r.closing : null }));
   const targets = list.filter((r) => r.position).map((r) => ({ id: trkId(r), kind: r.isYou ? 'you' : 'responder', position: r.position, track: r.track, sub: r.distanceKm != null ? (r.distanceKm < 1 ? Math.round(r.distanceKm * 1000) + 'm' : r.distanceKm + 'km') : '', title: `${r.label} · ${pretty(r.status)}` }));
-  const range = niceRange(Math.max(0.5, ...list.map((r) => r.distanceKm || 0)) * 1.15);
+  const range = ppiRange(key, niceRange(Math.max(0.5, ...list.map((r) => r.distanceKm || 0)) * 1.15));
   return `<section class="card track-card"><h2>🛰️ ${esc(title)}</h2>
-    ${list.length ? `<div class="ppi-wrap">${map && center && targets.length ? `${ppiSvg({ center, rangeKm: range, targets, title: 'PPI · LIVE' })}
-      <div class="ppi-legend"><span><i class="l-her"></i>HER</span><span><i class="l-vol"></i>VOLUNTEER</span><span><i class="l-trk"></i>TRACK</span></div>` : ''}
+    ${list.length ? `<div class="ppi-wrap">${map && center && targets.length ? `<div class="ppi-box">${ppiSvg({ center, rangeKm: range, targets, title: 'PPI · LIVE' })}${zoomBar('ppi-zoom', key, 'Radar')}</div>
+      <div class="ppi-legend"><span><i class="l-her"></i>HER</span><span><i class="l-vol"></i>VOLUNTEER</span>${viewer === 'volunteer' ? '<span><i class="l-you"></i>YOU</span>' : ''}<span><i class="l-trk"></i>TRACK</span></div>
+      <p class="ppi-explain">${viewer === 'volunteer'
+        ? 'She is the red dot in the centre. Blue dots are the volunteers who accepted (you are the light-blue dot); green lines show the path each one has travelled. Distance from the centre = how far from her; the angle = which direction (000° = north). The rotating line only shows the scope is live.'
+        : 'You are the red dot in the centre. Blue dots are verified volunteers who accepted your SOS; green lines show the path each one has travelled. Distance from the centre = how far away they are; the angle = which direction they are coming from (000° = north). The rotating line only shows the scope is live.'}</p>` : ''}
       ${ppiTable(rows)}</div>
       <ul class="track-list">${list.map((r) => `<li class="track-row ${r.isYou ? 'is-you' : ''}"><span class="track-who"><strong>${esc(r.label)}</strong> ${r.verified ? '<span class="badge badge-ok">Verified</span>' : ''}<br><small>${esc(pretty(r.status))}${r.locationUpdatedAt ? ` · GPS <span data-live="age" data-fmt="short" data-at="${esc(r.locationUpdatedAt)}"></span> ago` : ''}</small></span></li>`).join('')}</ul>`
       : `<p class="muted">${esc(t('status_red'))}</p>`}
@@ -370,7 +378,7 @@ async function viewIncident(id, params) {
     ${contacts.list().length ? `<div class="card"><h2>📞 ${esc(t('contacts'))}</h2><p class="small muted">${esc(t('text_contacts'))}: <a href="${esc(smsHref(contacts.list().map((c) => c.phone), sosMessage(v.location || geo.last)))}">💬 SMS with latest location</a></p><div class="row">${contacts.list().map((c) => `<a class="btn btn-secondary" href="${telHref(c.phone)}">📞 ${esc(c.name)}</a>`).join('')}</div></div>` : ''}
     <div class="card"><div class="row">${smsButtons()}<button class="btn btn-ghost" data-act="native-share">📤 Share…</button></div></div>
     ${locationCard(v.location, { live: true })}
-    ${v.location ? `<section class="card"><h2>📍 Your live location (as shared)</h2>${googleMap(v.location, 'Your live location')}</section>` : ''}
+    ${v.location ? `<section class="card"><h2>📍 Your live location (as shared)</h2>${googleMap(v.location, 'Your live location', 'mine')}</section>` : ''}
     ` : `<section class="card"><p>${v.closureReason === 'USER_CONFIRMED_SAFE' ? '💚 You confirmed you are safe. Responders have been released.' : 'This SOS has ended.'}</p><a class="btn btn-primary" href="#/home">${esc(t('home'))}</a></section>${emergencyBar()}`}
     <details class="card" data-keep="user-timeline"><summary>${esc(t('timeline'))} (${tl.length})</summary><ol class="timeline">${tl.map((x) => `<li><time>${esc(fmtTime(x.at))}</time> ${esc(pretty(x.text))}${x.reason ? ` <small class="muted">— ${esc(x.reason)}</small>` : ''}</li>`).join('')}</ol></details>
   `);
@@ -548,8 +556,8 @@ function volunteerDetail(a) {
         ${a.battery ? `<p>Her battery: ${Math.round(a.battery.level * 100)}%${a.battery.charging ? ' (charging)' : ''}</p>` : ''}
       </div>
       <h3>🧭 Route to her</h3>
-      ${googleDirections(a.team?.find((x) => x.isYou)?.position, a.location, 'Route to her')}
-      ${trackingCard(a.team, a.location, a.radiusStagesKm, { title: 'Responding team' })}
+      ${googleDirections(a.team?.find((x) => x.isYou)?.position, a.location, 'Route to her', 'route')}
+      ${trackingCard(a.team, a.location, a.radiusStagesKm, { title: 'Responding team', key: 'team', viewer: 'volunteer' })}
       <div class="row">${next ? `<button class="btn btn-primary" data-act="vol-status" data-aid="${esc(asg.id)}" data-status="${next[0]}">${esc(next[1])}</button>` : '<p>Stay with her until she confirms she is safe in the app.</p>'}
         <button class="btn btn-warn" data-act="vol-escalate" data-id="${esc(a.id)}">Request emergency escalation</button>
         <button class="btn btn-ghost" data-act="vol-unable" data-aid="${esc(asg.id)}">Unable to help</button></div>
@@ -590,19 +598,25 @@ function opsDetail(d, tl, cfg) {
     ...(d.alertedPositions || []).filter((p) => p.response !== 'ACCEPTED').map((p) => ({ kind: p.response === 'DECLINED' ? 'declined' : 'alerted', position: p.position, title: `${p.response || 'alerted'} ${p.distanceKm ?? ''} km` })),
     ...live.map((a) => ({ id: a.volunteerName.split(' ')[0].toUpperCase(), kind: 'responder', position: a.position, track: a.track, sub: a.distanceKm != null ? a.distanceKm + 'km' : '', title: `${a.volunteerName} ${a.status}` })),
   ];
-  const near = live.length ? niceRange(Math.max(0.5, ...live.map((a) => a.distanceKm || 0)) * 1.15) : null;
+  const near = live.length ? ppiRange('ops-approach', niceRange(Math.max(0.5, ...live.map((a) => a.distanceKm || 0)) * 1.15)) : null;
+  const searchRange = ppiRange('ops-search', radii[2]);
   const rows = live.map((a) => ({ id: a.volunteerName.split(' ')[0].toUpperCase(), km: a.distanceKm, brg: a.bearingDeg, spd: a.speedKmh, eta: a.status === 'ARRIVED' || a.status === 'ASSISTING' ? 0 : a.approxEtaMin, state: pretty(a.status).toUpperCase(), closing: a.status === 'EN_ROUTE' ? a.closing : null }));
   const scope = d.location ? `<div class="ppi-grid">
-      <div class="ppi-wrap">${ppiSvg({ center: d.location, rangeKm: radii[2], rings: radii, activeRing: d.search?.stage ?? null, targets, title: 'PPI · SEARCH' })}
-        <div class="ppi-legend"><span><i class="l-her"></i>HER</span><span><i class="l-vol"></i>ASSIGNED</span><span><i class="l-alert"></i>ALERTED</span><span><i class="l-trk"></i>TRACK</span></div></div>
-      ${near ? `<div class="ppi-wrap">${ppiSvg({ center: d.location, rangeKm: near, targets: targets.filter((x) => x.kind === 'responder'), title: 'PPI · APPROACH' })}${ppiTable(rows)}</div>` : ''}
+      <div class="ppi-wrap"><h3 class="ppi-title">① SEARCH radar — who was alerted</h3>
+        <div class="ppi-box">${ppiSvg({ center: d.location, rangeKm: searchRange, rings: radii.filter((r) => r <= searchRange), activeRing: d.search?.stage ?? null, targets, title: 'PPI · SEARCH' })}${zoomBar('ppi-zoom', 'ops-search', 'Search radar')}</div>
+        <div class="ppi-legend"><span><i class="l-her"></i>HER</span><span><i class="l-vol"></i>ACCEPTED</span><span><i class="l-alert"></i>ALERTED</span><span><i class="l-decl"></i>DECLINED</span></div>
+        <p class="ppi-explain">The whole search area around her. Rings are the ${radii.join(' / ')} km search stages; the <b>bright ring</b> is the stage being searched now. Hollow circles = volunteers alerted but not yet accepted; grey = declined; solid blue = accepted. Use it to see if the search is reaching enough people.</p></div>
+      ${near ? `<div class="ppi-wrap"><h3 class="ppi-title">② APPROACH radar — who is coming</h3>
+        <div class="ppi-box">${ppiSvg({ center: d.location, rangeKm: near, targets: targets.filter((x) => x.kind === 'responder'), title: 'PPI · APPROACH' })}${zoomBar('ppi-zoom', 'ops-approach', 'Approach radar')}</div>
+        <p class="ppi-explain">Zoomed in on only the volunteers who accepted, with their travelled path (green). The table gives each one's range (distance), bearing (direction from her), speed, ETA and whether they are closing in. Use it to spot a responder who has stopped or is moving away.</p>${ppiTable(rows)}</div>`
+      : `<div class="ppi-wrap"><h3 class="ppi-title">② APPROACH radar</h3><p class="ppi-explain">Appears when a volunteer accepts. It zooms in on accepted volunteers and tracks them closing in on her.</p></div>`}
     </div>` : '';
   return `<section class="card ops-detail">
     <div class="row space"><h2>${esc(d.requester?.displayName)} · <span class="status-text-${esc(d.color)}">${esc(pretty(d.status))}</span></h2><span class="badge">${esc(d.severity)}</span></div>
     ${d.duress ? '<div class="alert alert-danger"><strong>🚩 DURESS PIN USED.</strong> The user\'s app shows "cancelled". Treat as active danger. Do not contact her in a way that could reveal this.</div>' : ''}
     <p>Trigger: ${esc(d.trigger)}${d.silent ? ' (silent)' : ''} · Escalation: <strong>${esc(d.escalationStatus)}</strong> · Alerted: ${esc(d.alertedCount)} · Battery: ${d.battery ? Math.round(d.battery.level * 100) + '%' : 'unknown'}</p>
     ${d.location ? `${scope}
-      ${googleMap(d.location, 'Her live location')}
+      <h3>📍 Her live location</h3>${googleMap(d.location, 'Her live location', 'ops')}
       <p>📍 ${esc(d.location.lat.toFixed(5))}, ${esc(d.location.lng.toFixed(5))} · ±${esc(d.location.accuracyM)} m · ${esc(d.location.source)} · <span data-live="age" data-fmt="short" data-at="${esc(d.location.observedAt)}"></span> old ${d.location.stale ? '<span class="badge badge-warn">STALE</span>' : ''} · ${esc(d.location.vertical)}</p>
       ${d.locationHistory.some((l) => l.suspect) ? `<p class="badge badge-warn">Suspect location jumps ignored: ${d.locationHistory.filter((l) => l.suspect).map((l) => esc(l.suspectReason)).join('; ')}</p>` : ''}` : '<div class="alert alert-warn">No usable location. Contact the user through official channels if possible.</div>'}
     ${d.search?.secondsLeft != null ? `<p>Search stage ${d.search.stage + 1}/3 (${esc(d.search.radiusKm)} km) · next expansion in <span data-live="stage-countdown-raw" data-deadline="${esc(d.search.deadline)}"></span></p>` : ''}
@@ -743,16 +757,25 @@ function patchMain(html) {
   tpl.innerHTML = html;
   const nextMain = tpl.content.querySelector('#main');
   const curMain = $('#main');
-  if (!nextMain || !curMain || nextMain.children.length !== curMain.children.length) return false;
-  [...nextMain.children].forEach((n, i) => {
-    const c = curMain.children[i];
-    const src = n.outerHTML;
-    if (srcHtml.get(c) === src) return; // unchanged block: leave it exactly as it is
-    const fresh = n.cloneNode(true);
-    c.replaceWith(fresh);
-    srcHtml.set(fresh, src);
-  });
+  if (!nextMain || !curMain) return false;
+  morph(curMain, nextMain);
   return true;
+}
+
+// Minimal DOM diff: walks old and new trees together and changes only the text
+// and attributes that differ. Maps (iframes) are never reloaded unless their
+// address changes; the radar sweep keeps spinning; open panels stay open.
+const KEEP_ATTRS = new Set(['style', 'data-sync', 'open']);
+function morph(a, b) {
+  if (a.nodeType !== b.nodeType || a.nodeName !== b.nodeName) { a.replaceWith(b.cloneNode(true)); return; }
+  if (a.nodeType === 3 || a.nodeType === 8) { if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue; return; }
+  if (a.nodeType !== 1) return;
+  for (const at of [...b.attributes]) if (a.getAttribute(at.name) !== at.value) a.setAttribute(at.name, at.value);
+  for (const at of [...a.attributes]) if (!b.hasAttribute(at.name) && !KEEP_ATTRS.has(at.name)) a.removeAttribute(at.name);
+  if (a.tagName === 'IFRAME' || a.hasAttribute('data-live')) return; // live text is filled in by updateLive()
+  const ac = [...a.childNodes], bc = [...b.childNodes];
+  for (let i = 0; i < bc.length; i++) { if (i < ac.length) morph(ac[i], bc[i]); else a.appendChild(bc[i].cloneNode(true)); }
+  for (let i = bc.length; i < ac.length; i++) ac[i].remove();
 }
 
 // Re-render without losing typing: skip if the user is in a form field.
@@ -882,6 +905,8 @@ const actions = {
   },
   async 'vol-escalate'(el) { try { await st.api.escalate(el.dataset.id, { type: 'RESPONDER_REQUEST', reason: 'Responder requested emergency services' }); toast(`Escalation recorded — ${st.cfg.simulatedLabel}. Call ${country().emergency} yourself if needed.`, 'warn', 7000); render(); } catch (e) { showErr(e); } },
   // ops
+  'map-zoom'(el) { const m = (st.mapZoom ||= {}); const k = el.dataset.key; m[k] = Math.max(3, Math.min(20, (m[k] ?? (k === 'route' ? 13 : 16)) + Number(el.dataset.d))); st.softRefresh = true; render(); },
+  'ppi-zoom'(el) { const z = (st.ppiZoom ||= {}); const k = el.dataset.key; z[k] = Math.max(-4, Math.min(6, (z[k] || 0) + Number(el.dataset.d))); st.softRefresh = true; render(); },
   'op-select'(el) { st.opSel = el.dataset.id; render(); },
   async 'op-reassign'(el) {
     const r = await modal({ title: 'Remove responder', body: '<label>Reason (5+ chars)<input name="reason" required minlength="5"></label>', actions: [{ id: 'go', label: 'Remove & search again', kind: 'warn' }, { id: 'no', label: t('cancel') }] });
