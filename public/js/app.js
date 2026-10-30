@@ -1,8 +1,8 @@
-import { createApi, uuid } from './api.js?v=mvukvmhy';
-import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mvukvmhy';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mvukvmhy';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mvukvmhy';
-import { TRAINING_MODULES } from '../core/engine.js?v=mvukvmhy';
+import { createApi, uuid } from './api.js?v=mvular6a';
+import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mvular6a';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mvular6a';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mvular6a';
+import { TRAINING_MODULES } from '../core/engine.js?v=mvular6a';
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'policy', volSel: null };
 const app = () => $('#app');
@@ -132,6 +132,7 @@ function shell(content, { nav = true } = {}) {
 // ------------------------------------------------------------------ landing / auth
 function viewLanding() {
   return shell(`
+    ${st.cfg?.setupNeeded ? '<a class="alert alert-warn alert-link" href="#/setup">⚙️ No administrator yet — finish first-time setup</a>' : ''}
     <section class="hero">
       <img src="icons/icon.svg" alt="" class="hero-logo" width="84" height="84">
       <h1>Beti Bachao</h1>
@@ -173,6 +174,21 @@ async function viewLogin(params) {
         <label class="mfa hidden">Authenticator code<input name="mfaCode" inputmode="numeric" pattern="\\d{6}" autocomplete="one-time-code"></label>
         <button class="btn btn-primary" type="submit">${esc(t('login'))}</button>
         <p class="muted">New here? <a href="#/register${want ? `?as=${esc(want)}` : ''}">Create an account</a></p>
+      </form>
+    </section>`);
+}
+
+function viewSetup(params) {
+  return shell(`
+    <section class="narrow">
+      <h1>First-time setup</h1>
+      <p class="muted">Create the administrator account. The one-time setup code is printed in the server terminal (on GitHub Codespaces: the terminal, or run <code>cat /tmp/beti-bachao.log</code>).</p>
+      <form class="card form" data-form="setup">
+        <label>Setup code<input name="code" required value="${esc(params.get('code') || '')}" autocomplete="off"></label>
+        <label>Your name<input name="displayName" required maxlength="60"></label>
+        <label>Email<input name="email" type="email" required></label>
+        <label>Password (12+ characters)<input name="password" type="password" minlength="12" required autocomplete="new-password"></label>
+        <button class="btn btn-primary">Create admin</button>
       </form>
     </section>`);
 }
@@ -724,6 +740,7 @@ async function render() {
     case undefined: html = st.me ? null : viewLanding(); if (!html) return go(roleHome(st.me.role)); break;
     case 'login': if (st.me) return go(roleHome(st.me.role)); html = await viewLogin(params); break;
     case 'register': html = viewRegister(params); break;
+    case 'setup': html = viewSetup(params); break;
     case 'home': if (!guard(['user'])) return; html = await viewHome(); break;
     case 'incident': if (!guard(['user'])) return; html = await viewIncident(parts[1], params); st.pollTimer = setInterval(refreshSoft, 3000); break;
     case 'tools': if (!guard(['user'])) return; html = await viewTools(); break;
@@ -977,6 +994,7 @@ const forms = {
     patch.countryCode = f.countryCode.value;
     try { await st.api.patchConfig(patch); toast('Policy saved & audited', 'ok'); } catch (e) { showErr(e); }
   },
+  async setup(f) { try { await st.api.setup({ code: f.code.value.trim(), displayName: f.displayName.value, email: f.email.value, password: f.password.value }); st.cfg.setupNeeded = false; toast('Admin created. Log in to set up two-step login.', 'ok'); go('#/login'); } catch (e) { showErr(e); } },
   async 'add-staff'(f) { try { await st.api.createStaff({ displayName: f.displayName.value, email: f.email.value, password: f.password.value, role: f.role.value }); toast('Account created. They will set up 2-step login on first sign-in.', 'ok'); render(); } catch (e) { showErr(e); } },
   async handoff(f) { try { await st.api.handoff(f.dataset.id, { status: f.status.value, reason: f.reason.value }); toast('Handoff recorded', 'ok'); render(); } catch (e) { showErr(e); } },
   async closure(f) { try { await st.api.closureException(f.dataset.id, { reason: f.reason.value, note: f.note.value }); toast('Closed with documented exception', 'ok'); render(); } catch (e) { showErr(e); } },

@@ -112,3 +112,21 @@ test('server: admin-only config, staff suspension, path traversal blocked', asyn
   const res = await fetch(`${S.origin}/..%2f..%2fpackage.json`);
   assert.notEqual(res.status, 200);
 });
+
+test('server: first-time setup creates the admin once, protected by the one-time code', async () => {
+  const os = await import('node:os'); const path = await import('node:path');
+  const { createServer } = await import('../server/server.js');
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bb-setup-')), 'db.json');
+  const app = createServer({ env: { DATA_FILE: file, ADMIN_EMAIL: '', ADMIN_PASSWORD: '' }, tickMs: 50 });
+  await new Promise((r) => app.server.listen(0, r)); servers.push({ app });
+  const c = client(`http://127.0.0.1:${app.server.address().port}/api/v1`);
+  assert.equal((await c.call('GET', '/public-config')).body.setupNeeded, true);
+  const code = JSON.parse(fs.readFileSync(file, 'utf8')).setupToken;
+  assert.ok(code);
+  const body = { displayName: 'Owner', email: 'owner@test.app', password: 'owner-password-123' };
+  assert.equal((await c.call('POST', '/setup', { ...body, code: 'wrong-code' })).status, 403);
+  assert.equal((await c.call('POST', '/setup', { ...body, code })).status, 200);
+  assert.equal((await c.call('POST', '/setup', { ...body, code })).status, 409, 'cannot run twice');
+  assert.equal((await c.call('GET', '/public-config')).body.setupNeeded, false);
+  assert.ok((await c.login('owner@test.app', 'owner-password-123')).body.mfaEnroll, 'admin must enrol authenticator');
+});

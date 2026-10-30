@@ -30,7 +30,14 @@ export function createServer(opts = {}) {
   // ---------- first admin ----------
   function bootstrapAdmin() {
     if (store.db.users.some((u) => u.role === 'admin' && u.status === 'ACTIVE')) return;
-    if (!env.ADMIN_EMAIL || !env.ADMIN_PASSWORD) { console.warn('[bootstrap] No admin yet. Set ADMIN_EMAIL and ADMIN_PASSWORD (12+ chars) and restart.'); return; }
+    if (!env.ADMIN_EMAIL || !env.ADMIN_PASSWORD) {
+      // First-time setup in the browser, protected by a one-time code shown only in the server log.
+      store.db.setupToken ||= crypto.randomBytes(9).toString('base64url');
+      store.save();
+      const host = env.CODESPACE_NAME && env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN ? `https://${env.CODESPACE_NAME}-${env.PORT || 8080}.${env.GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN}` : `http://localhost:${env.PORT || 8080}`;
+      console.log(`\n[setup] No admin yet. Open ${host}/#/setup?code=${store.db.setupToken}\n[setup] One-time setup code: ${store.db.setupToken}\n`);
+      return;
+    }
     if (String(env.ADMIN_PASSWORD).length < 12) { console.warn('[bootstrap] ADMIN_PASSWORD must be at least 12 characters.'); return; }
     const u = engine.createUser({ displayName: env.ADMIN_NAME || 'Administrator', email: env.ADMIN_EMAIL, role: 'admin', passwordHash: hashPassword(env.ADMIN_PASSWORD) });
     if (env.ADMIN_MFA_SECRET) { u.mfaSecret = env.ADMIN_MFA_SECRET; u.mfaEnrolled = true; } else u.mfaEnrolled = false;
@@ -154,7 +161,19 @@ export function createServer(opts = {}) {
   };
 
   route('GET', '/health', () => ({ ok: true, time: new Date(deps.now()).toISOString(), auditChain: engine.verifyAuditChain().ok }), { auth: false });
-  route('GET', '/public-config', () => ({ demo: false, mfaRequired: MFA_REQUIRED, countries: COUNTRIES, defaultCountry: engine.cfg.countryCode, simulatedLabel: SIMULATED_LABEL, radiusStagesKm: engine.cfg.radiusStagesKm, vapidPublicKey: store.db.vapid.publicKey }), { auth: false });
+  route('POST', '/setup', ({ body }) => {
+    if (store.db.users.some((u) => u.role === 'admin')) throw new EngineError(409, 'ALREADY_SET_UP', 'Setup is already complete. Please log in.');
+    const tok = String(body.code || '');
+    const want = String(store.db.setupToken || '');
+    if (!want || tok.length !== want.length || !crypto.timingSafeEqual(Buffer.from(tok), Buffer.from(want))) throw new EngineError(403, 'BAD_SETUP_CODE', 'Setup code is incorrect');
+    if (typeof body.password !== 'string' || body.password.length < 12) throw new EngineError(400, 'WEAK_PASSWORD', 'Password must be at least 12 characters');
+    const u = engine.createUser({ displayName: body.displayName || 'Administrator', email: body.email, role: 'admin', passwordHash: hashPassword(body.password) });
+    u.mfaEnrolled = false;
+    delete store.db.setupToken;
+    engine.audit(u.id, 'ADMIN_SETUP', 'user', u.id);
+    return { ok: true };
+  }, { auth: false, limit: [10, 3600e3] });
+  route('GET', '/public-config', () => ({ setupNeeded: !store.db.users.some((u) => u.role === 'admin'), demo: false, mfaRequired: MFA_REQUIRED, countries: COUNTRIES, defaultCountry: engine.cfg.countryCode, simulatedLabel: SIMULATED_LABEL, radiusStagesKm: engine.cfg.radiusStagesKm, vapidPublicKey: store.db.vapid.publicKey }), { auth: false });
 
   route('POST', '/auth/register', async ({ body, res }) => {
     if (!['user', 'volunteer'].includes(body.role)) throw new EngineError(400, 'INVALID_ROLE', 'Only user or volunteer accounts can self-register');

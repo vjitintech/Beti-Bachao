@@ -66,6 +66,7 @@ class ServerApi {
   audit(limit = 100) { return this.req('GET', `/admin/audit-events?limit=${limit}`); }
   integrations() { return this.req('GET', '/admin/integrations'); }
 
+  setup(b) { return this.req('POST', '/setup', b); }
   savePushSubscription(sub) { return this.req('POST', '/me/push-subscriptions', sub); }
   staffList() { return this.req('GET', '/admin/staff'); }
   createStaff(b) { return this.req('POST', '/admin/staff', b); }

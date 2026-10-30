@@ -6,7 +6,9 @@ Beti Bachao is not "another panic button". It coordinates the whole response: SO
 
 > ⚠️ Beti Bachao **does not automatically contact police or ambulance**. Operators call 112 and record the handoff. In immediate danger, always call your local emergency number. The app shows those buttons on every screen.
 
-**➡ To put it online: [docs/DEPLOY.md](docs/DEPLOY.md)** (one-click Render deploy, about 10 minutes).
+**▶ Run it from GitHub now:** [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/vjitintech/Beti-Bachao) — see [docs/RUN_ON_GITHUB.md](docs/RUN_ON_GITHUB.md) (for testing; it stops when idle).
+
+**➡ For 24×7 real use: [docs/DEPLOY.md](docs/DEPLOY.md)** (one-click Render deploy, about 10 minutes).
 
 ## Features
 

@@ -1,0 +1,12 @@
+{
+  "name": "Beti Bachao",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
+  "forwardPorts": [8080],
+  "portsAttributes": {
+    "8080": { "label": "Beti Bachao app", "onAutoForward": "notify" }
+  },
+  "postStartCommand": "bash .devcontainer/start.sh",
+  "customizations": {
+    "codespaces": { "openFiles": ["docs/RUN_ON_GITHUB.md"] }
+  }
+}
