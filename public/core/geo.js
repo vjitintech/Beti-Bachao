@@ -55,3 +55,11 @@ export function impliedSpeedKmh(prev, next) {
   if (hours <= 0) return km > 0.5 ? Infinity : 0;
   return km / hours;
 }
+
+// Initial great-circle bearing from a to b, degrees clockwise from true north (0–359).
+export function bearingDeg(a, b) {
+  const φ1 = toRad(a.lat), φ2 = toRad(b.lat), Δλ = toRad(b.lng - a.lng);
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+  return Math.round(((Math.atan2(y, x) * 180) / Math.PI + 360) % 360);
+}

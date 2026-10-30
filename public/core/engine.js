@@ -15,8 +15,8 @@
 //   • escalation adapter is SIMULATED until a real integration is approved
 //   • append-only, hash-chained audit log
 
-import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh } from './geo.js?v=mvuhugq0';
-import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mvuhugq0';
+import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mvuiiaym';
+import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mvuiiaym';
 
 export const S = Object.freeze({
   CREATED: 'CREATED',
@@ -454,6 +454,7 @@ export class Engine {
     const distKm = loc ? haversineKm(loc, v.lastLocation) : null;
     const a = { id: this.deps.uuid(), incidentId: inc.id, volunteerId: actor.id, status: 'ACCEPTED', role: active.length === 0 ? 'PRIMARY' : 'BACKUP', acceptedAt: this.iso(), enRouteAt: null, arrivedAt: null, assistingAt: null, completedAt: null, cancelledAt: null, cancellationReason: null, distanceKmAtAccept: distKm != null ? +distKm.toFixed(2) : null, etaMinAtAccept: approxEtaMinutes(distKm, this.cfg), stallFlagged: false };
     this.db.assignments.push(a);
+    this.db.responderLocations.push({ id: this.deps.uuid(), assignmentId: a.id, lat: v.lastLocation.lat, lng: v.lastLocation.lng, accuracyM: v.lastLocation.accuracyM ?? null, observedAt: this.iso() });
     alert.response = 'ACCEPTED'; alert.respondedAt = this.iso();
     this.audit(actor.id, 'VOLUNTEER_ACCEPTED', 'incident', inc.id, null, { assignmentId: a.id, role: a.role });
     this.emit('volunteer.accepted', inc.id);
@@ -704,6 +705,30 @@ export class Engine {
       approxEtaMin: onScene ? 0 : approxEtaMinutes(d, this.cfg), etaLabel: 'approximate (straight-line estimate)',
       locationUpdatedAt: v?.lastLocationAt || null,
       position: withPosition && v?.lastLocation ? { lat: +v.lastLocation.lat.toFixed(4), lng: +v.lastLocation.lng.toFixed(4) } : undefined,
+      ...this.motion(a, loc, withPosition),
+    };
+  }
+
+  // Multi-target tracking data: bearing from her, ground speed, closing/opening, recent track.
+  motion(a, loc, withTrack) {
+    const v = this.vol(a.volunteerId);
+    if (!loc || !v?.lastLocation) return { bearingDeg: null, speedKmh: null, closing: null, track: withTrack ? [] : undefined };
+    const pts = this.db.responderLocations.filter((p) => p.assignmentId === a.id);
+    const recent = pts.slice(-40);
+    let speedKmh = null, closing = null;
+    if (recent.length >= 2) {
+      const p1 = recent[recent.length - 1];
+      const p0 = recent.find((p) => Date.parse(p1.observedAt) - Date.parse(p.observedAt) <= 30000) || recent[recent.length - 2];
+      const hrs = (Date.parse(p1.observedAt) - Date.parse(p0.observedAt)) / 3.6e6;
+      if (hrs > 0) {
+        speedKmh = Math.round(haversineKm(p0, p1) / hrs);
+        const dd = haversineKm(loc, p1) - haversineKm(loc, p0);
+        closing = Math.abs(dd) < 0.005 ? 'STEADY' : dd < 0 ? 'CLOSING' : 'OPENING';
+      }
+    }
+    return {
+      bearingDeg: bearingDeg(loc, v.lastLocation), speedKmh, closing,
+      track: withTrack ? recent.map((p) => ({ lat: +p.lat.toFixed(4), lng: +p.lng.toFixed(4) })) : undefined,
     };
   }
 
@@ -762,7 +787,8 @@ export class Engine {
       assignments: this.db.assignments.filter((a) => a.incidentId === inc.id).map((a) => {
         const v = this.vol(a.volunteerId);
         const d = loc && v?.lastLocation ? haversineKm(loc, v.lastLocation) : null;
-        return { ...a, volunteerName: this.user(a.volunteerId)?.displayName, position: ACTIVE_ASG.has(a.status) ? v?.lastLocation : null, distanceKm: d != null ? +d.toFixed(2) : null, approxEtaMin: approxEtaMinutes(d, this.cfg) };
+        const active = ACTIVE_ASG.has(a.status);
+        return { ...a, volunteerName: this.user(a.volunteerId)?.displayName, position: active ? v?.lastLocation : null, distanceKm: d != null ? +d.toFixed(2) : null, approxEtaMin: approxEtaMinutes(d, this.cfg), ...(active ? this.motion(a, loc, true) : {}) };
       }),
       alertedPositions: this.db.notifications.filter((n) => n.incidentId === inc.id && n.kind === 'ALERT').map((n) => ({ response: n.response, distanceKm: n.meta?.distanceKm ?? null, position: this.vol(n.recipientId)?.lastLocation || null })),
       notifications: this.db.notifications.filter((n) => n.incidentId === inc.id).map((n) => ({ id: n.id, kind: n.kind, recipient: this.user(n.recipientId)?.displayName, status: n.status, channel: n.channel, attemptCount: n.attemptCount, response: n.response })),

@@ -1,9 +1,9 @@
-import { createApi, uuid } from './api.js?v=mvuhugq0';
-import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mvuhugq0';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg } from './ui.js?v=mvuhugq0';
-import { geo, syntheticLocation, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mvuhugq0';
-import { TRAINING_MODULES } from '../core/engine.js?v=mvuhugq0';
-import { DEMO_BLURBS } from '../core/seed.js?v=mvuhugq0';
+import { createApi, uuid } from './api.js?v=mvuiiaym';
+import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mvuiiaym';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange } from './ui.js?v=mvuiiaym';
+import { geo, syntheticLocation, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mvuiiaym';
+import { TRAINING_MODULES } from '../core/engine.js?v=mvuiiaym';
+import { DEMO_BLURBS } from '../core/seed.js?v=mvuiiaym';
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'policy', volSel: null };
 const app = () => $('#app');
@@ -32,26 +32,32 @@ const statusText = (v) => {
 function openExternal(href) { const a = document.createElement('a'); a.href = href; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove(); }
 const pretty = (s) => String(s || '').replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
 
-// Google Maps embed of a point (no API key). Rounded to ~11 m so the frame only reloads when she actually moves.
+// Google Maps embedded inside the app (no API key, nothing opens externally).
+// Rounded to ~11 m so the frame only reloads when the position really changes.
+const ll = (p) => `${p.lat.toFixed(4)},${p.lng.toFixed(4)}`;
 function googleMap(loc, title) {
   if (!loc) return '';
-  const q = `${loc.lat.toFixed(4)},${loc.lng.toFixed(4)}`;
-  return `<div class="gmap"><iframe title="${esc(title)}" src="https://maps.google.com/maps?q=${q}&z=16&output=embed" loading="lazy" referrerpolicy="no-referrer" allowfullscreen></iframe>
-    <a class="btn btn-ghost btn-sm" href="https://www.google.com/maps/search/?api=1&query=${q}" target="_blank" rel="noopener">Open in Google Maps ↗</a></div>`;
+  return `<div class="gmap"><iframe title="${esc(title)}" src="https://maps.google.com/maps?q=${ll(loc)}&z=16&output=embed" loading="lazy" referrerpolicy="no-referrer"></iframe></div>`;
+}
+function googleDirections(from, to, title) {
+  if (!from || !to) return googleMap(to, title);
+  return `<div class="gmap"><iframe title="${esc(title)}" src="https://maps.google.com/maps?saddr=${ll(from)}&daddr=${ll(to)}&dirflg=d&output=embed" loading="lazy" referrerpolicy="no-referrer"></iframe></div>`;
 }
 
-// Live tracking of every accepted responder: distance & ETA to her, last GPS update.
+// Live tracking of every accepted responder on a PPI radar scope + multi-target readout.
+const trkId = (r) => (r.isYou ? 'YOU' : (r.label.match(/ ([A-Z])$/) || [])[1] || r.label.slice(0, 3).toUpperCase());
 function trackingCard(list, center, radii, { title = 'Live tracking', map = true, note = '' } = {}) {
-  const rows = (list || []).map((r) => `<li class="track-row ${r.isYou ? 'is-you' : ''}">
-      <span class="track-pin pin-l ${r.isYou ? 'pin-you' : 'pin-assigned'}"></span>
-      <span class="track-who"><strong>${esc(r.label)}</strong> ${r.verified ? '<span class="badge badge-ok">Verified</span>' : ''}<br><small>${esc(pretty(r.status))}${r.locationUpdatedAt ? ` · GPS <span data-live="age" data-fmt="short" data-at="${esc(r.locationUpdatedAt)}"></span> ago` : ''}</small></span>
-      <span class="track-dist"><strong>${r.status === 'ARRIVED' || r.status === 'ASSISTING' ? esc(t('arrived')) : r.distanceKm != null ? esc(r.distanceKm < 1 ? Math.round(r.distanceKm * 1000) + ' m' : r.distanceKm + ' km') : '—'}</strong>${r.approxEtaMin ? `<small>≈ ${esc(r.approxEtaMin)} min</small>` : ''}</span>
-    </li>`).join('');
-  const markers = (list || []).filter((r) => r.position).map((r) => ({ position: r.position, kind: r.isYou ? 'you' : 'assigned', title: `${r.label} ${r.distanceKm ?? ''} km` }));
+  list = list || [];
+  const rows = list.map((r) => ({ id: trkId(r), you: r.isYou, km: r.distanceKm, brg: r.bearingDeg, spd: r.speedKmh, eta: r.status === 'ARRIVED' || r.status === 'ASSISTING' ? 0 : r.approxEtaMin, state: pretty(r.status).toUpperCase(), closing: r.status === 'EN_ROUTE' ? r.closing : null }));
+  const targets = list.filter((r) => r.position).map((r) => ({ id: trkId(r), kind: r.isYou ? 'you' : 'responder', position: r.position, track: r.track, sub: r.distanceKm != null ? (r.distanceKm < 1 ? Math.round(r.distanceKm * 1000) + 'm' : r.distanceKm + 'km') : '', title: `${r.label} · ${pretty(r.status)}` }));
+  const range = niceRange(Math.max(0.5, ...list.map((r) => r.distanceKm || 0)) * 1.15);
   return `<section class="card track-card"><h2>🛰️ ${esc(title)}</h2>
-    ${list?.length ? `${map && center && markers.length ? `<div class="ops-map">${radarSvg({ center, radii: radii || [10, 20, 30], markers, zoomKm: Math.max(1, ...list.map((r) => r.distanceKm || 0)) * 1.25 })}<div class="legend"><span><span class="pin-l pin-incident"></span>Her location</span><span><span class="pin-l pin-assigned"></span>Responder</span>${markers.some((m) => m.kind === 'you') ? '<span><span class="pin-l pin-you"></span>You</span>' : ''}</div></div>` : ''}
-      <ul class="track-list">${rows}</ul>` : `<p class="muted">${esc(t('status_red'))}</p>`}
-    <p class="muted small">Distances update live from each responder's phone GPS. ETA is a straight-line estimate.${isDemo() ? ' Demo volunteers travel at a sped-up 120 km/h once "on my way".' : ''} ${esc(note)}</p></section>`;
+    ${list.length ? `<div class="ppi-wrap">${map && center && targets.length ? `${ppiSvg({ center, rangeKm: range, targets, title: 'PPI · LIVE' })}
+      <div class="ppi-legend"><span><i class="l-her"></i>HER</span><span><i class="l-vol"></i>VOLUNTEER</span><span><i class="l-trk"></i>TRACK</span></div>` : ''}
+      ${ppiTable(rows)}</div>
+      <ul class="track-list">${list.map((r) => `<li class="track-row ${r.isYou ? 'is-you' : ''}"><span class="track-who"><strong>${esc(r.label)}</strong> ${r.verified ? '<span class="badge badge-ok">Verified</span>' : ''}<br><small>${esc(pretty(r.status))}${r.locationUpdatedAt ? ` · GPS <span data-live="age" data-fmt="short" data-at="${esc(r.locationUpdatedAt)}"></span> ago` : ''}</small></span></li>`).join('')}</ul>`
+      : `<p class="muted">${esc(t('status_red'))}</p>`}
+    <p class="muted small">Range = distance from her, bearing = direction from her (000° = north). Live from each responder's phone GPS; ETA is a straight-line estimate.${isDemo() ? ' Demo volunteers travel at a sped-up 120 km/h once "on my way".' : ''} ${esc(note)}</p></section>`;
 }
 
 function emergencyBar() {
@@ -540,9 +546,9 @@ function volunteerDetail(a) {
       <div class="precise"><strong>Exact location (shared because you are assigned — access is logged)</strong>
         <p>±${esc(a.location.accuracyM)} m · <span data-live="age" data-fmt="short" data-at="${esc(a.location.observedAt)}"></span> old ${a.location.stale ? '<span class="badge badge-warn">stale</span>' : ''} · ${esc(a.location.vertical)}</p>
         ${a.battery ? `<p>Her battery: ${Math.round(a.battery.level * 100)}%${a.battery.charging ? ' (charging)' : ''}</p>` : ''}
-        <a class="btn btn-secondary" href="${esc(a.navigationUrl)}" target="_blank" rel="noopener">🧭 Navigate (Google Maps)</a>
       </div>
-      ${googleMap(a.location, 'Her live location')}
+      <h3>🧭 Route to her</h3>
+      ${googleDirections(a.team?.find((x) => x.isYou)?.position, a.location, 'Route to her')}
       ${trackingCard(a.team, a.location, a.radiusStagesKm, { title: 'Responding team' })}
       <div class="row">${next ? `<button class="btn btn-primary" data-act="vol-status" data-aid="${esc(asg.id)}" data-status="${next[0]}">${esc(next[1])}</button>` : '<p>Stay with her until she confirms she is safe in the app.</p>'}
         <button class="btn btn-warn" data-act="vol-escalate" data-id="${esc(a.id)}">Request emergency escalation</button>
@@ -578,16 +584,26 @@ async function viewOps() {
 }
 
 function opsDetail(d, tl, cfg) {
-  const markers = [...(d.alertedPositions || []).map((p) => ({ position: p.position, kind: p.response === 'DECLINED' ? 'declined' : 'alerted', title: `${p.response || 'alerted'} ${p.distanceKm ?? ''} km` })),
-    ...d.assignments.filter((a) => a.position).map((a) => ({ position: a.position, kind: 'assigned', title: `${a.volunteerName} ${a.status}` }))];
+  const radii = cfg?.radiusStagesKm || [10, 20, 30];
+  const live = d.assignments.filter((a) => a.position);
+  const targets = [
+    ...(d.alertedPositions || []).filter((p) => p.response !== 'ACCEPTED').map((p) => ({ kind: p.response === 'DECLINED' ? 'declined' : 'alerted', position: p.position, title: `${p.response || 'alerted'} ${p.distanceKm ?? ''} km` })),
+    ...live.map((a) => ({ id: a.volunteerName.split(' ')[0].toUpperCase(), kind: 'responder', position: a.position, track: a.track, sub: a.distanceKm != null ? a.distanceKm + 'km' : '', title: `${a.volunteerName} ${a.status}` })),
+  ];
+  const near = live.length ? niceRange(Math.max(0.5, ...live.map((a) => a.distanceKm || 0)) * 1.15) : null;
+  const rows = live.map((a) => ({ id: a.volunteerName.split(' ')[0].toUpperCase(), km: a.distanceKm, brg: a.bearingDeg, spd: a.speedKmh, eta: a.status === 'ARRIVED' || a.status === 'ASSISTING' ? 0 : a.approxEtaMin, state: pretty(a.status).toUpperCase(), closing: a.status === 'EN_ROUTE' ? a.closing : null }));
+  const scope = d.location ? `<div class="ppi-grid">
+      <div class="ppi-wrap">${ppiSvg({ center: d.location, rangeKm: radii[2], rings: radii, activeRing: d.search?.stage ?? null, targets, title: 'PPI · SEARCH' })}
+        <div class="ppi-legend"><span><i class="l-her"></i>HER</span><span><i class="l-vol"></i>ASSIGNED</span><span><i class="l-alert"></i>ALERTED</span><span><i class="l-trk"></i>TRACK</span></div></div>
+      ${near ? `<div class="ppi-wrap">${ppiSvg({ center: d.location, rangeKm: near, targets: targets.filter((x) => x.kind === 'responder'), title: 'PPI · APPROACH' })}${ppiTable(rows)}</div>` : ''}
+    </div>` : '';
   return `<section class="card ops-detail">
     <div class="row space"><h2>${esc(d.requester?.displayName)} · <span class="status-text-${esc(d.color)}">${esc(pretty(d.status))}</span></h2><span class="badge">${esc(d.severity)}</span></div>
     ${d.duress ? '<div class="alert alert-danger"><strong>🚩 DURESS PIN USED.</strong> The user\'s app shows "cancelled". Treat as active danger. Do not contact her in a way that could reveal this.</div>' : ''}
     <p>Trigger: ${esc(d.trigger)}${d.silent ? ' (silent)' : ''} · Escalation: <strong>${esc(d.escalationStatus)}</strong> · Alerted: ${esc(d.alertedCount)} · Battery: ${d.battery ? Math.round(d.battery.level * 100) + '%' : 'unknown'}</p>
-    ${d.location ? `<div class="ops-map">${radarSvg({ center: d.location, radii: cfg?.radiusStagesKm || [10, 20, 30], activeStage: d.search?.stage, markers })}
-      <div class="legend"><span class="pin-l pin-incident"></span>Her location <span class="pin-l pin-alerted"></span>Alerted <span class="pin-l pin-assigned"></span>Assigned <span class="pin-l pin-declined"></span>Declined</div></div>
+    ${d.location ? `${scope}
       ${googleMap(d.location, 'Her live location')}
-      <p>📍 ${esc(d.location.lat.toFixed(5))}, ${esc(d.location.lng.toFixed(5))} · ±${esc(d.location.accuracyM)} m · ${esc(d.location.source)} · <span data-live="age" data-fmt="short" data-at="${esc(d.location.observedAt)}"></span> old ${d.location.stale ? '<span class="badge badge-warn">STALE</span>' : ''} · ${esc(d.location.vertical)} <a href="https://maps.google.com/?q=${esc(d.location.lat)},${esc(d.location.lng)}" target="_blank" rel="noopener">map</a></p>
+      <p>📍 ${esc(d.location.lat.toFixed(5))}, ${esc(d.location.lng.toFixed(5))} · ±${esc(d.location.accuracyM)} m · ${esc(d.location.source)} · <span data-live="age" data-fmt="short" data-at="${esc(d.location.observedAt)}"></span> old ${d.location.stale ? '<span class="badge badge-warn">STALE</span>' : ''} · ${esc(d.location.vertical)}</p>
       ${d.locationHistory.some((l) => l.suspect) ? `<p class="badge badge-warn">Suspect location jumps ignored: ${d.locationHistory.filter((l) => l.suspect).map((l) => esc(l.suspectReason)).join('; ')}</p>` : ''}` : '<div class="alert alert-warn">No usable location. Contact the user through official channels if possible.</div>'}
     ${d.search?.secondsLeft != null ? `<p>Search stage ${d.search.stage + 1}/3 (${esc(d.search.radiusKm)} km) · next expansion in <span data-live="stage-countdown-raw" data-deadline="${esc(d.search.deadline)}"></span></p>` : ''}
     <h3>Responders</h3>
@@ -755,6 +771,7 @@ function updateLive() {
     const left = Math.max(0, Math.round((sw.endsAt - Date.now()) / 1000));
     el.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
   }
+  for (const el of $$('.ppi-sweep:not([data-sync])')) { el.style.animationDelay = `-${(Date.now() % 4000) / 1000}s`; el.dataset.sync = '1'; }
   const now = Date.now() + (st.skew || 0);
   for (const el of $$('[data-live="age"]')) {
     const s = Math.max(0, Math.round((now - Date.parse(el.dataset.at)) / 1000));
