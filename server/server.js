@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Engine, EngineError, SIMULATED_LABEL } from '../public/core/engine.js';
 import { COUNTRIES } from '../public/core/config.js';
-import { seedDemo, refreshDemoVolunteers, DEMO_PASSWORD, DEMO_CENTER } from '../public/core/seed.js';
+import { seedDemo, refreshDemoVolunteers, simulateDemoMovement, DEMO_PASSWORD, DEMO_CENTER } from '../public/core/seed.js';
 import { JsonStore } from './store.js';
 import { uuid, sha256, hashPassword, verifyPassword, hashSecret, newTotpSecret, verifyTotp, totp, RateLimiter, securityHeaders } from './security.js';
 
@@ -71,7 +71,7 @@ export function createServer(opts = {}) {
   // ---------- durable scheduler ----------
   const timer = setInterval(() => {
     try {
-      if (DEMO) refreshDemoVolunteers(engine);
+      if (DEMO) { refreshDemoVolunteers(engine); simulateDemoMovement(engine); }
       const changed = engine.tick();
       if (changed.length || DEMO) store.markDirty();
       store.flush();

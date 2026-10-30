@@ -56,7 +56,8 @@ export function ago(sec) {
 
 // Relative radar map (no tiles, works offline): incident at centre, search rings,
 // markers placed by true bearing/distance. Only rendered for authorised roles.
-export function radarSvg({ center, radii = [10, 20, 30], activeStage = null, markers = [] }) {
+export function radarSvg({ center, radii = [10, 20, 30], activeStage = null, markers = [], zoomKm = null }) {
+  if (zoomKm) { const z = Math.max(0.5, zoomKm); radii = [z / 3, (2 * z) / 3, z].map((r) => +r.toFixed(r < 3 ? 1 : 0)); activeStage = null; }
   const S = 300, C = S / 2, maxR = radii[radii.length - 1];
   const scale = (C - 14) / maxR;
   const toXY = (p) => {
@@ -67,7 +68,7 @@ export function radarSvg({ center, radii = [10, 20, 30], activeStage = null, mar
     if (r > lim) { x = (x / r) * lim; y = (y / r) * lim; }
     return [C + x, C + y];
   };
-  const rings = radii.map((r, i) => `<circle cx="${C}" cy="${C}" r="${(r * scale).toFixed(1)}" class="ring ${activeStage === i ? 'ring-active' : ''}"/><text x="${C + 4}" y="${(C - r * scale + 12).toFixed(1)}" class="ring-label">${r} km</text>`).join('');
+  const rings = radii.map((r, i) => `<circle cx="${C}" cy="${C}" r="${(r * scale).toFixed(1)}" class="ring ${activeStage === i ? 'ring-active' : ''}"/><text x="${C + 4}" y="${(C - r * scale + 12).toFixed(1)}" class="ring-label">${r < 1 ? Math.round(r * 1000) + ' m' : r + ' km'}</text>`).join('');
   const pins = markers.filter((m) => m.position).map((m) => { const [x, y] = toXY(m.position); return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="6" class="pin pin-${esc(m.kind)}"><title>${esc(m.title || '')}</title></circle>`; }).join('');
   return `<svg viewBox="0 0 ${S} ${S}" class="radar" role="img" aria-label="Relative map of search rings and responders">${rings}<line x1="${C}" y1="6" x2="${C}" y2="${S - 6}" class="axis"/><line x1="6" y1="${C}" x2="${S - 6}" y2="${C}" class="axis"/><text x="${C - 4}" y="16" class="ring-label">N</text>${pins}<circle cx="${C}" cy="${C}" r="8" class="pin pin-incident"/></svg>`;
 }

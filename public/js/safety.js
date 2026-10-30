@@ -1,7 +1,7 @@
 // On-device safety capabilities. Everything degrades gracefully: if a browser
 // lacks a sensor or permission is denied, the UI says so and offers the next
 // best option (call / SMS). Nothing here pretends to work when it doesn't.
-import { VOICE_KEYWORDS, lang, speechLang } from './i18n.js?v=mvud316b';
+import { VOICE_KEYWORDS, lang, speechLang } from './i18n.js?v=mvuhugq0';
 
 const store = {
   get(k, d) { try { const v = localStorage.getItem('bb.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
@@ -44,7 +44,7 @@ export const geo = {
 
 export function syntheticLocation(center) {
   // small jitter so repeated observations look like a real fix, never claimed as GPS
-  const j = () => (Math.random() - 0.5) * 0.0004;
+  const j = () => (Math.random() - 0.5) * 0.00006;
   return { lat: +(center.lat + j()).toFixed(6), lng: +(center.lng + j()).toFixed(6), accuracyM: 15, altitudeM: null, verticalAccuracyM: null, source: 'synthetic', observedAt: new Date().toISOString() };
 }
 

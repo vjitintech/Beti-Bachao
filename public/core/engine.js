@@ -15,8 +15,8 @@
 //   • escalation adapter is SIMULATED until a real integration is approved
 //   • append-only, hash-chained audit log
 
-import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh } from './geo.js?v=mvud316b';
-import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mvud316b';
+import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh } from './geo.js?v=mvuhugq0';
+import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mvuhugq0';
 
 export const S = Object.freeze({
   CREATED: 'CREATED',
@@ -692,6 +692,21 @@ export class Engine {
     if (!recent || this.now() - Date.parse(recent.timestamp) > win) this.audit(actorId, 'PRECISE_LOCATION_ACCESS', 'incident', inc.id);
   }
 
+  // Live tracking view of one accepted responder relative to her latest location.
+  responderTrack(a, loc, i, { withPosition = false, selfId = null } = {}) {
+    const v = this.vol(a.volunteerId);
+    const d = loc && v?.lastLocation ? haversineKm(loc, v.lastLocation) : null;
+    const onScene = a.status === 'ARRIVED' || a.status === 'ASSISTING';
+    return {
+      label: a.volunteerId === selfId ? 'You' : `Verified volunteer ${String.fromCharCode(65 + i)}`,
+      isYou: a.volunteerId === selfId, role: a.role, status: a.status, verified: v?.verificationStatus === 'VERIFIED',
+      distanceKm: d != null ? +d.toFixed(d < 1 ? 2 : 1) : null, distanceBand: distanceBand(d),
+      approxEtaMin: onScene ? 0 : approxEtaMinutes(d, this.cfg), etaLabel: 'approximate (straight-line estimate)',
+      locationUpdatedAt: v?.lastLocationAt || null,
+      position: withPosition && v?.lastLocation ? { lat: +v.lastLocation.lat.toFixed(4), lng: +v.lastLocation.lng.toFixed(4) } : undefined,
+    };
+  }
+
   viewIncident(actor, incidentId) {
     if (!actor) fail(401, 'UNAUTHENTICATED');
     const u = this.user(actor.id);
@@ -711,11 +726,8 @@ export class Engine {
         ...base, role: 'requester', status: inc.status, color: this.colorOf(inc), escalationStatus: inc.escalationStatus, closed: !this.isOpen(inc),
         closureReason: inc.closureReason, safeConfirmedAt: inc.safeConfirmedAt, search: searchView, alertedCount, flags: inc.flags,
         location: this.locationView(loc, now),
-        responders: active.map((a, i) => {
-          const v = this.vol(a.volunteerId);
-          const d = loc && v.lastLocation ? haversineKm(loc, v.lastLocation) : null;
-          return { label: `Verified volunteer ${String.fromCharCode(65 + i)}`, role: a.role, status: a.status, verified: v.verificationStatus === 'VERIFIED', trained: true, distanceBand: distanceBand(d), approxEtaMin: a.status === 'ARRIVED' || a.status === 'ASSISTING' ? 0 : approxEtaMinutes(d, this.cfg), etaLabel: 'approximate (straight-line estimate)' };
-        }),
+        responders: active.map((a, i) => this.responderTrack(a, loc, i, { withPosition: true })),
+        radiusStagesKm: this.cfg.radiusStagesKm,
         escalations: this.db.escalations.filter((e) => e.incidentId === inc.id).map((e) => ({ type: e.type, status: e.status, label: e.label, attemptedAt: e.attemptedAt })),
       };
     }
@@ -726,12 +738,12 @@ export class Engine {
       if (!mine && !alert) { this.audit(u.id, 'INCIDENT_ACCESS_DENIED', 'incident', inc.id); fail(403, 'FORBIDDEN'); }
       const v = this.vol(u.id);
       const d = loc && v.lastLocation ? haversineKm(loc, v.lastLocation) : null;
-      const others = this.activeAssignments(inc.id).filter((a) => a.volunteerId !== u.id).map((a) => {
-        const ov = this.vol(a.volunteerId);
-        const od = loc && ov.lastLocation ? haversineKm(loc, ov.lastLocation) : null;
-        return { role: a.role, status: a.status, distanceBand: distanceBand(od), approxEtaMin: approxEtaMinutes(od, this.cfg) };
-      });
-      const common = { ...base, role: mine ? 'assigned_responder' : 'alerted_volunteer', status: this.isOpen(inc) ? (inc.duress ? S.ESCALATION_REQUIRED : inc.status) : inc.status, open: this.isOpen(inc), color: this.colorOf(inc), distanceBand: distanceBand(d), approxEtaMin: approxEtaMinutes(d, this.cfg), otherResponders: others, alertResponse: alert?.response || null, escalationStatus: inc.escalationStatus };
+      // Every accepted responder's live distance to her is shared with the volunteers on this
+      // incident; map positions only with fellow assigned responders (never with merely alerted ones).
+      const amAssigned = this.activeAssignments(inc.id).some((a) => a.volunteerId === u.id) && this.isOpen(inc);
+      const team = this.activeAssignments(inc.id).map((a, i) => this.responderTrack(a, loc, i, { withPosition: amAssigned, selfId: u.id }));
+      const others = team.filter((x) => !x.isYou);
+      const common = { ...base, role: mine ? 'assigned_responder' : 'alerted_volunteer', status: this.isOpen(inc) ? (inc.duress ? S.ESCALATION_REQUIRED : inc.status) : inc.status, open: this.isOpen(inc), color: this.colorOf(inc), distanceBand: distanceBand(d), approxEtaMin: approxEtaMinutes(d, this.cfg), otherResponders: others, team, radiusStagesKm: this.cfg.radiusStagesKm, alertResponse: alert?.response || null, escalationStatus: inc.escalationStatus };
       if (mine && this.isOpen(inc)) {
         this.auditPreciseAccess(u.id, inc);
         return { ...common, assignment: { id: mine.id, status: mine.status, role: mine.role }, location: this.locationView(loc, now), navigationUrl: loc ? `https://www.google.com/maps/dir/?api=1&destination=${loc.lat},${loc.lng}` : null, battery: inc.battery };

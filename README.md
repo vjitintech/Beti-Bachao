@@ -20,6 +20,8 @@ Beti Bachao is not "another panic button". It coordinates the whole response —
 - Country-aware emergency numbers and helplines (India: 112, 181, 1091); others marked "verify locally"
 - Data export & account deletion
 
+**Live tracking** — her location streams from the phone's GPS every ~10 s and shows on an embedded Google Map for her, assigned responders and operators. Every accepted volunteer's live distance and ETA to her is shown to her and to the other volunteers on the incident (distances only for volunteers not assigned; map positions only for the assigned team).
+
 **For volunteers** — readiness checklist (verified, 5 training modules, on duty, fresh location, not busy), mock live-identity check, alert inbox with **approximate area only** until accepted, then precise location + navigation, En route → Arrived → Assisting, "Unable to help" (instant replacement search), escalation, Code of Conduct.
 
 **For operators** — live incident queue, relative **radar map** with search rings and responders, location confidence & suspect-GPS flags, remove/reassign responders, record manual emergency-service handoffs, audited closure exceptions.

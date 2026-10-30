@@ -2,9 +2,9 @@
 //   ServerApi     → the Node backend (/api/v1), real auth, SSE, server-side timers
 //   StandaloneApi → runs the same engine inside the browser (GitHub Pages demo).
 //                   Clearly labelled; data lives only in this browser.
-import { Engine, EngineError, emptyDb, SIMULATED_LABEL } from '../core/engine.js?v=mvud316b';
-import { COUNTRIES } from '../core/config.js?v=mvud316b';
-import { seedDemo, refreshDemoVolunteers, DEMO_CENTER, DEMO_PASSWORD } from '../core/seed.js?v=mvud316b';
+import { Engine, EngineError, emptyDb, SIMULATED_LABEL } from '../core/engine.js?v=mvuhugq0';
+import { COUNTRIES } from '../core/config.js?v=mvuhugq0';
+import { seedDemo, refreshDemoVolunteers, simulateDemoMovement, DEMO_CENTER, DEMO_PASSWORD } from '../core/seed.js?v=mvuhugq0';
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => { const r = (crypto.getRandomValues(new Uint8Array(1))[0] & 15); return (c === 'x' ? r : (r & 3) | 8).toString(16); }));
 
@@ -99,7 +99,7 @@ class StandaloneApi {
     if (!this.load()) this.reset();
     this.lastSeq = this.db.eventSeq;
     window.addEventListener('storage', (e) => { if (e.key === KEY) { this.load(); this.fanout(); } });
-    this.timer = setInterval(() => this.run(() => { refreshDemoVolunteers(this.engine); return this.engine.tick(); }, { quiet: true }), 1000);
+    this.timer = setInterval(() => this.run(() => { refreshDemoVolunteers(this.engine); simulateDemoMovement(this.engine); return this.engine.tick(); }, { quiet: true }), 1000);
   }
   load() {
     try { const raw = localStorage.getItem(KEY); if (!raw) return false; this.db = JSON.parse(raw); this.engine = new Engine(this.db, this.deps); return true; } catch { return false; }

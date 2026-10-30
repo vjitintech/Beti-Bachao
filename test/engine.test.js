@@ -279,3 +279,29 @@ test('account deletion purges precise location history', () => {
   t.e.deleteMyAccount(t.aamani);
   assert.equal(t.db.locations.filter((l) => l.incidentId === incident.id).length, 0);
 });
+
+test('live tracking: team sees each responder distance; only assigned responders get positions; demo travel closes distance', async () => {
+  const { simulateDemoMovement } = await import('../public/core/seed.js');
+  const t = setup();
+  t.db.config.targetResponders = 3;
+  const { incident } = t.e.createIncident(t.aamani, { idempotencyKey: 'k', location: t.loc() });
+  const a = t.e.acceptIncident(t.asha, incident.id).assignment;
+  t.e.acceptIncident(t.ravi, incident.id);
+  t.e.updateAssignment(t.asha, a.id, { status: 'EN_ROUTE' });
+  const before = t.e.viewIncident(t.aamani, incident.id).responders.find((r) => r.status === 'EN_ROUTE').distanceKm;
+  for (let i = 0; i < 10; i++) { t.advance(5); simulateDemoMovement(t.e); }
+  const her = t.e.viewIncident(t.aamani, incident.id);
+  const after = her.responders.find((r) => r.status === 'EN_ROUTE').distanceKm;
+  assert.ok(after < before, `distance should shrink (${before} → ${after})`);
+  assert.equal(her.responders.length, 2);
+  const ravi = t.e.viewIncident(t.ravi, incident.id);
+  assert.equal(ravi.team.length, 2);
+  assert.ok(ravi.team.find((x) => x.isYou));
+  assert.ok(ravi.team.every((x) => x.position), 'assigned responder sees team positions');
+  t.advance(46); // stage 2 → Meena alerted but not assigned
+  const meena = t.e.viewIncident(t.meena, incident.id);
+  assert.equal(meena.role, 'alerted_volunteer');
+  assert.equal(meena.otherResponders.length, 2);
+  assert.ok(meena.otherResponders.every((x) => x.distanceKm != null && x.position === undefined), 'alerted volunteer: distances only');
+  assert.equal(meena.location, undefined);
+});

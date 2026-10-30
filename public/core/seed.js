@@ -58,10 +58,40 @@ export function seedDemo(engine, { passwordHash = null, mfaSecret = null } = {})
 
 // Keep demo volunteers' locations fresh and optionally move them around a new centre.
 export function refreshDemoVolunteers(engine, center = null) {
+  const busy = new Set(engine.db.assignments.filter((a) => ['ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ASSISTING'].includes(a.status)).map((a) => a.volunteerId));
   for (const v of engine.db.volunteers) {
     const u = engine.user(v.userId);
     if (!u?.demo || v.demoKm == null) continue;
-    if (center) v.lastLocation = { ...offset(center, v.demoKm, v.demoBearing), accuracyM: 15 };
+    if (center && !busy.has(v.userId)) v.lastLocation = { ...offset(center, v.demoKm, v.demoBearing), accuracyM: 15 };
     v.lastLocationAt = engine.iso();
+  }
+}
+
+// Demo only: demo volunteers who are EN_ROUTE drive toward her latest location so
+// live distance tracking can be seen. Travel is sped up (DEMO_SPEED_KMH) and labelled.
+export const DEMO_SPEED_KMH = 120;
+export function simulateDemoMovement(engine) {
+  const now = engine.now();
+  for (const a of engine.db.assignments) {
+    if (a.status !== 'EN_ROUTE') continue;
+    const u = engine.user(a.volunteerId);
+    const v = engine.vol(a.volunteerId);
+    if (!u?.demo || !v?.lastLocation) continue;
+    const target = engine.latestLocation(a.incidentId);
+    if (!target) continue;
+    const last = a.demoMovedAt ? Date.parse(a.demoMovedAt) : now;
+    const dt = Math.min(5, Math.max(0, (now - last) / 1000));
+    a.demoMovedAt = new Date(now).toISOString();
+    const R = 6371.0088, toR = Math.PI / 180;
+    const dLat = (target.lat - v.lastLocation.lat) * toR, dLng = (target.lng - v.lastLocation.lng) * toR;
+    const distKm = 2 * R * Math.asin(Math.sqrt(Math.sin(dLat / 2) ** 2 + Math.cos(v.lastLocation.lat * toR) * Math.cos(target.lat * toR) * Math.sin(dLng / 2) ** 2));
+    const stopKm = 0.04; // stop ~40 m away; the volunteer marks "Arrived" herself
+    if (distKm <= stopKm || dt === 0) continue;
+    const step = Math.min(distKm - stopKm, (DEMO_SPEED_KMH * dt) / 3600);
+    const f = step / distKm;
+    v.lastLocation = { lat: +(v.lastLocation.lat + (target.lat - v.lastLocation.lat) * f).toFixed(6), lng: +(v.lastLocation.lng + (target.lng - v.lastLocation.lng) * f).toFixed(6), accuracyM: 12 };
+    v.lastLocationAt = new Date(now).toISOString();
+    engine.db.responderLocations.push({ id: engine.deps.uuid(), assignmentId: a.id, lat: v.lastLocation.lat, lng: v.lastLocation.lng, accuracyM: 12, observedAt: v.lastLocationAt, demo: true });
+    if (engine.db.responderLocations.length > 3000) engine.db.responderLocations.splice(0, 1000);
   }
 }

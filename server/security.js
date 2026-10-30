@@ -64,7 +64,7 @@ export class RateLimiter {
 
 export function securityHeaders(secure) {
   const h = {
-    'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; frame-src https://maps.google.com https://www.google.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
     'X-Frame-Options': 'DENY',
