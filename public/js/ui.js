@@ -133,8 +133,19 @@ export function ppiSvg({ center, rangeKm, rings = null, activeRing = null, targe
       tracks += pts.slice(0, -1).map(([x, y], i) => (i % 3 === 0 ? `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="1.3" class="ppi-track-dot"/>` : '')).join('');
     }
     const [x, y] = pts[pts.length - 1];
-    tgts += `<g class="ppi-tgt ppi-${esc(t.kind || 'responder')}"><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="9" class="ppi-halo"/><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4.6" class="ppi-dot"><title>${esc(t.title || t.id)}</title></circle>`
-      + (t.id ? `<text x="${(x + 8).toFixed(1)}" y="${(y - 7).toFixed(1)}" class="ppi-lbl">${esc(t.id)}${t.sub ? ` <tspan class="ppi-sub">${esc(t.sub)}</tspan>` : ''}</text>` : '') + '</g>';
+    // Data box above the dot: track id · distance · ETA (counts down live).
+    let box = '';
+    if (t.id) {
+      const parts = [t.id, t.distText, t.etaText].filter(Boolean);
+      const txt = parts.join(' · ');
+      const w = Math.max(30, txt.length * 5.9 + 12), h = 17;
+      let bx = x - w / 2, by = y - 14 - h;
+      bx = Math.max(4, Math.min(V - w - 4, bx)); if (by < 4) by = y + 12;
+      box = `<g class="ppi-box-lbl"><line x1="${x.toFixed(1)}" y1="${(by + h > y ? by : by + h).toFixed(1)}" x2="${x.toFixed(1)}" y2="${(by + h > y ? y + 5 : y - 5).toFixed(1)}" class="ppi-leader"/>`
+        + `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${w.toFixed(1)}" height="${h}" rx="3" class="ppi-tag ${t.moving ? 'ppi-tag-moving' : ''}"/>`
+        + `<text x="${(bx + w / 2).toFixed(1)}" y="${(by + 12).toFixed(1)}" class="ppi-tag-txt"><tspan class="ppi-tag-id">${esc(t.id)}</tspan>${parts.slice(1).map((p) => ` · ${esc(p)}`).join('')}</text></g>`;
+    }
+    tgts += `<g class="ppi-tgt ppi-${esc(t.kind || 'responder')} ${t.moving ? 'ppi-moving' : ''}"><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="9" class="ppi-halo"/><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4.6" class="ppi-dot"><title>${esc(t.title || t.id)}</title></circle></g>${box}`;
   }
   return `<svg viewBox="0 0 ${V} ${V}" class="ppi" role="img" aria-label="Radar plan position indicator: her location at centre, volunteers by range and bearing">
     <defs><radialGradient id="ppiBg"><stop offset="0" stop-color="#03200f"/><stop offset="1" stop-color="#000"/></radialGradient>

@@ -2,9 +2,9 @@
 //   ServerApi     → the Node backend (/api/v1), real auth, SSE, server-side timers
 //   StandaloneApi → runs the same engine inside the browser (GitHub Pages demo).
 //                   Clearly labelled; data lives only in this browser.
-import { Engine, EngineError, emptyDb, SIMULATED_LABEL } from '../core/engine.js?v=mvuixxhg';
-import { COUNTRIES } from '../core/config.js?v=mvuixxhg';
-import { seedDemo, refreshDemoVolunteers, simulateDemoMovement, DEMO_CENTER, DEMO_PASSWORD } from '../core/seed.js?v=mvuixxhg';
+import { Engine, EngineError, emptyDb, SIMULATED_LABEL } from '../core/engine.js?v=mvuj58r6';
+import { COUNTRIES } from '../core/config.js?v=mvuj58r6';
+import { seedDemo, refreshDemoVolunteers, simulateDemoMovement, DEMO_CENTER, DEMO_PASSWORD } from '../core/seed.js?v=mvuj58r6';
 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => { const r = (crypto.getRandomValues(new Uint8Array(1))[0] & 15); return (c === 'x' ? r : (r & 3) | 8).toString(16); }));
 

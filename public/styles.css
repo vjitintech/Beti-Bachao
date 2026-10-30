@@ -322,3 +322,15 @@ button.alert { width: 100%; text-align: start; font: inherit; cursor: pointer; }
 .ppi-explain { color: #b9e8c8; font-size: .82rem; line-height: 1.45; margin: 6px 8px 4px; }
 .ppi-explain b { color: #8dffb4; }
 .ppi-legend .l-you { background: #6cc0ff; box-shadow: 0 0 0 2px #fff inset; } .ppi-legend .l-decl { background: #4a5a66; }
+
+.ppi-tag { fill: rgba(0, 18, 8, .88); stroke: #2bff88; stroke-width: 1; }
+.ppi-tag-moving { stroke: #8dffb4; }
+.ppi-tag-txt { fill: #c9ffdc; font-size: 9.5px; text-anchor: middle; font-weight: 600; }
+.ppi-tag-id { fill: #9fd2ff; font-weight: 800; }
+.ppi-leader { stroke: #2bff88; stroke-width: .8; stroke-opacity: .7; }
+.ppi-moving .ppi-dot { animation: ppi-blink 1s steps(2, jump-none) infinite; }
+.ppi-moving .ppi-halo { animation: ppi-blink-halo 1s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes ppi-blink { 0% { opacity: 1; } 50% { opacity: .15; } 100% { opacity: 1; } }
+@keyframes ppi-blink-halo { from { transform: scale(.7); stroke-opacity: .8; } to { transform: scale(1.8); stroke-opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .ppi-moving .ppi-dot, .ppi-moving .ppi-halo { animation: none; } }
+.ppi-box .zoom-bar { top: 34px; inset-inline-end: 10px; }

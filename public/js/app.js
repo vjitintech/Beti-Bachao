@@ -1,9 +1,9 @@
-import { createApi, uuid } from './api.js?v=mvuixxhg';
-import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mvuixxhg';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mvuixxhg';
-import { geo, syntheticLocation, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mvuixxhg';
-import { TRAINING_MODULES } from '../core/engine.js?v=mvuixxhg';
-import { DEMO_BLURBS } from '../core/seed.js?v=mvuixxhg';
+import { createApi, uuid } from './api.js?v=mvuj58r6';
+import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mvuj58r6';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mvuj58r6';
+import { geo, syntheticLocation, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mvuj58r6';
+import { TRAINING_MODULES } from '../core/engine.js?v=mvuj58r6';
+import { DEMO_BLURBS } from '../core/seed.js?v=mvuj58r6';
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'policy', volSel: null };
 const app = () => $('#app');
@@ -50,16 +50,18 @@ function googleDirections(from, to, title, key = 'route') {
 function ppiRange(key, autoKm) { const steps = (st.ppiZoom ||= {})[key] || 0; return stepRange(autoKm, -steps); }
 
 // Live tracking of every accepted responder on a PPI radar scope + multi-target readout.
+const distText = (km) => (km == null ? '' : km < 1 ? `${Math.round(km * 1000)} m` : `${km} km`);
+const etaText = (status, eta) => (status === 'ARRIVED' || status === 'ASSISTING' ? 'on scene' : eta == null ? '' : eta <= 1 ? '<1 min' : `${eta} min`);
 const trkId = (r) => (r.isYou ? 'YOU' : (r.label.match(/ ([A-Z])$/) || [])[1] || r.label.slice(0, 3).toUpperCase());
 function trackingCard(list, center, radii, { title = 'Live tracking', map = true, note = '', key = 'track', viewer = 'her' } = {}) {
   list = list || [];
   const rows = list.map((r) => ({ id: trkId(r), you: r.isYou, km: r.distanceKm, brg: r.bearingDeg, spd: r.speedKmh, eta: r.status === 'ARRIVED' || r.status === 'ASSISTING' ? 0 : r.approxEtaMin, state: pretty(r.status).toUpperCase(), closing: r.status === 'EN_ROUTE' ? r.closing : null }));
-  const targets = list.filter((r) => r.position).map((r) => ({ id: trkId(r), kind: r.isYou ? 'you' : 'responder', position: r.position, track: r.track, sub: r.distanceKm != null ? (r.distanceKm < 1 ? Math.round(r.distanceKm * 1000) + 'm' : r.distanceKm + 'km') : '', title: `${r.label} · ${pretty(r.status)}` }));
+  const targets = list.filter((r) => r.position).map((r) => ({ id: trkId(r), kind: r.isYou ? 'you' : 'responder', position: r.position, track: r.track, distText: distText(r.distanceKm), etaText: etaText(r.status, r.approxEtaMin), moving: r.status === 'EN_ROUTE' && r.closing !== 'OPENING', title: `${r.label} · ${pretty(r.status)}` }));
   const range = ppiRange(key, niceRange(Math.max(0.5, ...list.map((r) => r.distanceKm || 0)) * 1.15));
   return `<section class="card track-card"><h2>🛰️ ${esc(title)}</h2>
     ${list.length ? `<div class="ppi-wrap">${map && center && targets.length ? `<div class="ppi-box">${ppiSvg({ center, rangeKm: range, targets, title: 'PPI · LIVE' })}${zoomBar('ppi-zoom', key, 'Radar')}</div>
       <div class="ppi-legend"><span><i class="l-her"></i>HER</span><span><i class="l-vol"></i>VOLUNTEER</span>${viewer === 'volunteer' ? '<span><i class="l-you"></i>YOU</span>' : ''}<span><i class="l-trk"></i>TRACK</span></div>
-      <p class="ppi-explain">${viewer === 'volunteer'
+      <p class="ppi-explain">Each box shows that volunteer's distance and ETA; it counts down as they get closer. A blinking dot is on the move towards her.<br>${viewer === 'volunteer'
         ? 'She is the red dot in the centre. Blue dots are the volunteers who accepted (you are the light-blue dot); green lines show the path each one has travelled. Distance from the centre = how far from her; the angle = which direction (000° = north). The rotating line only shows the scope is live.'
         : 'You are the red dot in the centre. Blue dots are verified volunteers who accepted your SOS; green lines show the path each one has travelled. Distance from the centre = how far away they are; the angle = which direction they are coming from (000° = north). The rotating line only shows the scope is live.'}</p>` : ''}
       ${ppiTable(rows)}</div>
@@ -596,7 +598,7 @@ function opsDetail(d, tl, cfg) {
   const live = d.assignments.filter((a) => a.position);
   const targets = [
     ...(d.alertedPositions || []).filter((p) => p.response !== 'ACCEPTED').map((p) => ({ kind: p.response === 'DECLINED' ? 'declined' : 'alerted', position: p.position, title: `${p.response || 'alerted'} ${p.distanceKm ?? ''} km` })),
-    ...live.map((a) => ({ id: a.volunteerName.split(' ')[0].toUpperCase(), kind: 'responder', position: a.position, track: a.track, sub: a.distanceKm != null ? a.distanceKm + 'km' : '', title: `${a.volunteerName} ${a.status}` })),
+    ...live.map((a) => ({ id: a.volunteerName.split(' ')[0].toUpperCase(), kind: 'responder', position: a.position, track: a.track, distText: distText(a.distanceKm), etaText: etaText(a.status, a.approxEtaMin), moving: a.status === 'EN_ROUTE' && a.closing !== 'OPENING', title: `${a.volunteerName} ${a.status}` })),
   ];
   const near = live.length ? ppiRange('ops-approach', niceRange(Math.max(0.5, ...live.map((a) => a.distanceKm || 0)) * 1.15)) : null;
   const searchRange = ppiRange('ops-search', radii[2]);
