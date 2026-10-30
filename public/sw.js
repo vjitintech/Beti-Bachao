@@ -1,6 +1,6 @@
 // Offline shell: the SOS screen, call button and SMS fallback must open even
 // with no network. API calls are never cached.
-const CACHE = 'bb-shell-v1';
+const CACHE = 'bb-shell-v2';
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
   'js/app.js', 'js/api.js', 'js/i18n.js', 'js/safety.js', 'js/ui.js',

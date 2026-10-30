@@ -226,3 +226,8 @@ body.strobe::after { content: ""; position: fixed; inset: 0; z-index: 40; pointe
 @keyframes strobe { 0% { background: rgba(255, 0, 40, .35); } 50% { background: rgba(255, 255, 255, .25); } }
 @media (prefers-reduced-motion: reduce) { body.strobe::after { animation: none; background: rgba(255, 0, 40, .2); } }
 [dir="rtl"] .sos-ring { transform: rotate(-90deg) scaleY(-1); }
+
+.eb-title { flex-basis: 100%; text-align: center; margin: 0; font-weight: 700; font-size: .9rem; color: var(--ink-2); }
+.eb-change { font-weight: 500; margin-inline-start: 6px; }
+.btn-call, .btn-call-alt { flex-direction: column; gap: 0; line-height: 1.2; }
+.eb-sub { display: block; font-size: .72rem; font-weight: 500; opacity: .9; }

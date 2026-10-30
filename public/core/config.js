@@ -28,7 +28,7 @@ export const DEFAULT_CONFIG = Object.freeze({
 // checked for this build; everything else must be confirmed with local
 // authorities before any pilot. The UI always shows the verification state.
 export const COUNTRIES = {
-  IN: { name: 'India', emergency: '112', verified: true, extra: [{ label: 'Women Helpline', number: '181' }, { label: 'Women Helpline (Police)', number: '1091' }], locale: 'hi' },
+  IN: { name: 'India', emergency: '112', verified: true, extra: [{ label: 'Women Helpline (violence, abuse, counselling)', number: '181' }, { label: 'Women Police Helpline (report harassment)', number: '1091' }], locale: 'hi' },
   US: { name: 'United States', emergency: '911', verified: false, extra: [{ label: 'National DV Hotline', number: '18007997233' }], locale: 'en' },
   GB: { name: 'United Kingdom', emergency: '999', verified: false, extra: [{ label: 'EU/Intl', number: '112' }], locale: 'en' },
   EU: { name: 'European Union', emergency: '112', verified: false, extra: [], locale: 'en' },

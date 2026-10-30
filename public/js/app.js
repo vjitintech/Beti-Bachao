@@ -31,8 +31,9 @@ const pretty = (s) => String(s || '').replace(/_/g, ' ').toLowerCase().replace(/
 function emergencyBar() {
   const c = country();
   return `<div class="emergency-bar" role="region" aria-label="Emergency calling">
-    <a class="btn btn-call" href="${telHref(c.emergency)}">📞 ${esc(t('call_emergency', { n: c.emergency }))}</a>
-    ${(c.extra || []).slice(0, 2).map((h) => `<a class="btn btn-call-alt" href="${telHref(h.number)}">${esc(h.label)} · ${esc(h.number)}</a>`).join('')}
+    <p class="eb-title">${esc(c.name)} · ${esc(t('helplines'))} <a href="#/settings" class="eb-change">change country</a></p>
+    <a class="btn btn-call" href="${telHref(c.emergency)}">📞 ${esc(t('call_emergency', { n: c.emergency }))}<small class="eb-sub">Police · Ambulance · Fire</small></a>
+    ${(c.extra || []).slice(0, 2).map((h) => `<a class="btn btn-call-alt" href="${telHref(h.number)}"><strong>${esc(h.number)}</strong><small class="eb-sub">${esc(h.label)}</small></a>`).join('')}
     ${c.verified ? '' : `<span class="verify-note">${esc(c.name)}: number configured — verify locally before relying on it</span>`}
   </div>`;
 }
