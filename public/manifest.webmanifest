@@ -1,0 +1,19 @@
+{
+  "name": "Beti Bachao — Women's Safety SOS",
+  "short_name": "Beti Bachao",
+  "description": "SOS-to-safety coordination: staged volunteer search, privacy-first location, escalation and explicit safety confirmation.",
+  "start_url": "./#/",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#fbf7f9",
+  "theme_color": "#6d1a4a",
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    { "name": "SOS", "url": "./#/home", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
