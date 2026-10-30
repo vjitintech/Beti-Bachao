@@ -1,9 +1,9 @@
-import { createApi, uuid } from './api.js';
-import { t, setLang, detectLang, LANGS, lang } from './i18n.js';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg } from './ui.js';
-import { geo, syntheticLocation, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js';
-import { TRAINING_MODULES } from '../core/engine.js';
-import { DEMO_BLURBS } from '../core/seed.js';
+import { createApi, uuid } from './api.js?v=mvubmhrj';
+import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mvubmhrj';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg } from './ui.js?v=mvubmhrj';
+import { geo, syntheticLocation, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mvubmhrj';
+import { TRAINING_MODULES } from '../core/engine.js?v=mvubmhrj';
+import { DEMO_BLURBS } from '../core/seed.js?v=mvubmhrj';
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'policy', volSel: null };
 const app = () => $('#app');
@@ -13,6 +13,7 @@ const country = () => {
   const code = prefs.get().country || st.me?.countryCode || st.cfg?.defaultCountry || 'IN';
   return { code, ...(st.cfg?.countries?.[code] || { name: 'India', emergency: '112', extra: [], verified: true }) };
 };
+const medicalNumber = () => (country().extra || []).find((h) => h.medical)?.number || null;
 const telHref = (n) => `tel:${String(n).replace(/[^\d+]/g, '')}`;
 const showErr = (e) => toast(e?.message || 'Something went wrong', 'error', 5000);
 const go = (hash) => { if (location.hash === hash) render(); else location.hash = hash; };
@@ -27,6 +28,8 @@ const statusText = (v) => {
   if (v.status === 'NO_RESPONDER_AVAILABLE') return t('no_responder');
   return t('status_red');
 };
+// Opens sms:/tel: links in the phone's app without leaving this page.
+function openExternal(href) { const a = document.createElement('a'); a.href = href; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove(); }
 const pretty = (s) => String(s || '').replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
 
 function emergencyBar() {
@@ -180,7 +183,8 @@ async function viewHome() {
       </button>
       <p id="sos-hint" class="sos-hint">${esc(t('hold_to_send'))}</p>
       <label class="switch danger-switch"><input type="checkbox" id="sev-high"> ${esc(t('immediate_danger'))}</label>
-      <div class="row center"><button class="btn btn-dark" data-act="silent-sos">🤫 ${esc(t('silent_sos'))}</button></div>
+      <div class="row center"><button class="btn btn-dark" data-act="silent-sos">🤫 ${esc(t('silent_sos'))}</button>${medicalNumber() ? `<a class="btn btn-medical-solid" href="${telHref(medicalNumber())}">🚑 ${esc(t('medical_help'))} · ${esc(medicalNumber())}</a>` : ''}</div>
+      ${contacts.list().length ? '' : `<a class="alert alert-info alert-link" href="#/settings">👥 ${esc(t('add_contacts_hint'))}</a>`}
       <p class="hint-strong">${esc(t('call_now_hint'))}</p>
     </section>
     ${emergencyBar()}
@@ -211,8 +215,18 @@ function smsButtons() {
 async function triggerSOS({ severity = 'NORMAL', silent = false, trigger = 'button' } = {}) {
   if (st.sendingSos) return;
   st.sendingSos = true;
+  const isRetry = !!store.get('pendingSos', null);
   const pending = store.get('pendingSos', null) || { key: uuid(), createdAt: new Date().toISOString(), severity, silent, trigger };
   store.set('pendingSos', pending);
+  // Open the pre-filled "I am in danger + location" SMS to trusted contacts right away,
+  // while the tap/hold still counts as a user gesture. Browsers cannot send SMS silently;
+  // the phone's SMS app opens ready to send. The SOS continues in the background.
+  if (!isRetry && prefs.get().autoSms && contacts.list().length) {
+    const nums = contacts.list().map((c) => c.phone);
+    const loc0 = (isDemo() && prefs.get().synthetic && st.cfg.demoCenter) ? syntheticLocation(st.cfg.demoCenter) : geo.last;
+    store.set('autoSmsAt', Date.now());
+    openExternal(smsHref(nums, sosMessage(loc0)));
+  }
   if (!silent) vibrate([200, 100, 200]);
   keepAwake(true);
   if (!silent) toast(t('sending'), 'warn');
@@ -326,7 +340,7 @@ async function viewIncident(id, params) {
       <button class="btn btn-secondary" data-act="record-toggle">🎙️ ${esc(recorder.recording ? t('stop') : t('record'))}</button>
       <button class="btn btn-ghost" data-act="cancel-sos">${esc(t('cancel_sos'))}</button>
     </section>
-    ${contacts.list().length ? `<div class="card"><h2>📞 ${esc(t('contacts'))}</h2><div class="row">${contacts.list().map((c) => `<a class="btn btn-secondary" href="${telHref(c.phone)}">📞 ${esc(c.name)}</a>`).join('')}</div></div>` : ''}
+    ${contacts.list().length ? `<div class="card"><h2>📞 ${esc(t('contacts'))}</h2><p class="small muted">${esc(t('text_contacts'))}: <a href="${esc(smsHref(contacts.list().map((c) => c.phone), sosMessage(v.location || geo.last)))}">💬 SMS with latest location</a></p><div class="row">${contacts.list().map((c) => `<a class="btn btn-secondary" href="${telHref(c.phone)}">📞 ${esc(c.name)}</a>`).join('')}</div></div>` : ''}
     <div class="card"><div class="row">${smsButtons()}<button class="btn btn-ghost" data-act="native-share">📤 Share…</button></div></div>
     ${locationCard(v.location, { live: true })}
     ` : `<section class="card"><p>${v.closureReason === 'USER_CONFIRMED_SAFE' ? '💚 You confirmed you are safe. Responders have been released.' : 'This SOS has ended.'}</p><a class="btn btn-primary" href="#/home">${esc(t('home'))}</a></section>${emergencyBar()}`}
@@ -412,6 +426,7 @@ async function viewSettings() {
       <form data-form="pins" class="inline-form"><label>${esc(t('cancel_pin'))}<input name="cancelPin" inputmode="numeric" pattern="\\d{4,6}" required maxlength="6" type="password"></label><label>${esc(t('duress_pin'))}<input name="duressPin" inputmode="numeric" pattern="\\d{4,6}" maxlength="6" type="password"></label><button class="btn btn-secondary">${esc(t('save'))}</button></form>
     </section>
     <section class="card form"><h2>⚡ ${esc(t('triggers'))}</h2>
+      <label class="switch"><input type="checkbox" data-change="autoSms" ${p.autoSms ? 'checked' : ''}> ${esc(t('auto_sms'))}</label>
       <label class="switch"><input type="checkbox" data-change="shake" ${p.shake ? 'checked' : ''}> ${esc(t('shake_trigger'))}</label>
       <label class="switch"><input type="checkbox" data-change="voice" ${p.voice ? 'checked' : ''} ${voice.supported ? '' : 'disabled'}> ${esc(t('voice_trigger'))} ${voice.supported ? '' : '<small>(not supported in this browser)</small>'}</label>
       <label class="switch"><input type="checkbox" data-change="autoRecord" ${p.autoRecord ? 'checked' : ''}> ${esc(t('auto_record'))}</label>
@@ -715,7 +730,7 @@ const actions = {
     const loc = geo.last || currentLoc();
     const nums = contacts.list().map((c) => c.phone);
     const msg = sosMessage(loc);
-    if (nums.length) location.href = smsHref(nums, msg);
+    if (nums.length) openExternal(smsHref(nums, msg));
     else if (!(await nativeShare(msg))) { toast('Add trusted contacts in Settings first', 'warn'); go('#/settings'); }
   },
   async 'native-share'() { if (!(await nativeShare(sosMessage(geo.last || currentLoc())))) toast('Sharing not supported — use SMS/WhatsApp', 'warn'); },
@@ -872,6 +887,7 @@ const changes = {
     prefs.set({ voice: el.checked });
   },
   autoRecord(el) { prefs.set({ autoRecord: el.checked }); },
+  autoSms(el) { prefs.set({ autoSms: el.checked }); },
   'ops-all'(el) { store.set('ops.all', el.checked); render(); },
 };
 
@@ -924,7 +940,12 @@ async function boot() {
 
   if (st.me?.role === 'user') afterLoginSilent();
   render();
-  if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((r) => r.update()).catch(() => {});
+    // A new version took over: reload once so every file is the same version (never during an SOS).
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !location.hash.startsWith('#/incident')) location.reload(); });
+  }
 }
 function afterLoginSilent() {
   const p = prefs.get();

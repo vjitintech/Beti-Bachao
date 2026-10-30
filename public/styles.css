@@ -241,3 +241,5 @@ body.strobe::after { content: ""; position: fixed; inset: 0; z-index: 40; pointe
 @media (prefers-reduced-motion: reduce) { .heartbeat { animation: none; } }
 .btn-medical { border-color: #1f7a4d; color: #13683f; }
 @media (prefers-color-scheme: dark) { .btn-medical { color: #5fdc9c; border-color: #3ccf82; } }
+
+.btn-medical-solid { background: #13834a; color: #fff; }

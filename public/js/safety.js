@@ -1,7 +1,7 @@
 // On-device safety capabilities. Everything degrades gracefully: if a browser
 // lacks a sensor or permission is denied, the UI says so and offers the next
 // best option (call / SMS). Nothing here pretends to work when it doesn't.
-import { VOICE_KEYWORDS, lang, speechLang } from './i18n.js';
+import { VOICE_KEYWORDS, lang, speechLang } from './i18n.js?v=mvubmhrj';
 
 const store = {
   get(k, d) { try { const v = localStorage.getItem('bb.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
@@ -231,6 +231,6 @@ export const safeWalk = {
 
 // ---------------- settings ----------------
 export const prefs = {
-  get() { return { shake: false, voice: false, autoRecord: false, synthetic: true, country: null, fakeCaller: 'Maa', ...store.get('prefs', {}) }; },
+  get() { return { autoSms: true, shake: false, voice: false, autoRecord: false, synthetic: true, country: null, fakeCaller: 'Maa', ...store.get('prefs', {}) }; },
   set(patch) { const p = { ...this.get(), ...patch }; store.set('prefs', p); return p; },
 };

@@ -16,7 +16,7 @@ Beti Bachao is not "another panic button". It coordinates the whole response —
 - Live status in **RED / AMBER / GREEN**, search stage, responders with approximate ETA, and an honest location card (accuracy, age, "floor/vertical location unknown")
 - **"Are you safe now?" → YES / NO / NEED MORE HELP**. YES needs a second confirmation; NO/need-help escalates
 - **Offline-first**: the app shell works offline; an SOS made offline is queued (idempotent) and sent on reconnect, while SMS-to-contacts and call buttons still work
-- Pre-filled **SMS / WhatsApp** to trusted contacts with a maps link · **siren + strobe** · **fake incoming call** · **audio/video evidence recorder** (stays on the device) · battery level shared with responders
+- **Auto-message on SOS**: the moment SOS is raised, the phone opens an SMS to all trusted contacts pre-filled with "I am in danger" + a maps link (one tap to send; browsers cannot send SMS silently) · WhatsApp share · **siren + strobe** · **fake incoming call** · **audio/video evidence recorder** (stays on the device) · battery level shared with responders
 - Country-aware emergency numbers and helplines (India: 112, 181, 1091); others marked "verify locally"
 - Data export & account deletion
 
@@ -36,6 +36,7 @@ Requires Node.js ≥ 20. **No npm install needed** — zero runtime dependencies
 npm run demo        # http://localhost:8080 — seeded synthetic accounts, demo controls
 npm test            # 26 engine + API acceptance tests
 npm run smoke       # headless-browser end-to-end walkthrough (needs Playwright/Chromium)
+node scripts/version.mjs   # run after editing public/ so phones load fresh files
 npm start           # production-style: MFA on, no demo routes (set ADMIN_EMAIL/ADMIN_PASSWORD on first boot)
 ```
 
