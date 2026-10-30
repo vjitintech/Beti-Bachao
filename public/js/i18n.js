@@ -41,6 +41,7 @@ export const VOICE_KEYWORDS = {
 const D = {
   en: {
     tagline: 'Every SOS acknowledged. Every response tracked. Never marked safe without you.',
+    need_safety: 'I need safety', want_volunteer: 'I want to volunteer',
     sos: 'SOS', hold_to_send: 'Press and hold for 3 seconds to send SOS', sending: 'Sending SOS…', silent_sos: 'Silent SOS', immediate_danger: "I'm in immediate danger",
     call_emergency: 'Call {n}', call_now_hint: "In immediate danger, call now — don't wait for volunteers.",
     location: 'Location', location_off: 'Location not shared yet', location_on: 'Location shared', accuracy: 'Accuracy ±{m} m', updated_ago: 'Updated {s}s ago',
@@ -63,6 +64,7 @@ const D = {
   },
   hi: {
     tagline: 'हर SOS का जवाब। हर मदद पर नज़र। आपकी पुष्टि के बिना कभी "सुरक्षित" नहीं।',
+    need_safety: 'मुझे सुरक्षा चाहिए', want_volunteer: 'मैं स्वयंसेवक बनना चाहता/चाहती हूँ',
     sos: 'SOS', hold_to_send: 'SOS भेजने के लिए 3 सेकंड दबाकर रखें', sending: 'SOS भेजा जा रहा है…', silent_sos: 'चुपचाप SOS', immediate_danger: 'मैं तुरंत खतरे में हूँ',
     call_emergency: '{n} पर कॉल करें', call_now_hint: 'तुरंत खतरे में हों तो अभी कॉल करें — स्वयंसेवकों का इंतज़ार न करें।',
     location: 'लोकेशन', location_off: 'लोकेशन अभी साझा नहीं', location_on: 'लोकेशन साझा', accuracy: 'सटीकता ±{m} मी', updated_ago: '{s} सेकंड पहले अपडेट',
@@ -85,6 +87,7 @@ const D = {
   },
   te: {
     tagline: 'ప్రతి SOSకి స్పందన. ప్రతి సహాయం ట్రాక్. మీ నిర్ధారణ లేకుండా ఎప్పుడూ "సురక్షితం" కాదు.',
+    need_safety: 'నాకు రక్షణ కావాలి', want_volunteer: 'నేను వాలంటీర్ అవ్వాలనుకుంటున్నాను',
     sos: 'SOS', hold_to_send: 'SOS పంపడానికి 3 సెకన్లు నొక్కి పట్టుకోండి', sending: 'SOS పంపుతోంది…', silent_sos: 'నిశ్శబ్ద SOS', immediate_danger: 'నేను తక్షణ ప్రమాదంలో ఉన్నాను',
     call_emergency: '{n}కి కాల్ చేయండి', call_now_hint: 'తక్షణ ప్రమాదంలో ఉంటే ఇప్పుడే కాల్ చేయండి — వాలంటీర్ల కోసం ఆగవద్దు.',
     location: 'లొకేషన్', location_off: 'లొకేషన్ ఇంకా షేర్ కాలేదు', location_on: 'లొకేషన్ షేర్ అయింది', accuracy: 'ఖచ్చితత్వం ±{m} మీ', updated_ago: '{s} సెకన్ల క్రితం అప్డేట్',
@@ -107,6 +110,7 @@ const D = {
   },
   ta: {
     tagline: 'ஒவ்வொரு SOS-க்கும் பதில். ஒவ்வொரு உதவியும் கண்காணிப்பு. உங்கள் உறுதி இன்றி "பாதுகாப்பு" இல்லை.',
+    need_safety: 'எனக்குப் பாதுகாப்பு வேண்டும்', want_volunteer: 'நான் தன்னார்வலராக விரும்புகிறேன்',
     sos: 'SOS', hold_to_send: 'SOS அனுப்ப 3 விநாடிகள் அழுத்திப் பிடிக்கவும்', sending: 'SOS அனுப்பப்படுகிறது…', silent_sos: 'அமைதியான SOS', immediate_danger: 'நான் உடனடி ஆபத்தில் இருக்கிறேன்',
     call_emergency: '{n} அழைக்கவும்', call_now_hint: 'உடனடி ஆபத்தில் இருந்தால் இப்போதே அழைக்கவும் — தன்னார்வலர்களுக்காகக் காத்திருக்க வேண்டாம்.',
     location: 'இருப்பிடம்', location_off: 'இருப்பிடம் இன்னும் பகிரப்படவில்லை', location_on: 'இருப்பிடம் பகிரப்பட்டது', accuracy: 'துல்லியம் ±{m} மீ', updated_ago: '{s} விநாடிகளுக்கு முன்',
@@ -129,6 +133,7 @@ const D = {
   },
   kn: {
     tagline: 'ಪ್ರತಿ SOSಗೆ ಉತ್ತರ. ಪ್ರತಿ ಸಹಾಯದ ಮೇಲೆ ನಿಗಾ. ನಿಮ್ಮ ದೃಢೀಕರಣವಿಲ್ಲದೆ "ಸುರಕ್ಷಿತ" ಇಲ್ಲ.',
+    need_safety: 'ನನಗೆ ಸುರಕ್ಷತೆ ಬೇಕು', want_volunteer: 'ನಾನು ಸ್ವಯಂಸೇವಕರಾಗಲು ಬಯಸುತ್ತೇನೆ',
     sos: 'SOS', hold_to_send: 'SOS ಕಳುಹಿಸಲು 3 ಸೆಕೆಂಡ್ ಒತ್ತಿ ಹಿಡಿಯಿರಿ', sending: 'SOS ಕಳುಹಿಸಲಾಗುತ್ತಿದೆ…', silent_sos: 'ಮೌನ SOS', immediate_danger: 'ನಾನು ತಕ್ಷಣದ ಅಪಾಯದಲ್ಲಿದ್ದೇನೆ',
     call_emergency: '{n}ಗೆ ಕರೆ ಮಾಡಿ', call_now_hint: 'ತಕ್ಷಣದ ಅಪಾಯವಿದ್ದರೆ ಈಗಲೇ ಕರೆ ಮಾಡಿ — ಸ್ವಯಂಸೇವಕರಿಗಾಗಿ ಕಾಯಬೇಡಿ.',
     location: 'ಸ್ಥಳ', location_off: 'ಸ್ಥಳ ಇನ್ನೂ ಹಂಚಿಕೊಂಡಿಲ್ಲ', location_on: 'ಸ್ಥಳ ಹಂಚಿಕೊಳ್ಳಲಾಗಿದೆ', accuracy: 'ನಿಖರತೆ ±{m} ಮೀ', updated_ago: '{s} ಸೆಕೆಂಡ್ ಹಿಂದೆ ನವೀಕರಣ',
@@ -151,6 +156,7 @@ const D = {
   },
   ml: {
     tagline: 'ഓരോ SOS-നും മറുപടി. ഓരോ സഹായവും നിരീക്ഷണത്തിൽ. നിങ്ങളുടെ സ്ഥിരീകരണമില്ലാതെ "സുരക്ഷിതം" ഇല്ല.',
+    need_safety: 'എനിക്ക് സുരക്ഷ വേണം', want_volunteer: 'എനിക്ക് വോളണ്ടിയറാകണം',
     sos: 'SOS', hold_to_send: 'SOS അയയ്ക്കാൻ 3 സെക്കൻഡ് അമർത്തിപ്പിടിക്കുക', sending: 'SOS അയയ്ക്കുന്നു…', silent_sos: 'നിശബ്ദ SOS', immediate_danger: 'ഞാൻ അടിയന്തര അപകടത്തിലാണ്',
     call_emergency: '{n} വിളിക്കുക', call_now_hint: 'അടിയന്തര അപകടത്തിലാണെങ്കിൽ ഇപ്പോൾ തന്നെ വിളിക്കുക — വോളണ്ടിയർമാരെ കാത്തിരിക്കരുത്.',
     location: 'ലൊക്കേഷൻ', location_off: 'ലൊക്കേഷൻ ഇതുവരെ പങ്കിട്ടിട്ടില്ല', location_on: 'ലൊക്കേഷൻ പങ്കിട്ടു', accuracy: 'കൃത്യത ±{m} മീ', updated_ago: '{s} സെക്കൻഡ് മുമ്പ് പുതുക്കി',
@@ -173,6 +179,7 @@ const D = {
   },
   bn: {
     tagline: 'প্রতিটি SOS-এর সাড়া। প্রতিটি সাহায্যের খোঁজ। আপনার নিশ্চয়তা ছাড়া কখনো "নিরাপদ" নয়।',
+    need_safety: 'আমার নিরাপত্তা দরকার', want_volunteer: 'আমি স্বেচ্ছাসেবক হতে চাই',
     sos: 'SOS', hold_to_send: 'SOS পাঠাতে ৩ সেকেন্ড চেপে ধরুন', sending: 'SOS পাঠানো হচ্ছে…', silent_sos: 'নীরব SOS', immediate_danger: 'আমি তাৎক্ষণিক বিপদে আছি',
     call_emergency: '{n} নম্বরে কল করুন', call_now_hint: 'তাৎক্ষণিক বিপদে থাকলে এখনই কল করুন — স্বেচ্ছাসেবকদের জন্য অপেক্ষা করবেন না।',
     location: 'অবস্থান', location_off: 'অবস্থান এখনো শেয়ার হয়নি', location_on: 'অবস্থান শেয়ার হয়েছে', accuracy: 'নির্ভুলতা ±{m} মি', updated_ago: '{s} সেকেন্ড আগে আপডেট',
@@ -195,6 +202,7 @@ const D = {
   },
   mr: {
     tagline: 'प्रत्येक SOS ला प्रतिसाद. प्रत्येक मदतीवर लक्ष. तुमच्या पुष्टीशिवाय कधीही "सुरक्षित" नाही.',
+    need_safety: 'मला सुरक्षा हवी आहे', want_volunteer: 'मला स्वयंसेवक व्हायचे आहे',
     sos: 'SOS', hold_to_send: 'SOS पाठवण्यासाठी 3 सेकंद दाबून ठेवा', sending: 'SOS पाठवत आहे…', silent_sos: 'शांत SOS', immediate_danger: 'मी तात्काळ धोक्यात आहे',
     call_emergency: '{n} वर कॉल करा', call_now_hint: 'तात्काळ धोका असल्यास आत्ताच कॉल करा — स्वयंसेवकांची वाट पाहू नका.',
     location: 'स्थान', location_off: 'स्थान अजून शेअर केलेले नाही', location_on: 'स्थान शेअर केले', accuracy: 'अचूकता ±{m} मी', updated_ago: '{s} सेकंदांपूर्वी अपडेट',
@@ -217,6 +225,7 @@ const D = {
   },
   gu: {
     tagline: 'દરેક SOS નો જવાબ. દરેક મદદ પર નજર. તમારી પુષ્ટિ વિના ક્યારેય "સુરક્ષિત" નહીં.',
+    need_safety: 'મને સુરક્ષા જોઈએ', want_volunteer: 'હું સ્વયંસેવક બનવા માંગું છું',
     sos: 'SOS', hold_to_send: 'SOS મોકલવા 3 સેકન્ડ દબાવી રાખો', sending: 'SOS મોકલાઈ રહ્યું છે…', silent_sos: 'શાંત SOS', immediate_danger: 'હું તાત્કાલિક જોખમમાં છું',
     call_emergency: '{n} પર કૉલ કરો', call_now_hint: 'તાત્કાલિક જોખમ હોય તો હમણાં જ કૉલ કરો — સ્વયંસેવકોની રાહ ન જુઓ.',
     location: 'સ્થાન', location_off: 'સ્થાન હજુ શેર નથી', location_on: 'સ્થાન શેર થયું', accuracy: 'ચોકસાઈ ±{m} મી', updated_ago: '{s} સેકન્ડ પહેલાં અપડેટ',
@@ -239,6 +248,7 @@ const D = {
   },
   ur: {
     tagline: 'ہر SOS کا جواب۔ ہر مدد پر نظر۔ آپ کی تصدیق کے بغیر کبھی "محفوظ" نہیں۔',
+    need_safety: 'مجھے حفاظت چاہیے', want_volunteer: 'میں رضاکار بننا چاہتا/چاہتی ہوں',
     sos: 'SOS', hold_to_send: 'SOS بھیجنے کے لیے 3 سیکنڈ دبائے رکھیں', sending: 'SOS بھیجا جا رہا ہے…', silent_sos: 'خاموش SOS', immediate_danger: 'میں فوری خطرے میں ہوں',
     call_emergency: '{n} پر کال کریں', call_now_hint: 'فوری خطرے میں ہوں تو ابھی کال کریں — رضاکاروں کا انتظار نہ کریں۔',
     location: 'مقام', location_off: 'مقام ابھی شیئر نہیں ہوا', location_on: 'مقام شیئر ہو گیا', accuracy: 'درستگی ±{m} میٹر', updated_ago: '{s} سیکنڈ پہلے اپ ڈیٹ',
@@ -261,6 +271,7 @@ const D = {
   },
   ar: {
     tagline: 'كل نداء استغاثة يُستجاب له. كل استجابة تُتابَع. لا يُعلَن الأمان دون تأكيدكِ.',
+    need_safety: 'أحتاج إلى الأمان', want_volunteer: 'أريد أن أتطوع',
     sos: 'SOS', hold_to_send: 'اضغطي مطولاً 3 ثوانٍ لإرسال الاستغاثة', sending: 'جارٍ إرسال الاستغاثة…', silent_sos: 'استغاثة صامتة', immediate_danger: 'أنا في خطر فوري',
     call_emergency: 'اتصلي بـ {n}', call_now_hint: 'إن كنتِ في خطر فوري فاتصلي الآن — لا تنتظري المتطوعين.',
     location: 'الموقع', location_off: 'لم تتم مشاركة الموقع بعد', location_on: 'تمت مشاركة الموقع', accuracy: 'الدقة ±{m} م', updated_ago: 'تحديث قبل {s} ث',
@@ -283,6 +294,7 @@ const D = {
   },
   es: {
     tagline: 'Cada SOS atendido. Cada respuesta seguida. Nunca se marca "a salvo" sin ti.',
+    need_safety: 'Necesito seguridad', want_volunteer: 'Quiero ser voluntario/a',
     sos: 'SOS', hold_to_send: 'Mantén pulsado 3 segundos para enviar SOS', sending: 'Enviando SOS…', silent_sos: 'SOS silencioso', immediate_danger: 'Estoy en peligro inmediato',
     call_emergency: 'Llamar al {n}', call_now_hint: 'Si estás en peligro inmediato, llama ya — no esperes a los voluntarios.',
     location: 'Ubicación', location_off: 'Ubicación aún no compartida', location_on: 'Ubicación compartida', accuracy: 'Precisión ±{m} m', updated_ago: 'Actualizado hace {s} s',
@@ -305,6 +317,7 @@ const D = {
   },
   fr: {
     tagline: 'Chaque SOS pris en compte. Chaque intervention suivie. Jamais « en sécurité » sans vous.',
+    need_safety: "J'ai besoin de sécurité", want_volunteer: 'Je veux être bénévole',
     sos: 'SOS', hold_to_send: 'Maintenez 3 secondes pour envoyer le SOS', sending: 'Envoi du SOS…', silent_sos: 'SOS silencieux', immediate_danger: 'Je suis en danger immédiat',
     call_emergency: 'Appeler le {n}', call_now_hint: "En danger immédiat, appelez maintenant — n'attendez pas les bénévoles.",
     location: 'Position', location_off: 'Position pas encore partagée', location_on: 'Position partagée', accuracy: 'Précision ±{m} m', updated_ago: 'Mis à jour il y a {s} s',
@@ -327,6 +340,7 @@ const D = {
   },
   pt: {
     tagline: 'Cada SOS atendido. Cada resposta acompanhada. Nunca marcado como "segura" sem você.',
+    need_safety: 'Preciso de segurança', want_volunteer: 'Quero ser voluntário/a',
     sos: 'SOS', hold_to_send: 'Segure por 3 segundos para enviar SOS', sending: 'Enviando SOS…', silent_sos: 'SOS silencioso', immediate_danger: 'Estou em perigo imediato',
     call_emergency: 'Ligar {n}', call_now_hint: 'Em perigo imediato, ligue agora — não espere pelos voluntários.',
     location: 'Localização', location_off: 'Localização ainda não compartilhada', location_on: 'Localização compartilhada', accuracy: 'Precisão ±{m} m', updated_ago: 'Atualizado há {s} s',

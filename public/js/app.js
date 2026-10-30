@@ -34,7 +34,7 @@ function emergencyBar() {
   return `<div class="emergency-bar" role="region" aria-label="Emergency calling">
     <p class="eb-title">${esc(c.name)} · ${esc(t('helplines'))} <a href="#/settings" class="eb-change">change country</a></p>
     <a class="btn btn-call" href="${telHref(c.emergency)}">📞 ${esc(t('call_emergency', { n: c.emergency }))}<small class="eb-sub">${esc(c.emergencyLabel || 'Emergency services')}</small></a>
-    ${(c.extra || []).map((h) => `<a class="btn btn-call-alt" href="${telHref(h.number)}"><strong>${esc(h.number)}</strong><small class="eb-sub">${esc(h.label)}</small></a>`).join('')}
+    ${(c.extra || []).map((h) => `<a class="btn btn-call-alt ${h.medical ? 'btn-medical' : ''}" href="${telHref(h.number)}">${h.medical ? '🚑 ' : ''}<strong>${esc(h.number)}</strong><small class="eb-sub">${esc(h.label)}</small></a>`).join('')}
     ${c.verified ? '' : `<span class="verify-note">${esc(c.name)}: number configured — verify locally before relying on it</span>`}
   </div>`;
 }
@@ -72,8 +72,8 @@ function viewLanding() {
       <h1>Beti Bachao</h1>
       <p class="lead">${esc(t('tagline'))}</p>
       <div class="hero-actions">
-        <a href="#/login?as=user" class="btn btn-primary btn-lg">I need safety tools</a>
-        <a href="#/login?as=volunteer" class="btn btn-secondary btn-lg">I want to volunteer</a>
+        <a href="#/login?as=user" class="btn btn-primary btn-lg heartbeat">🛡️ ${esc(t('need_safety'))}</a>
+        <a href="#/login?as=volunteer" class="btn btn-secondary btn-lg">${esc(t('want_volunteer'))}</a>
       </div>
       ${isDemo() ? '<p class="muted">Demo accounts are pre-filled on the login screen.</p>' : ''}
     </section>
