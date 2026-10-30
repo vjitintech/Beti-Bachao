@@ -1,9 +1,9 @@
-import { createApi, uuid } from './api.js?v=mvubmhrj';
-import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mvubmhrj';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg } from './ui.js?v=mvubmhrj';
-import { geo, syntheticLocation, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mvubmhrj';
-import { TRAINING_MODULES } from '../core/engine.js?v=mvubmhrj';
-import { DEMO_BLURBS } from '../core/seed.js?v=mvubmhrj';
+import { createApi, uuid } from './api.js?v=mvubs8pw';
+import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mvubs8pw';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg } from './ui.js?v=mvubs8pw';
+import { geo, syntheticLocation, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mvubs8pw';
+import { TRAINING_MODULES } from '../core/engine.js?v=mvubs8pw';
+import { DEMO_BLURBS } from '../core/seed.js?v=mvubs8pw';
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'policy', volSel: null };
 const app = () => $('#app');
@@ -36,8 +36,8 @@ function emergencyBar() {
   const c = country();
   return `<div class="emergency-bar" role="region" aria-label="Emergency calling">
     <p class="eb-title">${esc(c.name)} · ${esc(t('helplines'))} <a href="#/settings" class="eb-change">change country</a></p>
-    <a class="btn btn-call" href="${telHref(c.emergency)}">📞 ${esc(t('call_emergency', { n: c.emergency }))}<small class="eb-sub">${esc(c.emergencyLabel || 'Emergency services')}</small></a>
-    ${(c.extra || []).map((h) => `<a class="btn btn-call-alt ${h.medical ? 'btn-medical' : ''}" href="${telHref(h.number)}">${h.medical ? '🚑 ' : ''}<strong>${esc(h.number)}</strong><small class="eb-sub">${esc(h.label)}</small></a>`).join('')}
+    <a class="btn btn-call" href="${telHref(c.emergency)}"><span class="eb-main">📞 ${esc(t('call_emergency', { n: c.emergency }))}</span><small class="eb-sub">${esc(c.emergencyLabel || 'Emergency services')}</small></a>
+    ${(c.extra || []).map((h) => `<a class="btn btn-call-alt ${h.medical ? 'btn-medical' : ''}" href="${telHref(h.number)}"><span class="eb-main">${h.medical ? '🚑 ' : '📞 '}<strong>${esc(h.number)}</strong></span><small class="eb-sub">${esc(h.label)}</small></a>`).join('')}
     ${c.verified ? '' : `<span class="verify-note">${esc(c.name)}: number configured — verify locally before relying on it</span>`}
   </div>`;
 }
@@ -75,7 +75,7 @@ function viewLanding() {
       <h1>Beti Bachao</h1>
       <p class="lead">${esc(t('tagline'))}</p>
       <div class="hero-actions">
-        <a href="#/login?as=user" class="btn btn-primary btn-lg heartbeat">🛡️ ${esc(t('need_safety'))}</a>
+        <a href="#/login?as=user" class="btn btn-primary btn-lg heartbeat"><svg class="woman-icon" viewBox="0 0 24 32" aria-hidden="true" focusable="false"><circle cx="12" cy="4.6" r="3.4"/><circle cx="14.6" cy="2.2" r="1.7"/><path d="M9.4 9.4h5.2c.9 0 1.6.6 1.8 1.4l3.4 11.4c.2.6-.3 1.2-.9 1.2h-3.3v6.5a1.3 1.3 0 0 1-2.6 0v-6.5h-2v6.5a1.3 1.3 0 0 1-2.6 0v-6.5H5.1c-.6 0-1.1-.6-.9-1.2L7.6 10.8c.2-.8.9-1.4 1.8-1.4z"/><path d="M7.4 11.6 4.6 17.4a1.1 1.1 0 0 0 2 1l2.1-4.6zM16.6 11.6l2.8 5.8a1.1 1.1 0 0 1-2 1l-2.1-4.6z"/></svg>${esc(t('need_safety'))}</a>
         <a href="#/login?as=volunteer" class="btn btn-secondary btn-lg">${esc(t('want_volunteer'))}</a>
       </div>
       ${isDemo() ? '<p class="muted">Demo accounts are pre-filled on the login screen.</p>' : ''}

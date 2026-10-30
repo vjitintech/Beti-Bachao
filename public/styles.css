@@ -243,3 +243,6 @@ body.strobe::after { content: ""; position: fixed; inset: 0; z-index: 40; pointe
 @media (prefers-color-scheme: dark) { .btn-medical { color: #5fdc9c; border-color: #3ccf82; } }
 
 .btn-medical-solid { background: #13834a; color: #fff; }
+
+.eb-main { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.woman-icon { width: 22px; height: 30px; fill: currentColor; flex: none; }
