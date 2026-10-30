@@ -1,9 +1,6 @@
 # Architecture
 
-Modular monolith. One engine (`public/core/engine.js`) holds every safety rule and is used by:
-
-- **Node server** (`server/server.js`) — authoritative in real deployments. Sessions (HttpOnly, SameSite=Strict cookies), scrypt passwords, TOTP MFA for operator/admin, CSRF header check, per-route rate limits, strict CSP/security headers, SSE realtime, 1 s durable scheduler, atomic JSON persistence.
-- **Standalone browser host** (`public/js/api.js` → `StandaloneApi`) — demo only, for static hosting.
+Modular monolith. One engine (`public/core/engine.js`) holds every safety rule; the Node server (`server/server.js`) is authoritative: sessions (HttpOnly, SameSite=Strict cookies), scrypt passwords, TOTP MFA with first-login enrolment for staff, CSRF header check, per-route rate limits, strict CSP/security headers, SSE realtime, Web Push (VAPID + aes128gcm, `server/webpush.js`), a 1 s durable scheduler, and atomic JSON persistence on a persistent disk (single instance). The PWA in `public/` is served by the same server (same origin).
 
 ## Incident state machine
 
@@ -38,7 +35,7 @@ stateDiagram-v2
 
 `incident.status`, `searchStage`, assignment status and `escalationStatus` are separate fields. Every transition stores actor, time, reason and source, and writes an audit event. Rejected transitions return 409 and are audited.
 
-**Duress PIN** → status `ESCALATION_REQUIRED`, `duress=true`, simulated escalation; the requester's view is masked as `USER_CANCELLED`.
+**Duress PIN** → status `ESCALATION_REQUIRED`, `duress=true`, operators alerted; the requester's view is masked as `USER_CANCELLED`.
 
 ## Durable timers
 Each open incident stores `stageDeadline`. The scheduler calls `engine.tick()` every second, which compares deadlines with the clock; because the deadline is persisted, a restart resumes correctly (tested). With Postgres, run the tick under `SELECT … FOR UPDATE SKIP LOCKED` for multiple workers.
@@ -53,3 +50,6 @@ Each open incident stores `stageDeadline`. The scheduler calls `engine.tick()` e
 | Alerted volunteer | distance band, ≈2 km grid area, severity, status — **no coordinates** |
 | Assigned volunteer | precise location, accuracy/age, vertical honesty note, battery, navigation link (access audited, throttled to 1/min) |
 | Operator/admin | everything incl. history, suspect flags, responder positions (audited) |
+
+## Notifications
+Every engine notification is delivered in-app (SSE) and, when the recipient has enabled alerts, as an encrypted Web Push: volunteers (new SOS nearby, stand-down), the woman (accepted, arrived, responder dropped) and all operators/admins (every escalation). Expired subscriptions (404/410) are removed automatically.

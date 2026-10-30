@@ -1,6 +1,7 @@
-// Beti Bachao API + static PWA server. Zero runtime dependencies (Node ≥ 20).
-//   node server/server.js                    production-style (MFA on, no demo routes)
-//   DEMO_MODE=true node server/server.js     seeded synthetic data + demo controls
+// Beti Bachao API + PWA server. Zero runtime dependencies (Node ≥ 20).
+//   ADMIN_EMAIL=… ADMIN_PASSWORD=… node server/server.js
+// The first admin is created from those variables on first start and sets up
+// two-step login (authenticator app) at first sign-in. See docs/DEPLOY.md.
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,7 +9,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Engine, EngineError, SIMULATED_LABEL } from '../public/core/engine.js';
 import { COUNTRIES } from '../public/core/config.js';
-import { seedDemo, refreshDemoVolunteers, simulateDemoMovement, DEMO_PASSWORD, DEMO_CENTER } from '../public/core/seed.js';
+import { generateVapidKeys, sendPush, isValidSubscription } from './webpush.js';
 import { JsonStore } from './store.js';
 import { uuid, sha256, hashPassword, verifyPassword, hashSecret, newTotpSecret, verifyTotp, totp, RateLimiter, securityHeaders } from './security.js';
 
@@ -17,31 +18,55 @@ const PUBLIC = path.join(ROOT, 'public');
 
 export function createServer(opts = {}) {
   const env = { ...process.env, ...opts.env };
-  const DEMO = env.DEMO_MODE === 'true';
   const MFA_REQUIRED = env.MFA_REQUIRED ? env.MFA_REQUIRED === 'true' : true;
   const SECURE = env.COOKIE_SECURE === 'true';
   const SESSION_TTL_MS = 12 * 3600 * 1000;
-  const store = new JsonStore(env.DATA_FILE || path.join(ROOT, 'data', DEMO ? 'demo-db.json' : 'db.json'));
+  const RATE_MULT = Math.max(1, Number(env.RATE_LIMIT_MULTIPLIER) || 1); // tests only
+  const store = new JsonStore(env.DATA_FILE || path.join(ROOT, 'data', 'db.json'));
   const limiter = new RateLimiter();
-  let demoMfaSecret = store.db.demoMfaSecret || null;
-  let clockOffset = 0;
-  const deps = { uuid, hash: sha256, hashSecret, now: () => Date.now() + clockOffset };
+  const deps = { uuid, hash: sha256, hashSecret, now: () => Date.now(), notify: (n) => { queuePush(n); return { ok: true }; } };
   let engine = new Engine(store.db, deps);
 
-  function seedIfNeeded() {
-    if (!store.fresh) return;
-    if (DEMO) {
-      demoMfaSecret = newTotpSecret();
-      store.db.demoMfaSecret = demoMfaSecret;
-      seedDemo(engine, { passwordHash: hashPassword(DEMO_PASSWORD), mfaSecret: demoMfaSecret });
-    } else if (env.ADMIN_EMAIL && env.ADMIN_PASSWORD) {
-      const secret = newTotpSecret();
-      engine.createUser({ displayName: 'Administrator', email: env.ADMIN_EMAIL, role: 'admin', passwordHash: hashPassword(env.ADMIN_PASSWORD), mfaSecret: secret });
-      console.log(`[bootstrap] admin created. TOTP secret (add to authenticator app, shown once): ${secret}`);
-    }
+  // ---------- first admin ----------
+  function bootstrapAdmin() {
+    if (store.db.users.some((u) => u.role === 'admin' && u.status === 'ACTIVE')) return;
+    if (!env.ADMIN_EMAIL || !env.ADMIN_PASSWORD) { console.warn('[bootstrap] No admin yet. Set ADMIN_EMAIL and ADMIN_PASSWORD (12+ chars) and restart.'); return; }
+    if (String(env.ADMIN_PASSWORD).length < 12) { console.warn('[bootstrap] ADMIN_PASSWORD must be at least 12 characters.'); return; }
+    const u = engine.createUser({ displayName: env.ADMIN_NAME || 'Administrator', email: env.ADMIN_EMAIL, role: 'admin', passwordHash: hashPassword(env.ADMIN_PASSWORD) });
+    if (env.ADMIN_MFA_SECRET) { u.mfaSecret = env.ADMIN_MFA_SECRET; u.mfaEnrolled = true; } else u.mfaEnrolled = false;
+    console.log(`[bootstrap] Admin ${u.email} created. Sign in to set up two-step login.`);
     store.save();
   }
-  seedIfNeeded();
+  bootstrapAdmin();
+
+  // ---------- web push ----------
+  store.db.pushSubs ||= [];
+  if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY) store.db.vapid = { publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY };
+  if (!store.db.vapid) { store.db.vapid = generateVapidKeys(); store.save(); }
+  const VAPID_SUBJECT = env.VAPID_SUBJECT || `mailto:${env.ADMIN_EMAIL || 'admin@localhost'}`;
+  const PUSH_TEXT = {
+    ALERT: (n) => ({ title: '🚨 SOS nearby — help needed', body: `A woman needs help about ${n.meta?.distanceKm ?? '?'} km from you. Tap to respond.`, url: '#/volunteer', tag: 'sos-' + n.incidentId, urgent: true }),
+    RESPONDER_ACCEPTED: () => ({ title: '✅ A verified volunteer is coming', body: 'Open Beti Bachao to see their distance and ETA.', url: '#/home', tag: 'status' }),
+    RESPONDER_ARRIVED: () => ({ title: '📍 Your volunteer has arrived', body: 'Confirm in the app when you are safe.', url: '#/home', tag: 'status' }),
+    RESPONDER_LOST: () => ({ title: '⚠️ A volunteer dropped out', body: 'We are finding another responder. Call 112 if you are in danger.', url: '#/home', tag: 'status' }),
+    INCIDENT_CANCELLED: () => ({ title: 'SOS cancelled', body: 'You can stand down. Thank you.', url: '#/volunteer', tag: 'stand-down' }),
+    INCIDENT_CLOSED: () => ({ title: '💚 She confirmed she is safe', body: 'You can stand down. Thank you for responding.', url: '#/volunteer', tag: 'stand-down' }),
+    UNASSIGNED_BY_OPERATOR: () => ({ title: 'You were stood down by an operator', body: 'Another responder has been assigned.', url: '#/volunteer', tag: 'stand-down' }),
+    ESCALATION: (n) => ({ title: '🚩 SOS needs an operator', body: `Escalation: ${String(n.meta?.type || '').replace(/_/g, ' ').toLowerCase()}. Open the operations console.`, url: '#/ops', tag: 'ops-' + n.incidentId, urgent: true }),
+  };
+  function queuePush(n) {
+    const make = PUSH_TEXT[n.kind];
+    if (!make) return;
+    const subs = store.db.pushSubs.filter((x) => x.userId === n.recipientId);
+    if (!subs.length) return;
+    const payload = make(n);
+    for (const sub of subs) {
+      sendPush(sub, payload, { vapid: store.db.vapid, subject: VAPID_SUBJECT, urgency: payload.urgent ? 'high' : 'normal' }).then((r) => {
+        if (r.gone) { store.db.pushSubs = store.db.pushSubs.filter((x) => x.endpoint !== sub.endpoint); store.markDirty(); }
+        else if (!r.ok) engine.audit('system', 'PUSH_FAILED', 'notification', n.id, `status ${r.status}`);
+      }).catch((e) => console.error('[push]', e.message));
+    }
+  }
 
   // ---------- realtime (SSE) ----------
   const clients = new Set();
@@ -71,9 +96,8 @@ export function createServer(opts = {}) {
   // ---------- durable scheduler ----------
   const timer = setInterval(() => {
     try {
-      if (DEMO) { refreshDemoVolunteers(engine); simulateDemoMovement(engine); }
       const changed = engine.tick();
-      if (changed.length || DEMO) store.markDirty();
+      if (changed.length) store.markDirty();
       store.flush();
       broadcast();
     } catch (err) { console.error('[scheduler]', err); }
@@ -129,24 +153,40 @@ export function createServer(opts = {}) {
     routes.push({ method, re, keys, handler, auth, limit });
   };
 
-  route('GET', '/health', () => ({ ok: true, demo: DEMO, time: new Date(deps.now()).toISOString(), auditChain: engine.verifyAuditChain().ok }), { auth: false });
-  route('GET', '/public-config', () => ({ demo: DEMO, mfaRequired: MFA_REQUIRED, countries: COUNTRIES, defaultCountry: engine.cfg.countryCode, simulatedLabel: SIMULATED_LABEL, demoCenter: DEMO ? DEMO_CENTER : null, radiusStagesKm: engine.cfg.radiusStagesKm }), { auth: false });
+  route('GET', '/health', () => ({ ok: true, time: new Date(deps.now()).toISOString(), auditChain: engine.verifyAuditChain().ok }), { auth: false });
+  route('GET', '/public-config', () => ({ demo: false, mfaRequired: MFA_REQUIRED, countries: COUNTRIES, defaultCountry: engine.cfg.countryCode, simulatedLabel: SIMULATED_LABEL, radiusStagesKm: engine.cfg.radiusStagesKm, vapidPublicKey: store.db.vapid.publicKey }), { auth: false });
 
   route('POST', '/auth/register', async ({ body, res }) => {
     if (!['user', 'volunteer'].includes(body.role)) throw new EngineError(400, 'INVALID_ROLE', 'Only user or volunteer accounts can self-register');
-    if (typeof body.password !== 'string' || body.password.length < 8) throw new EngineError(400, 'WEAK_PASSWORD', 'Password must be at least 8 characters');
+    if (typeof body.password !== 'string' || body.password.length < 10) throw new EngineError(400, 'WEAK_PASSWORD', 'Password must be at least 10 characters');
+    if (body.consent !== true) throw new EngineError(400, 'CONSENT_REQUIRED', 'Please accept the location-sharing notice');
     const u = engine.createUser({ displayName: body.displayName, email: body.email, role: body.role, passwordHash: hashPassword(body.password), countryCode: COUNTRIES[body.countryCode] ? body.countryCode : null });
+    u.consentAt = new Date().toISOString();
+    engine.audit(u.id, 'CONSENT_RECORDED', 'user', u.id, 'location sharing during SOS');
     res.setHeader('Set-Cookie', startSession(res, u));
     return { user: meView(u) };
-  }, { auth: false, limit: [5, 3600e3] });
+  }, { auth: false, limit: [20, 3600e3] });
 
   route('POST', '/auth/login', async ({ body, res }) => {
     const u = store.db.users.find((x) => x.email === String(body.email || '').trim().toLowerCase());
     const okPw = u && u.status === 'ACTIVE' && verifyPassword(body.password || '', u.passwordHash);
     if (!okPw) { engine.audit(u?.id || 'anonymous', 'LOGIN_FAILED', 'user', u?.id || 'unknown'); throw new EngineError(401, 'INVALID_CREDENTIALS', 'Email or password is incorrect'); }
     if (['operator', 'admin'].includes(u.role) && MFA_REQUIRED) {
-      if (!body.mfaCode) return { mfaRequired: true };
-      if (!verifyTotp(u.mfaSecret, body.mfaCode)) { engine.audit(u.id, 'MFA_FAILED', 'user', u.id); throw new EngineError(401, 'INVALID_MFA', 'Authenticator code is incorrect'); }
+      if (!u.mfaEnrolled) {
+        // First staff sign-in: enrol an authenticator app before any access.
+        if (!u.pendingMfaSecret || !body.mfaCode) {
+          u.pendingMfaSecret ||= newTotpSecret();
+          store.markDirty();
+          const label = encodeURIComponent(`Beti Bachao:${u.email}`);
+          return { mfaEnroll: { secret: u.pendingMfaSecret, otpauthUri: `otpauth://totp/${label}?secret=${u.pendingMfaSecret}&issuer=Beti%20Bachao&algorithm=SHA1&digits=6&period=30` } };
+        }
+        if (!verifyTotp(u.pendingMfaSecret, body.mfaCode)) { engine.audit(u.id, 'MFA_ENROLL_FAILED', 'user', u.id); throw new EngineError(401, 'INVALID_MFA', 'Code does not match. Check the key and your phone clock.'); }
+        u.mfaSecret = u.pendingMfaSecret; u.pendingMfaSecret = null; u.mfaEnrolled = true;
+        engine.audit(u.id, 'MFA_ENROLLED', 'user', u.id);
+      } else {
+        if (!body.mfaCode) return { mfaRequired: true };
+        if (!verifyTotp(u.mfaSecret, body.mfaCode)) { engine.audit(u.id, 'MFA_FAILED', 'user', u.id); throw new EngineError(401, 'INVALID_MFA', 'Authenticator code is incorrect'); }
+      }
     }
     res.setHeader('Set-Cookie', startSession(res, u));
     engine.audit(u.id, 'LOGIN', 'user', u.id);
@@ -163,6 +203,30 @@ export function createServer(opts = {}) {
   route('GET', '/me/incidents', ({ actor }) => ({ items: engine.myIncidents(actor) }));
   route('GET', '/me/export', ({ actor }) => engine.exportMyData(actor));
   route('DELETE', '/me', ({ actor }) => { const r = engine.deleteMyAccount(actor); store.db.sessions = store.db.sessions.filter((s) => s.userId !== actor.id); return r; });
+
+  route('POST', '/me/push-subscriptions', ({ actor, body }) => {
+    const endpoint = String(body.endpoint || '');
+    if (!/^https:\/\//.test(endpoint) || endpoint.length > 1000 || !body.keys?.p256dh || !body.keys?.auth || !isValidSubscription({ keys: body.keys })) throw new EngineError(400, 'INVALID_SUBSCRIPTION');
+    store.db.pushSubs = store.db.pushSubs.filter((x) => x.endpoint !== endpoint);
+    const mine = store.db.pushSubs.filter((x) => x.userId === actor.id);
+    if (mine.length >= 5) store.db.pushSubs = store.db.pushSubs.filter((x) => x !== mine[0]);
+    store.db.pushSubs.push({ userId: actor.id, endpoint, keys: { p256dh: String(body.keys.p256dh).slice(0, 200), auth: String(body.keys.auth).slice(0, 100) }, createdAt: new Date().toISOString() });
+    engine.audit(actor.id, 'PUSH_SUBSCRIBED', 'user', actor.id);
+    return { ok: true };
+  }, { limit: [20, 3600e3] });
+  route('GET', '/admin/staff', ({ actor }) => ({ items: engine.listStaff(actor) }));
+  route('GET', '/admin/backup', ({ actor, res }) => {
+    engine.requireRole(actor, 'admin');
+    engine.audit(actor.id, 'BACKUP_DOWNLOADED', 'system', 'db');
+    res.setHeader('Content-Disposition', `attachment; filename="beti-bachao-backup-${new Date().toISOString().slice(0, 10)}.json"`);
+    const { sessions, ...rest } = store.db; // never export live session tokens
+    return rest;
+  }, { limit: [10, 3600e3] });
+  route('POST', '/admin/staff', ({ actor, body }) => {
+    if (typeof body.password !== 'string' || body.password.length < 12) throw new EngineError(400, 'WEAK_PASSWORD', 'Temporary password must be at least 12 characters');
+    return engine.createStaff(actor, { displayName: body.displayName, email: body.email, role: body.role, passwordHash: hashPassword(body.password) });
+  }, { limit: [30, 3600e3] });
+  route('POST', '/admin/staff/:id/status', ({ actor, p, body }) => { const r = engine.setStaffStatus(actor, p.id, body.status); if (body.status !== 'ACTIVE') store.db.sessions = store.db.sessions.filter((x) => x.userId !== p.id); return r; });
 
   route('GET', '/volunteer/profile', ({ actor }) => engine.volunteerProfile(actor));
   route('PATCH', '/volunteer/availability', ({ actor, body }) => engine.setAvailability(actor, body), { limit: [120, 600e3] });
@@ -194,32 +258,12 @@ export function createServer(opts = {}) {
   route('GET', '/admin/abuse-reports', ({ actor }) => ({ items: engine.listAbuse(actor) }));
   route('POST', '/admin/abuse-reports/:id/resolve', ({ actor, p, body }) => engine.resolveAbuse(actor, p.id, body));
   route('GET', '/admin/integrations', ({ actor }) => { engine.requireRole(actor, 'admin', 'operator'); return { items: [
-    { name: 'Emergency services (112 / ERSS)', status: 'SIMULATED', note: SIMULATED_LABEL },
-    { name: 'Push notifications', status: 'IN_APP_ONLY', note: 'In-app + SSE. FCM/APNs adapter not connected.' },
-    { name: 'SMS gateway', status: 'NOT_CONNECTED', note: 'User device composes SMS to trusted contacts.' },
-    { name: 'Identity verification', status: 'MOCK', note: 'No real ID collected. Production provider needs legal review.' },
-    { name: 'Routing / ETA provider', status: 'NOT_CONNECTED', note: 'Straight-line × road factor; always labelled approximate.' },
+    { name: 'Police / ambulance (112)', status: 'MANUAL', note: 'Not contacted automatically. Operators phone 112 and record the handoff in the console.' },
+    { name: 'Phone push notifications', status: 'ACTIVE', note: `${store.db.pushSubs.length} device(s) subscribed. Android Chrome; iPhone only when installed to Home Screen (iOS 16.4+).` },
+    { name: 'SMS to trusted contacts', status: 'ON DEVICE', note: "Opens the user's own SMS app pre-filled; no SMS gateway." },
+    { name: 'Volunteer identity verification', status: 'MANUAL', note: 'Trust team verifies ID by video call / in person; no ID documents stored.' },
+    { name: 'Route ETA', status: 'ESTIMATE', note: 'Straight-line × road factor; always labelled approximate.' },
   ] }; });
-
-  if (DEMO) {
-    const demoOnly = (fn) => (ctx) => fn(ctx);
-    route('GET', '/demo/accounts', () => ({ password: DEMO_PASSWORD, accounts: store.db.users.filter((u) => u.demo).map((u) => ({ email: u.email, role: u.role, displayName: u.displayName })) }), { auth: false });
-    route('GET', '/demo/mfa-code', () => ({ code: demoMfaSecret ? totp(demoMfaSecret) : null, note: 'Demo only — production uses an authenticator app' }), { auth: false });
-    route('POST', '/demo/advance', demoOnly(({ body }) => { const s = Math.max(1, Math.min(600, Number(body.seconds) || 30)); clockOffset += s * 1000; refreshDemoVolunteers(engine); return { changed: engine.tick(), clockOffsetSec: clockOffset / 1000 }; }));
-    route('POST', '/demo/fail-notifications', demoOnly(({ body }) => { store.db.demo.failNextNotifications = Math.max(0, Math.min(20, Number(body.count) || 1)); return { pending: store.db.demo.failNextNotifications }; }));
-    route('POST', '/demo/relocate-volunteers', demoOnly(({ body }) => { refreshDemoVolunteers(engine, { lat: Number(body.lat), lng: Number(body.lng) }); return { ok: true }; }));
-    route('POST', '/demo/volunteer-action', demoOnly(({ body }) => {
-      const v = store.db.users.find((u) => u.email === body.email && u.role === 'volunteer' && u.demo);
-      if (!v) throw new EngineError(404, 'NOT_FOUND', 'Demo volunteer not found');
-      const a = { id: v.id };
-      if (body.action === 'ACCEPT') return engine.acceptIncident(a, body.incidentId);
-      if (body.action === 'DECLINE') return engine.declineIncident(a, body.incidentId, { reason: 'demo' });
-      const asg = store.db.assignments.find((x) => x.incidentId === body.incidentId && x.volunteerId === v.id && ['ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ASSISTING'].includes(x.status));
-      if (!asg) throw new EngineError(409, 'NOT_ASSIGNED', 'That volunteer is not assigned');
-      return engine.updateAssignment(a, asg.id, { status: body.action, reason: 'demo' });
-    }));
-    route('POST', '/demo/reset', demoOnly(() => { store.reset(); engine = new Engine(store.db, deps); clockOffset = 0; seedIfNeeded(); lastBroadcastSeq = 0; return { ok: true }; }));
-  }
 
   // ---------- static ----------
   const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8' };
@@ -261,7 +305,7 @@ export function createServer(opts = {}) {
       if (req.method !== 'GET' && req.headers['x-bb-csrf'] !== '1') throw new EngineError(403, 'CSRF', 'Missing CSRF header');
       const actor = sessionUser(req);
       if (r.auth && !actor) throw new EngineError(401, 'UNAUTHENTICATED', 'Please log in');
-      if (r.limit && !limiter.check(`${r.re}:${actor?.id || ip(req)}`, r.limit[0], r.limit[1])) throw new EngineError(429, 'RATE_LIMITED', 'Too many requests. In an emergency call your local emergency number.');
+      if (r.limit && !limiter.check(`${r.re}:${actor?.id || ip(req)}`, r.limit[0] * RATE_MULT, r.limit[1])) throw new EngineError(429, 'RATE_LIMITED', 'Too many requests. In an emergency call your local emergency number.');
       const m = url.pathname.match(r.re);
       const p = Object.fromEntries(r.keys.map((k, i) => [k, m[i + 1]]));
       const body = req.method === 'GET' ? {} : await readBody(req);
@@ -285,7 +329,7 @@ export function createServer(opts = {}) {
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   const port = Number(process.env.PORT || 8080);
   const { server } = createServer();
-  server.listen(port, () => console.log(`Beti Bachao listening on http://localhost:${port}${process.env.DEMO_MODE === 'true' ? '  (DEMO MODE — synthetic data, simulated dispatch)' : ''}`));
+  server.listen(port, () => console.log(`Beti Bachao listening on port ${port}`));
   const stop = () => server.close(() => process.exit(0));
   process.on('SIGINT', stop); process.on('SIGTERM', stop);
 }

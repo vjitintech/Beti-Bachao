@@ -1,9 +1,8 @@
-import { createApi, uuid } from './api.js?v=mvuj58r6';
-import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mvuj58r6';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mvuj58r6';
-import { geo, syntheticLocation, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mvuj58r6';
-import { TRAINING_MODULES } from '../core/engine.js?v=mvuj58r6';
-import { DEMO_BLURBS } from '../core/seed.js?v=mvuj58r6';
+import { createApi, uuid } from './api.js?v=mvukvmhy';
+import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mvukvmhy';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mvukvmhy';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mvukvmhy';
+import { TRAINING_MODULES } from '../core/engine.js?v=mvukvmhy';
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'policy', volSel: null };
 const app = () => $('#app');
@@ -17,7 +16,7 @@ const medicalNumber = () => (country().extra || []).find((h) => h.medical)?.numb
 const telHref = (n) => `tel:${String(n).replace(/[^\d+]/g, '')}`;
 const showErr = (e) => toast(e?.message || 'Something went wrong', 'error', 5000);
 const go = (hash) => { if (location.hash === hash) render(); else location.hash = hash; };
-const isDemo = () => !!st.cfg?.demo;
+
 const roleHome = (role) => ({ user: '#/home', volunteer: '#/volunteer', operator: '#/ops', admin: '#/admin' }[role] || '#/');
 const statusText = (v) => {
   if (!v) return '';
@@ -67,7 +66,33 @@ function trackingCard(list, center, radii, { title = 'Live tracking', map = true
       ${ppiTable(rows)}</div>
       <ul class="track-list">${list.map((r) => `<li class="track-row ${r.isYou ? 'is-you' : ''}"><span class="track-who"><strong>${esc(r.label)}</strong> ${r.verified ? '<span class="badge badge-ok">Verified</span>' : ''}<br><small>${esc(pretty(r.status))}${r.locationUpdatedAt ? ` · GPS <span data-live="age" data-fmt="short" data-at="${esc(r.locationUpdatedAt)}"></span> ago` : ''}</small></span></li>`).join('')}</ul>`
       : `<p class="muted">${esc(t('status_red'))}</p>`}
-    <p class="muted small">Range = distance from her, bearing = direction from her (000° = north). Live from each responder's phone GPS; ETA is a straight-line estimate.${isDemo() ? ' Demo volunteers travel at a sped-up 120 km/h once "on my way".' : ''} ${esc(note)}</p></section>`;
+    <p class="muted small">Range = distance from her, bearing = direction from her (000° = north). Live from each responder's phone GPS; ETA is a straight-line estimate. ${esc(note)}</p></section>`;
+}
+
+// Phone push notifications (Web Push). Volunteers need this to hear about an SOS
+// when the app isn't open. iPhone: only after "Add to Home Screen" (iOS 16.4+).
+function pushState() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !st.cfg?.vapidPublicKey) return 'unsupported';
+  return Notification.permission;
+}
+function pushCard(why) {
+  const ps = pushState();
+  if (ps === 'granted' && store.get('pushOk', false)) return '';
+  if (ps === 'unsupported') return `<div class="alert alert-warn">🔔 This browser can't receive SOS alerts in the background. ${/iPhone|iPad/.test(navigator.userAgent) ? 'On iPhone: tap Share → "Add to Home Screen", open Beti Bachao from there, then enable alerts.' : 'Use Chrome on Android, or keep this app open.'}</div>`;
+  if (ps === 'denied') return `<div class="alert alert-warn">🔔 Notifications are blocked for this site. Allow them in your browser's site settings to receive SOS alerts.</div>`;
+  return `<button class="alert alert-info alert-link push-cta" data-act="enable-push">🔔 ${esc(why)} — tap to enable</button>`;
+}
+const b64ToU8 = (b) => { const p = '='.repeat((4 - (b.length % 4)) % 4); const raw = atob((b + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from([...raw].map((c) => c.charCodeAt(0))); };
+async function enablePush(silent = false) {
+  try {
+    if (pushState() === 'unsupported') return false;
+    if (Notification.permission !== 'granted' && (silent || (await Notification.requestPermission()) !== 'granted')) return false;
+    const reg = await navigator.serviceWorker.ready;
+    const sub = (await reg.pushManager.getSubscription()) || (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(st.cfg.vapidPublicKey) }));
+    await st.api.savePushSubscription(sub.toJSON());
+    store.set('pushOk', true);
+    return true;
+  } catch (e) { if (!silent) toast('Could not enable alerts: ' + (e.message || e), 'error'); return false; }
 }
 
 function emergencyBar() {
@@ -88,10 +113,9 @@ function shell(content, { nav = true } = {}) {
     operator: [['#/ops', '🛰️', 'Operations'], ['#/settings', '⚙️', t('settings')]],
     admin: [['#/admin', '🗂️', 'Admin'], ['#/ops', '🛰️', 'Operations'], ['#/settings', '⚙️', t('settings')]],
   }[role] || [];
-  if (role && isDemo()) links.push(['#/demo', '🧪', 'Demo']);
   const cur = location.hash.split('/').slice(0, 2).join('/');
   return `
-    ${isDemo() ? `<div class="demo-banner" role="note">🧪 ${esc(t('demo_banner'))}${st.cfg.standalone ? ' · Standalone (in-browser) mode' : ''}</div>` : ''}
+    ${st.offline ? `<div class="offline-banner" role="alert">⚠️ Can't reach the Beti Bachao server. Your SOS will be queued; call ${esc(country().emergency)} now if you are in danger.</div>` : ''}
     <header class="topbar">
       <a href="${role ? roleHome(role) : '#/'}" class="brand" aria-label="Beti Bachao home"><img src="icons/icon.svg" alt="" width="28" height="28"><span>Beti Bachao</span></a>
       <div class="topbar-right">
@@ -116,7 +140,6 @@ function viewLanding() {
         <a href="#/login?as=user" class="btn btn-primary btn-lg heartbeat"><svg class="woman-icon" viewBox="0 0 24 32" aria-hidden="true" focusable="false"><circle cx="12" cy="4.6" r="3.4"/><circle cx="14.6" cy="2.2" r="1.7"/><path d="M9.4 9.4h5.2c.9 0 1.6.6 1.8 1.4l3.4 11.4c.2.6-.3 1.2-.9 1.2h-3.3v6.5a1.3 1.3 0 0 1-2.6 0v-6.5h-2v6.5a1.3 1.3 0 0 1-2.6 0v-6.5H5.1c-.6 0-1.1-.6-.9-1.2L7.6 10.8c.2-.8.9-1.4 1.8-1.4z"/><path d="M7.4 11.6 4.6 17.4a1.1 1.1 0 0 0 2 1l2.1-4.6zM16.6 11.6l2.8 5.8a1.1 1.1 0 0 1-2 1l-2.1-4.6z"/></svg>${esc(t('need_safety'))}</a>
         <a href="#/login?as=volunteer" class="btn btn-secondary btn-lg">${esc(t('want_volunteer'))}</a>
       </div>
-      ${isDemo() ? '<p class="muted">Demo accounts are pre-filled on the login screen.</p>' : ''}
     </section>
     ${emergencyBar()}
     <section class="cards-3">
@@ -125,52 +148,50 @@ function viewLanding() {
       <div class="card"><h3>✅ Never "safe" without you</h3><p>Arrival never closes an SOS. Only your explicit "Yes, I am safe" — or an audited operator exception — ends it.</p></div>
     </section>
     <section class="card limits">
-      <h3>Honest limits of this MVP</h3>
+      <h3>Please know</h3>
       <ul>
-        <li><strong>Not an emergency service.</strong> Emergency-service dispatch is <strong>${esc(st.cfg?.simulatedLabel || 'SIMULATED')}</strong> until an approved integration exists. Always call your local emergency number in immediate danger.</li>
+        <li><strong>Not a replacement for 112.</strong> Beti Bachao does not automatically contact police or ambulance. Our operators may call them for you, but in immediate danger always call your local emergency number yourself.</li>
         <li>Location accuracy depends on your device. We show accuracy, age and "floor unknown" honestly — never a fake precise position.</li>
         <li>Browsers cannot send SMS silently. "Text my contacts" opens your SMS app pre-filled; you press send.</li>
-        <li>Translations are drafts pending native-speaker review.</li>
+        <li>Volunteers are verified people, not police. They are trained to help you reach safety and to call emergency services — never to fight.</li>
       </ul>
     </section>
   `);
 }
 
 async function viewLogin(params) {
-  let demo = null;
-  if (isDemo()) { try { demo = await st.api.demoAccounts(); } catch {} }
   const want = params.get('as');
-  const accounts = (demo?.accounts || []).filter((a) => !want || a.role === want || want === 'all');
-  const groups = ['user', 'volunteer', 'operator', 'admin'].map((r) => [r, (demo?.accounts || []).filter((a) => a.role === r)]);
   return shell(`
     <section class="narrow">
       <h1>${esc(t('login'))}</h1>
-      ${demo ? `<div class="card"><h3>Demo accounts</h3><p class="muted">Synthetic people only. ${st.cfg.standalone ? 'No password needed in standalone mode.' : `Password: <code>${esc(demo.password)}</code>. Operator/Admin need the demo MFA code (auto-filled).`}</p>
-        ${groups.map(([r, list]) => list.length ? `<div class="demo-group"><h4>${esc(pretty(r))}</h4><div class="chip-row">${list.map((a) => `<button class="chip ${accounts.includes(a) && want ? 'chip-hl' : ''}" data-act="demo-login" data-email="${esc(a.email)}" data-role="${esc(a.role)}"><span class="chip-name">${esc(a.displayName.replace(/ \(.*\)$/, ''))}</span>${DEMO_BLURBS[a.email] ? `<small class="chip-blurb">${esc(DEMO_BLURBS[a.email])}</small>` : ''}</button>`).join('')}</div></div>` : '').join('')}
-      </div>` : ''}
       <form class="card form" data-form="login" autocomplete="on">
         <label>Email<input name="email" type="email" required autocomplete="username"></label>
-        <label>Password<input name="password" type="password" ${st.cfg?.standalone ? '' : 'required'} autocomplete="current-password"></label>
-        <label class="mfa hidden">Authenticator code (operators/admins)<input name="mfaCode" inputmode="numeric" pattern="\\d{6}" autocomplete="one-time-code"></label>
+        <label>Password<input name="password" type="password" required autocomplete="current-password"></label>
+        <div class="mfa-enroll hidden card"><h3>Set up two-step login</h3>
+          <p class="small">Operators and admins must use an authenticator app (Google Authenticator, Microsoft Authenticator, Authy…). Add a new account in the app using this key, then enter the 6-digit code it shows:</p>
+          <p class="phrase mfa-secret"></p><p class="small"><a class="mfa-uri" href="#">Open in authenticator app</a></p></div>
+        <label class="mfa hidden">Authenticator code<input name="mfaCode" inputmode="numeric" pattern="\\d{6}" autocomplete="one-time-code"></label>
         <button class="btn btn-primary" type="submit">${esc(t('login'))}</button>
-        <p class="muted">New here? <a href="#/register">Create an account</a></p>
+        <p class="muted">New here? <a href="#/register${want ? `?as=${esc(want)}` : ''}">Create an account</a></p>
       </form>
     </section>`);
 }
 
-function viewRegister() {
+function viewRegister(params) {
+  const asVol = params?.get('as') === 'volunteer';
   return shell(`
     <section class="narrow">
       <h1>Create account</h1>
       <form class="card form" data-form="register">
         <label>Display name<input name="displayName" required maxlength="60"></label>
         <label>Email<input name="email" type="email" required></label>
-        ${st.cfg?.standalone ? '' : '<label>Password (8+ characters)<input name="password" type="password" minlength="8" required></label>'}
+        <label>Password (10+ characters)<input name="password" type="password" minlength="10" required autocomplete="new-password"></label>
         <fieldset><legend>I am joining as</legend>
-          <label class="radio"><input type="radio" name="role" value="user" checked> Someone who wants safety tools</label>
-          <label class="radio"><input type="radio" name="role" value="volunteer"> A volunteer responder (verification + training required)</label>
+          <label class="radio"><input type="radio" name="role" value="user" ${asVol ? '' : 'checked'}> ${esc(t('need_safety'))}</label>
+          <label class="radio"><input type="radio" name="role" value="volunteer" ${asVol ? 'checked' : ''}> ${esc(t('want_volunteer'))} (identity check + training required)</label>
         </fieldset>
         <label>Country<select name="countryCode">${Object.entries(st.cfg.countries).map(([c, v]) => `<option value="${c}" ${c === 'IN' ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></label>
+        <label class="switch"><input type="checkbox" name="consent" required> I agree that when I raise an SOS my live location is shared with verified volunteers who accept it and with Beti Bachao operators, and that this app does not automatically contact police or ambulance.</label>
         <button class="btn btn-primary" type="submit">Create account</button>
       </form>
     </section>`);
@@ -183,27 +204,22 @@ function locationCard(loc, { live = false } = {}) {
     return `<div class="card loc-card"><div class="loc-head"><strong>📍 ${esc(t('location'))}</strong><span class="badge badge-warn">${esc(t('location_off'))}</span></div>
       <p class="muted">${geo.supported ? 'Location helps volunteers find you. You can still send SOS without it.' : 'This browser has no location support.'}</p>
       ${geo.supported ? `<button class="btn btn-secondary" data-act="share-location">${esc(t('allow_location'))}</button>` : ''}
-      ${isDemo() ? `<label class="switch"><input type="checkbox" data-change="synthetic" ${p.synthetic ? 'checked' : ''}> Use synthetic demo location (Kurnool)</label>` : ''}</div>`;
+</div>`;
   }
   const ageSec = loc.ageSec ?? Math.round((Date.now() - Date.parse(loc.observedAt)) / 1000);
   const staleNow = loc.stale || ageSec > 120;
   return `<div class="card loc-card">
-    <div class="loc-head"><strong>📍 ${esc(t('location'))}</strong><span class="badge ${loc.source === 'synthetic' ? 'badge-info' : 'badge-ok'}">${esc(loc.source === 'synthetic' ? 'Synthetic (demo)' : t('location_on'))}</span></div>
+    <div class="loc-head"><strong>📍 ${esc(t('location'))}</strong><span class="badge badge-ok">${esc(t('location_on'))}</span></div>
     <div class="loc-grid">
       <div><span class="k">${esc(t('accuracy', { m: loc.accuracyM }))}</span>${loc.lowAccuracy || loc.accuracyM > 100 ? `<span class="badge badge-warn">${esc(t('low_accuracy'))}</span>` : ''}</div>
       <div><span class="k" data-live="age" data-at="${esc(loc.observedAt)}"></span>${staleNow ? `<span class="badge badge-warn">${esc(t('stale'))}</span>` : ''}</div>
       <div class="full"><span class="k">${esc(loc.vertical || t('floor_unknown'))}</span>${loc.altitudeNote ? `<small class="muted">${esc(loc.altitudeNote)}</small>` : ''}</div>
     </div>
     ${live ? `<form class="inline-form" data-form="floor"><label>Floor (optional, if safe)<input name="floor" type="number" min="-5" max="200" inputmode="numeric"></label><button class="btn btn-ghost btn-sm">Add</button></form>` : ''}
-    ${isDemo() && !live ? `<label class="switch"><input type="checkbox" data-change="synthetic" ${p.synthetic ? 'checked' : ''}> Use synthetic demo location (Kurnool)</label>` : ''}
   </div>`;
 }
 
-function currentLoc() {
-  const p = prefs.get();
-  if (isDemo() && p.synthetic && st.cfg.demoCenter) return syntheticLocation(st.cfg.demoCenter);
-  return geo.last;
-}
+function currentLoc() { return geo.last; }
 
 async function viewHome() {
   let open = null;
@@ -260,7 +276,7 @@ async function triggerSOS({ severity = 'HIGH', silent = false, trigger = 'button
   // the phone's SMS app opens ready to send. The SOS continues in the background.
   if (!isRetry && prefs.get().autoSms && contacts.list().length) {
     const nums = contacts.list().map((c) => c.phone);
-    const loc0 = (isDemo() && prefs.get().synthetic && st.cfg.demoCenter) ? syntheticLocation(st.cfg.demoCenter) : geo.last;
+    const loc0 = geo.last;
     store.set('autoSmsAt', Date.now());
     openExternal(smsHref(nums, sosMessage(loc0)));
   }
@@ -269,14 +285,10 @@ async function triggerSOS({ severity = 'HIGH', silent = false, trigger = 'button
   if (!silent) toast(t('sending'), 'warn');
   let loc = null;
   const p = prefs.get();
-  if (isDemo() && p.synthetic && st.cfg.demoCenter) loc = syntheticLocation(st.cfg.demoCenter);
-  else {
+  {
     if (geo.last && Date.now() - Date.parse(geo.last.observedAt) < 30000) loc = geo.last;
     else { try { loc = await Promise.race([geo.once(6000), new Promise((r) => setTimeout(() => r(null), 4000))]); } catch { loc = null; } }
     geo.start();
-    // Demo only: if the phone can't get a GPS fix, use the synthetic area so the walkthrough still reaches volunteers.
-    if (isDemo() && !loc && st.cfg.demoCenter) loc = syntheticLocation(st.cfg.demoCenter);
-    if (isDemo() && loc && loc.source !== 'synthetic') { try { await st.api.demoRelocate(loc.lat, loc.lng); } catch {} }
   }
   const body = { idempotencyKey: pending.key, location: loc, severity: pending.severity, trigger: pending.trigger, silent: pending.silent, battery: await battery() };
   try {
@@ -366,6 +378,7 @@ async function viewIncident(id, params) {
     </section>
     ${open && v.status === 'LOCATION_UNAVAILABLE' ? `<div class="alert alert-danger" role="alert"><strong>📍 We don't have your location yet, so volunteers can't be matched.</strong> Call a number below now, and allow location for this site.<div class="row"><button class="btn btn-secondary" data-act="share-location">${esc(t('allow_location'))}</button></div></div>` : ''}
     ${open ? emergencyBar() : ''}
+    ${open ? pushCard('Get updates on your phone when a volunteer accepts or arrives') : ''}
     ${v.escalations?.length ? `<div class="alert alert-warn"><strong>Escalation:</strong> ${v.escalations.map((e) => `${esc(pretty(e.type))} — <em>${esc(e.label)}</em>`).join('<br>')}<p class="small">Call one of the numbers above yourself — this app has not contacted them.</p></div>` : ''}
     ${open ? `
     ${trackingCard(v.responders, v.location, v.radiusStagesKm, { title: t('responders') })}
@@ -386,10 +399,17 @@ async function viewIncident(id, params) {
   `);
 }
 
+let lastDutyPost = 0;
+async function streamDutyLocation() {
+  if (st.me?.role !== 'volunteer' || st.activeAsg || !store.get('onDuty', false) || Date.now() - lastDutyPost < 120000) return;
+  lastDutyPost = Date.now();
+  geo.start();
+  if (!geo.last) return;
+  try { await st.api.setAvailability({ location: geo.last }); } catch {}
+}
 let lastVolPost = 0;
 async function streamVolunteerLocation() {
   if (st.me?.role !== 'volunteer' || !st.activeAsg || Date.now() - lastVolPost < 10000) return;
-  if (isDemo() && prefs.get().synthetic) return; // demo volunteers' movement is simulated
   lastVolPost = Date.now();
   geo.start();
   if (!geo.last) return;
@@ -403,7 +423,6 @@ async function streamLocation() {
   const loc = currentLoc();
   if (!loc) return;
   st.lastLocPost = Date.now();
-  if (isDemo() && !v.location && loc.source !== 'synthetic') { try { await st.api.demoRelocate(loc.lat, loc.lng); } catch {} }
   try { await st.api.addLocation(v.id, loc); } catch {}
 }
 
@@ -517,13 +536,14 @@ async function viewVolunteer() {
   return shell(`
     ${fresh.length ? `<button class="alert alert-danger alert-link sos-incoming" data-act="vol-select" data-id="${esc(fresh[0].id)}">🚨 New SOS nearby (${esc(fresh[0].distanceBand)}) — tap to respond</button>` : ''}
     <h1>Volunteer</h1>
+    ${pushCard('Get SOS alerts even when the app is closed')}
     <section class="card">
       <div class="row space"><h2>Readiness</h2><span class="badge ${el.eligible ? 'badge-ok' : 'badge-warn'}">${el.eligible ? 'Ready to receive alerts' : 'Not receiving alerts'}</span></div>
       <ul class="checklist">
         ${check(prof.verificationStatus === 'VERIFIED' && !reasons.includes('verification expired'), `Identity verified (${pretty(prof.verificationStatus)})`)}
         ${check(!reasons.includes('training incomplete'), `Training ${prof.trainingCompleted.length}/${prof.trainingModules.length}`)}
         ${check(prof.available, 'Available')}
-        ${check(!reasons.includes('location stale'), 'Location shared in last 30 min')}
+        ${check(!reasons.includes('location stale'), 'Location shared recently')}
         ${check(!reasons.includes('busy on another incident'), 'Not on another incident')}
         ${reasons.includes('suspended') ? '<li class="no">⛔ Account suspended — contact the trust team</li>' : ''}
       </ul>
@@ -533,7 +553,7 @@ async function viewVolunteer() {
       </div>
     </section>
     ${prof.verificationStatus !== 'VERIFIED' ? `<section class="card"><h2>Identity verification</h2>
-      ${prof.verificationStatus === 'PENDING' ? '<p>Submitted. Waiting for admin review.</p>' : `<p class="muted">Demo uses a <strong>mock provider</strong>: no ID documents are collected. Production needs a lawful, reviewed provider plus background screening where permitted.</p><button class="btn btn-primary" data-act="vol-verify">Start verification</button>`}
+      ${prof.verificationStatus === 'PENDING' ? '<p>Submitted. Waiting for admin review.</p>' : `<p class="muted">The Beti Bachao trust team verifies every volunteer personally (ID shown on a video call or in person, plus a live check). <strong>Never upload ID documents in this app.</strong> Request verification and the team will contact you.</p><button class="btn btn-primary" data-act="vol-verify">Request verification</button>`}
     </section>` : ''}
     ${prof.trainingCompleted.length < prof.trainingModules.length ? `<section class="card"><h2>Training</h2><ul class="training">${prof.trainingModules.map((m) => `<li>${prof.trainingCompleted.includes(m.id) ? '✅' : `<button class="btn btn-ghost btn-sm" data-act="vol-train" data-id="${esc(m.id)}">Start</button>`} ${esc(m.title)}</li>`).join('')}</ul></section>` : ''}
     <section class="card"><h2>Alerts</h2>
@@ -647,7 +667,7 @@ function opsDetail(d, tl, cfg) {
 // ------------------------------------------------------------------ admin
 async function viewAdmin() {
   const tab = st.adminTab;
-  const tabs = [['policy', 'Policy'], ['volunteers', 'Volunteers'], ['abuse', 'Abuse reports'], ['audit', 'Audit log'], ['integrations', 'Integrations']];
+  const tabs = [['policy', 'Policy'], ['volunteers', 'Volunteers'], ['staff', 'Operators'], ['abuse', 'Abuse reports'], ['audit', 'Audit log'], ['integrations', 'Integrations']];
   let body = '';
   try {
     if (tab === 'policy') {
@@ -667,6 +687,15 @@ async function viewAdmin() {
           <td class="actions">${v.verificationStatus === 'PENDING' ? `<button class="btn btn-sm btn-primary" data-act="adm-review" data-id="${esc(v.userId)}" data-d="APPROVE">Approve</button><button class="btn btn-sm btn-ghost" data-act="adm-review" data-id="${esc(v.userId)}" data-d="REJECT">Reject</button>` : ''}
           ${v.suspendedReason ? `<button class="btn btn-sm btn-ghost" data-act="adm-review" data-id="${esc(v.userId)}" data-d="REINSTATE">Reinstate</button>` : `<button class="btn btn-sm btn-ghost danger-text" data-act="adm-review" data-id="${esc(v.userId)}" data-d="SUSPEND">Suspend</button>`}</td></tr>`).join('')}
         </tbody></table></section>`;
+    } else if (tab === 'staff') {
+      const { items } = await st.api.staffList();
+      body = `<section class="card"><h2>Operators & admins</h2><p class="muted">Operators watch live SOS incidents and record handoffs to police/ambulance. Every staff account must set up an authenticator app at first login.</p>
+        <table class="tbl"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>2-step</th><th>Status</th><th></th></tr></thead><tbody>${items.map((u) => `<tr><td>${esc(u.displayName)}</td><td>${esc(u.email)}</td><td>${esc(u.role)}</td><td>${u.mfaEnrolled ? '✅' : 'pending'}</td><td>${esc(u.status)}</td><td>${u.id !== st.me.id ? `<button class="btn btn-sm btn-ghost danger-text" data-act="adm-staff-toggle" data-id="${esc(u.id)}" data-s="${u.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE'}">${u.status === 'ACTIVE' ? 'Suspend' : 'Reactivate'}</button>` : ''}</td></tr>`).join('')}</tbody></table></section>
+        <form class="card form" data-form="add-staff"><h2>Add operator</h2>
+          <label>Name<input name="displayName" required maxlength="60"></label><label>Email<input name="email" type="email" required></label>
+          <label>Temporary password (12+ characters — share it privately)<input name="password" type="text" minlength="12" required autocomplete="off"></label>
+          <label>Role<select name="role"><option value="operator">Operator</option><option value="admin">Admin</option></select></label>
+          <button class="btn btn-primary">Create account</button></form>`;
     } else if (tab === 'abuse') {
       const { items } = await st.api.abuseList();
       body = `<section class="card"><h2>Abuse & safety reports</h2><ul class="history">${items.map((r) => `<li><strong>${esc(pretty(r.category))}</strong> by ${esc(r.reporter)} · ${esc(fmtTime(r.createdAt))} · ${esc(r.status)}<br>${esc(r.details)}${r.status === 'OPEN' ? ` <button class="btn btn-sm btn-ghost" data-act="adm-resolve" data-id="${esc(r.id)}">Resolve</button>` : ` <small>— ${esc(r.resolution || '')}</small>`}</li>`).join('') || '<li class="muted">No reports.</li>'}</ul></section>`;
@@ -676,37 +705,10 @@ async function viewAdmin() {
         <table class="tbl small"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Entity</th><th>Reason</th></tr></thead><tbody>${a.items.map((x) => `<tr><td>${esc(fmtTime(x.timestamp))}</td><td>${esc(x.actorId.slice(0, 8))}</td><td>${esc(x.action)}</td><td>${esc(x.entityType)}:${esc(String(x.entityId).slice(0, 8))}</td><td>${esc(x.reason || '')}</td></tr>`).join('')}</tbody></table></section>`;
     } else {
       const { items } = await st.api.integrations();
-      body = `<section class="card"><h2>Integration health</h2><ul class="history">${items.map((i) => `<li><strong>${esc(i.name)}</strong> <span class="badge ${i.status === 'SIMULATED' || i.status === 'MOCK' ? 'badge-warn' : 'badge-info'}">${esc(i.status)}</span><br><small>${esc(i.note)}</small></li>`).join('')}</ul></section>`;
+      body = `<section class="card"><h2>Backup</h2><p class="muted">Download a full copy of the data (contains personal and location data — store it encrypted, delete old copies). Do this daily during the pilot.</p><a class="btn btn-secondary" href="api/v1/admin/backup" download>⬇ Download backup</a></section><section class="card"><h2>Integration health</h2><ul class="history">${items.map((i) => `<li><strong>${esc(i.name)}</strong> <span class="badge ${i.status === 'SIMULATED' || i.status === 'MOCK' ? 'badge-warn' : 'badge-info'}">${esc(i.status)}</span><br><small>${esc(i.note)}</small></li>`).join('')}</ul></section>`;
     }
   } catch (e) { body = `<div class="alert alert-danger">${esc(e.message)}</div>`; }
   return shell(`<h1>Admin & trust</h1><div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" aria-selected="${k === tab}" class="tab ${k === tab ? 'active' : ''}" data-act="adm-tab" data-tab="${k}">${esc(l)}</button>`).join('')}</div>${body}`);
-}
-
-// ------------------------------------------------------------------ demo
-function viewDemo() {
-  const last = store.get('lastIncident', '');
-  const vols = [['asha@demo.betibachao.app', 'Asha (3 km)'], ['ravi@demo.betibachao.app', 'Ravi (7.5 km)'], ['meena@demo.betibachao.app', 'Meena (14 km)'], ['imran@demo.betibachao.app', 'Imran (24 km)']];
-  return shell(`
-    <h1>🧪 Demo controls</h1>
-    <section class="card"><h2>Suggested walkthrough</h2><ol>
-      <li>Log in as <b>Aamani</b> → hold SOS (synthetic Kurnool location). Watch the 10 km search.</li>
-      <li>Advance time to see 10 → 20 → 30 km expansion, or act as a volunteer below.</li>
-      <li>Open a second tab, log in as <b>Asha</b> (volunteer): note she only sees an approximate area until she accepts.</li>
-      <li>Open a third tab as <b>Operator</b>: radar, escalations labelled <em>SIMULATED</em>, manual handoff record.</li>
-      <li>As Aamani choose "I need more help" (escalates) and later "Yes, I am safe" → GREEN and closed.</li>
-      <li>Try the duress PIN: set PINs in Settings, then cancel with the duress PIN — Aamani sees "cancelled", the operator sees 🚩 DURESS.</li>
-    </ol></section>
-    <section class="card"><h2>Clock & failures</h2><div class="row">
-      <button class="btn btn-secondary" data-act="demo-advance" data-s="30">+30 s</button><button class="btn btn-secondary" data-act="demo-advance" data-s="60">+60 s</button><button class="btn btn-secondary" data-act="demo-advance" data-s="180">+3 min</button>
-      <button class="btn btn-ghost" data-act="demo-fail">Fail next notification</button>
-      <button class="btn btn-ghost" data-act="demo-relocate">Move volunteers around my real GPS</button></div></section>
-    <form class="card form" data-form="demo-vol"><h2>Act as a demo volunteer</h2>
-      <label>Incident ID<input name="incidentId" value="${esc(last)}" required></label>
-      <label>Volunteer<select name="email">${vols.map(([e, l]) => `<option value="${e}">${esc(l)}</option>`).join('')}</select></label>
-      <label>Action<select name="action"><option>ACCEPT</option><option>EN_ROUTE</option><option>ARRIVED</option><option>ASSISTING</option><option value="UNABLE">UNABLE (drop out)</option><option>DECLINE</option></select></label>
-      <button class="btn btn-primary">Run</button></form>
-    <section class="card"><h2>Reset</h2><p class="muted">Wipes all demo data and re-seeds synthetic accounts.</p><button class="btn btn-ghost danger-text" data-act="demo-reset">Reset demo data</button></section>
-  `);
 }
 
 // ------------------------------------------------------------------ router
@@ -720,8 +722,8 @@ async function render() {
   st.incident = null;
   switch (parts[0]) {
     case undefined: html = st.me ? null : viewLanding(); if (!html) return go(roleHome(st.me.role)); break;
-    case 'login': html = await viewLogin(params); break;
-    case 'register': html = viewRegister(); break;
+    case 'login': if (st.me) return go(roleHome(st.me.role)); html = await viewLogin(params); break;
+    case 'register': html = viewRegister(params); break;
     case 'home': if (!guard(['user'])) return; html = await viewHome(); break;
     case 'incident': if (!guard(['user'])) return; html = await viewIncident(parts[1], params); st.pollTimer = setInterval(refreshSoft, 3000); break;
     case 'tools': if (!guard(['user'])) return; html = await viewTools(); break;
@@ -729,7 +731,6 @@ async function render() {
     case 'volunteer': if (!guard(['volunteer'])) return; html = await viewVolunteer(); st.pollTimer = setInterval(refreshSoft, 3000); break;
     case 'ops': if (!guard(['operator', 'admin'])) return; html = await viewOps(); st.pollTimer = setInterval(refreshSoft, 3000); break;
     case 'admin': if (!guard(['admin'])) return; html = await viewAdmin(); break;
-    case 'demo': if (!guard()) return; html = viewDemo(); break;
     default: html = shell('<p>Page not found.</p>');
   }
   // Background refresh: only touch the screen when something actually changed.
@@ -747,7 +748,6 @@ async function render() {
   st.softRefresh = false;
   bindHold();
   updateLive();
-  if (parts[0] === 'login' && isDemo() && params.get('as')) $('[data-form="login"] [name="email"]')?.focus();
 }
 
 // Background refresh: swap only the blocks whose content changed, so the
@@ -811,19 +811,7 @@ function updateLive() {
 // ------------------------------------------------------------------ actions
 const actions = {
   async logout() { try { await st.api.logout(); } catch {} st.me = null; geo.stop(); go('#/'); },
-  async 'demo-login'(el) {
-    const email = el.dataset.email;
-    const f = $('[data-form="login"]');
-    f.email.value = email;
-    if (!st.cfg.standalone) f.password.value = 'demo1234';
-    if (['operator', 'admin'].includes(el.dataset.role) && st.cfg.mfaRequired) {
-      $('.mfa').classList.remove('hidden');
-      try { f.mfaCode.value = (await st.api.demoMfaCode()).code || ''; } catch {}
-    }
-    f.requestSubmit();
-  },
   async 'share-location'() {
-    prefs.set({ synthetic: false });
     try { await geo.once(); geo.start(); toast(t('location_on'), 'ok'); } catch (e) { toast(e.code === 1 ? 'Location permission denied. You can still send SOS and call.' : 'Could not get a location fix.', 'error', 6000); }
     render();
   },
@@ -878,15 +866,20 @@ const actions = {
     if (r.id !== 'send') return;
     try { await st.api.reportAbuse({ incidentId: el.dataset.id || null, category: r.data.category, details: r.data.details }); toast('Report sent to the trust team', 'ok'); } catch (e) { showErr(e); }
   },
+  async 'enable-push'() { if (await enablePush()) { toast('Alerts enabled on this phone', 'ok'); render(); } },
   // volunteer
-  async 'vol-avail'(el) { try { await st.api.setAvailability({ available: el.dataset.on === '1', location: await volLoc() }); render(); } catch (e) { showErr(e); } },
+  async 'vol-avail'(el) {
+    const on = el.dataset.on === '1';
+    const loc = on ? await volLoc() : null;
+    if (on && !loc) return toast('Allow location so nearby SOS alerts can reach you', 'error');
+    try { await st.api.setAvailability({ available: on, location: loc }); store.set('onDuty', on); if (on) enablePush(true); render(); } catch (e) { showErr(e); }
+  },
   async 'vol-locate'() { try { const loc = await volLoc(); if (!loc) return toast('No location available', 'error'); await st.api.setAvailability({ location: loc }); toast('Location updated', 'ok'); render(); } catch (e) { showErr(e); } },
   async 'vol-verify'() {
-    const words = ['river', 'mango', 'lotus', 'kite', 'temple', 'monsoon', 'peacock', 'saffron'];
-    const phrase = `${words[Math.floor(Math.random() * words.length)]} ${words[Math.floor(Math.random() * words.length)]} ${Math.floor(10 + Math.random() * 89)}`;
-    const r = await modal({ title: 'Live identity check (mock)', body: `<p>In production you would record yourself saying this random phrase, alongside a lawful ID check:</p><p class="phrase">“${esc(phrase)}”</p><p class="muted small">Demo: nothing is recorded or uploaded.</p>`, actions: [{ id: 'ok', label: 'Submit for review', kind: 'primary' }, { id: 'no', label: t('cancel') }] });
+    const r = await modal({ title: 'Request identity verification', body: `<label>Phone number for the trust team to call you<input name="phone" type="tel" required maxlength="20"></label><label>Your town / area<input name="area" maxlength="60"></label><p class="muted small">Your number is used only for verification. Do not send ID photos anywhere except to the verified team during the call.</p>`, actions: [{ id: 'ok', label: 'Send request', kind: 'primary' }, { id: 'no', label: t('cancel') }] });
     if (r.id !== 'ok') return;
-    try { await st.api.submitVerification({ liveChallengePhrase: phrase }); toast('Submitted for admin review', 'ok'); render(); } catch (e) { showErr(e); }
+    if (String(r.data.phone || '').replace(/\D/g, '').length < 8) return toast('Enter a valid phone number', 'error');
+    try { await st.api.submitVerification({ contactPhone: r.data.phone, area: r.data.area }); toast('Request sent. The trust team will contact you.', 'ok'); render(); } catch (e) { showErr(e); }
   },
   async 'vol-train'(el) {
     const m = TRAINING_MODULES.find((x) => x.id === el.dataset.id);
@@ -917,6 +910,7 @@ const actions = {
   },
   async 'op-escalate'(el) { try { await st.api.escalate(el.dataset.id, { type: 'OPERATOR', reason: 'Operator marked escalation required' }); render(); } catch (e) { showErr(e); } },
   // admin
+  async 'adm-staff-toggle'(el) { try { await st.api.setStaffStatus(el.dataset.id, el.dataset.s); render(); } catch (e) { showErr(e); } },
   'adm-tab'(el) { st.adminTab = el.dataset.tab; render(); },
   async 'adm-review'(el) {
     let reason = null;
@@ -924,15 +918,9 @@ const actions = {
     try { await st.api.reviewVolunteer(el.dataset.id, { decision: el.dataset.d, reason }); render(); } catch (e) { showErr(e); }
   },
   async 'adm-resolve'(el) { const r = await modal({ title: 'Resolve report', body: '<label>Resolution<input name="resolution" maxlength="300"></label>', actions: [{ id: 'go', label: 'Resolve', kind: 'primary' }, { id: 'no', label: t('cancel') }] }); if (r.id !== 'go') return; try { await st.api.resolveAbuse(el.dataset.id, { resolution: r.data.resolution }); render(); } catch (e) { showErr(e); } },
-  // demo
-  async 'demo-advance'(el) { try { await st.api.demoAdvance(Number(el.dataset.s)); toast(`Clock advanced ${el.dataset.s}s`, 'ok'); } catch (e) { showErr(e); } },
-  async 'demo-fail'() { try { await st.api.demoFail(1); toast('Next notification will fail (then fall back)', 'ok'); } catch (e) { showErr(e); } },
-  async 'demo-relocate'() { try { const l = await geo.once(); await st.api.demoRelocate(l.lat, l.lng); prefs.set({ synthetic: false }); toast('Demo volunteers moved around you', 'ok'); } catch { toast('Need location permission', 'error'); } },
-  async 'demo-reset'() { try { await st.api.demoReset(); store.set('lastIncident', ''); st.me = null; toast('Demo reset', 'ok'); go('#/login'); } catch (e) { showErr(e); } },
 };
 
 async function volLoc() {
-  if (isDemo() && prefs.get().synthetic) return null; // demo volunteers keep their seeded positions
   try { return await geo.once(8000); } catch { return null; }
 }
 
@@ -956,12 +944,19 @@ const forms = {
   async login(f) {
     try {
       const r = await st.api.login(f.email.value, f.password?.value, f.mfaCode?.value || undefined);
+      if (r.mfaEnroll) {
+        $('.mfa-enroll').classList.remove('hidden'); $('.mfa').classList.remove('hidden');
+        $('.mfa-secret').textContent = r.mfaEnroll.secret.replace(/(.{4})/g, '$1 ').trim();
+        $('.mfa-uri').href = r.mfaEnroll.otpauthUri;
+        f.mfaCode.focus(); return;
+      }
       if (r.mfaRequired) { $('.mfa').classList.remove('hidden'); f.mfaCode.focus(); toast('Enter your authenticator code', 'info'); return; }
       st.me = r.user; st.api.connect(); afterLogin();
     } catch (e) { showErr(e); }
   },
   async register(f) {
-    try { const r = await st.api.register({ displayName: f.displayName.value, email: f.email.value, password: f.password?.value, role: f.role.value, countryCode: f.countryCode.value }); st.me = r.user; st.api.connect(); afterLogin(); } catch (e) { showErr(e); }
+    if (!f.consent.checked) return toast('Please read and accept the location-sharing notice', 'warn');
+    try { const r = await st.api.register({ displayName: f.displayName.value, email: f.email.value, password: f.password.value, role: f.role.value, countryCode: f.countryCode.value, consent: true }); st.me = r.user; st.api.connect(); afterLogin(); } catch (e) { showErr(e); }
   },
   async pins(f) { try { await st.api.setPins({ cancelPin: f.cancelPin.value, duressPin: f.duressPin.value || null }); st.me = (await st.api.me()).user; toast('PINs saved', 'ok'); render(); } catch (e) { showErr(e); } },
   contact(f) { if (contacts.add(f.name.value, f.phone.value)) render(); else toast('Enter a name and a valid phone (max 10 contacts)', 'error'); },
@@ -982,15 +977,14 @@ const forms = {
     patch.countryCode = f.countryCode.value;
     try { await st.api.patchConfig(patch); toast('Policy saved & audited', 'ok'); } catch (e) { showErr(e); }
   },
+  async 'add-staff'(f) { try { await st.api.createStaff({ displayName: f.displayName.value, email: f.email.value, password: f.password.value, role: f.role.value }); toast('Account created. They will set up 2-step login on first sign-in.', 'ok'); render(); } catch (e) { showErr(e); } },
   async handoff(f) { try { await st.api.handoff(f.dataset.id, { status: f.status.value, reason: f.reason.value }); toast('Handoff recorded', 'ok'); render(); } catch (e) { showErr(e); } },
   async closure(f) { try { await st.api.closureException(f.dataset.id, { reason: f.reason.value, note: f.note.value }); toast('Closed with documented exception', 'ok'); render(); } catch (e) { showErr(e); } },
-  async 'demo-vol'(f) { try { await st.api.demoVolunteerAction(f.email.value, f.incidentId.value.trim(), f.action.value); toast(`Done: ${f.action.value}`, 'ok'); } catch (e) { showErr(e); } },
 };
 
 const changes = {
   lang(el) { setLang(el.value); render(); },
   country(el) { prefs.set({ country: el.value }); render(); },
-  synthetic(el) { prefs.set({ synthetic: el.checked }); if (!el.checked) actions['share-location'](); else render(); },
   async shake(el) {
     if (el.checked) { const r = await shake.enable(() => startCountdown('shake')); if (r !== 'on') { el.checked = false; return toast(r === 'denied' ? 'Motion permission denied' : 'Motion sensors not available', 'error'); } }
     else shake.disable();
@@ -1011,7 +1005,7 @@ function afterLogin() {
   if (st.me.role === 'user') {
     if (p.shake) shake.enable(() => startCountdown('shake'));
     if (p.voice) voice.start(() => startCountdown('voice'));
-    if (!isDemo() || !p.synthetic) geo.permission().then((s) => { if (s === 'granted') geo.start(); });
+    geo.permission().then((s) => { if (s === 'granted') geo.start(); });
   }
   if (store.get('pendingSos', null)) scheduleSosRetry();
   go(roleHome(st.me.role));
@@ -1021,7 +1015,8 @@ function afterLogin() {
 async function boot() {
   setLang(detectLang());
   st.api = await createApi();
-  try { st.cfg = await st.api.publicConfig(); } catch { st.cfg = { demo: false, countries: { IN: { name: 'India', emergency: '112', extra: [], verified: true } }, defaultCountry: 'IN', simulatedLabel: 'SIMULATED — NOT SENT TO EMERGENCY SERVICES' }; }
+  st.offline = !!st.api.unreachable;
+  try { st.cfg = await st.api.publicConfig(); } catch { st.offline = true; st.cfg = { demo: false, countries: { IN: { name: 'India', emergency: '112', extra: [], verified: true } }, defaultCountry: 'IN', simulatedLabel: 'SIMULATED — NOT SENT TO EMERGENCY SERVICES' }; }
   try { st.me = (await st.api.me()).user; st.api.connect(); } catch { st.me = null; }
 
   document.addEventListener('click', (e) => {
@@ -1050,12 +1045,14 @@ async function boot() {
     updateLive();
     streamLocation();
     streamVolunteerLocation();
+    streamDutyLocation();
     const sw = safeWalk.get();
     if (sw && Date.now() >= sw.endsAt && st.me?.role === 'user') { safeWalk.stop(); startCountdown('safewalk', 30); }
   }, 1000);
 
   if (st.me?.role === 'user') afterLoginSilent();
   render();
+  if (st.me && pushState() === 'granted') enablePush(true);
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     const hadController = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((r) => r.update()).catch(() => {});
@@ -1067,7 +1064,7 @@ function afterLoginSilent() {
   const p = prefs.get();
   if (p.shake) shake.enable(() => startCountdown('shake'));
   if (p.voice) voice.start(() => startCountdown('voice'));
-  if (!isDemo() || !p.synthetic) geo.permission().then((s) => { if (s === 'granted') geo.start(); });
+  geo.permission().then((s) => { if (s === 'granted') geo.start(); });
   if (store.get('pendingSos', null)) scheduleSosRetry();
 }
 

@@ -5,8 +5,8 @@ Base `/api/v1`. JSON. Errors: `{ "error": { "code", "message" } }`. All non-GET 
 | Method | Path | Role | Notes |
 |---|---|---|---|
 | GET | /health, /public-config | public | |
-| POST | /auth/register | public | user/volunteer only; 5/h/IP |
-| POST | /auth/login | public | returns `{mfaRequired:true}` for operator/admin until `mfaCode` sent |
+| POST | /auth/register | public | user/volunteer only; `consent:true` required; password 10+; 20/h/IP |
+| POST | /auth/login | public | staff: `{mfaEnroll:{secret,otpauthUri}}` on first login, then `{mfaRequired:true}` until `mfaCode` sent |
 | POST | /auth/logout · GET /me | any | |
 | PATCH | /me/pins | user | `{cancelPin, duressPin?}` 4–6 digits |
 | GET | /me/incidents · /me/export · DELETE /me | user/volunteer | |
@@ -28,4 +28,6 @@ Base `/api/v1`. JSON. Errors: `{ "error": { "code", "message" } }`. All non-GET 
 | GET | /admin/volunteers · /admin/abuse-reports · /admin/audit-events · /admin/integrations | admin | |
 | POST | /admin/volunteers/:id/review · /admin/abuse-reports/:id/resolve | admin | |
 | GET | /events | any | SSE |
-| * | /demo/* | DEMO_MODE only | accounts, mfa-code, advance, fail-notifications, relocate-volunteers, volunteer-action, reset |
+| POST | /me/push-subscriptions | any | Web Push subscription (validated) |
+| GET/POST | /admin/staff · /admin/staff/:id/status | admin | add operators/admins (temp password, 12+ chars); suspend/reactivate |
+| GET | /admin/backup | admin | full data export (no sessions), audited |

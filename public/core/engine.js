@@ -15,8 +15,8 @@
 //   • escalation adapter is SIMULATED until a real integration is approved
 //   • append-only, hash-chained audit log
 
-import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mvuj58r6';
-import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mvuj58r6';
+import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mvukvmhy';
+import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mvukvmhy';
 
 export const S = Object.freeze({
   CREATED: 'CREATED',
@@ -72,7 +72,10 @@ const OPERATOR_CLOSURE_REASONS = [
 ];
 
 export const ESC = Object.freeze({ NONE: 'NONE', REQUIRED: 'REQUIRED', SIMULATED: 'SIMULATED', ATTEMPTED: 'ATTEMPTED', DELIVERED: 'DELIVERED', ACKNOWLEDGED: 'ACKNOWLEDGED', FAILED: 'FAILED' });
-export const SIMULATED_LABEL = 'SIMULATED — NOT SENT TO EMERGENCY SERVICES';
+// Escalations go to Beti Bachao operators (push + console). Police/ambulance are
+// never contacted automatically: an operator calls them and records it as a handoff.
+export const ESCALATION_LABEL = 'Operators alerted — police/ambulance NOT contacted automatically. Call 112.';
+export const SIMULATED_LABEL = ESCALATION_LABEL; // backwards-compatible name
 
 const ASG_ORDER = ['ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ASSISTING'];
 const ASG_TO_INCIDENT = { ACCEPTED: S.RESPONDER_ASSIGNED, EN_ROUTE: S.EN_ROUTE, ARRIVED: S.ARRIVED, ASSISTING: S.ASSISTANCE_IN_PROGRESS };
@@ -276,13 +279,15 @@ export class Engine {
     return this.volunteerProfile(actor);
   }
 
-  // Mock identity provider: records a PENDING verification with a minimal reference
-  // token only. Raw ID images are never accepted or stored. Admin approves.
-  submitVerification(actor, { liveChallengePhrase }) {
+  // Manual verification request: the trust team calls the volunteer, checks ID on a
+  // video call / in person and approves. Raw ID images are never accepted or stored.
+  submitVerification(actor, { contactPhone, area } = {}) {
     this.requireRole(actor, 'volunteer');
     const v = this.vol(actor.id);
     if (v.verificationStatus === 'VERIFIED') fail(409, 'ALREADY_VERIFIED');
-    const rec = { id: this.deps.uuid(), volunteerId: actor.id, provider: 'MOCK_PROVIDER (demo — no real ID collected)', status: 'PENDING', referenceToken: 'mock_' + this.deps.uuid().slice(0, 8), challenge: String(liveChallengePhrase || '').slice(0, 80), submittedAt: this.iso(), reviewedAt: null, expiresAt: null };
+    const phone = String(contactPhone || '').replace(/[^\d+]/g, '');
+    if (phone.replace(/\D/g, '').length < 8 || phone.length > 16) fail(400, 'INVALID_PHONE', 'A valid phone number is required');
+    const rec = { id: this.deps.uuid(), volunteerId: actor.id, provider: 'MANUAL_REVIEW', status: 'PENDING', referenceToken: 'req_' + this.deps.uuid().slice(0, 8), contactPhone: phone, area: String(area || '').slice(0, 60), submittedAt: this.iso(), reviewedAt: null, expiresAt: null };
     this.db.verifications.push(rec);
     v.verificationStatus = 'PENDING';
     this.audit(actor.id, 'VERIFICATION_SUBMITTED', 'volunteer', actor.id);
@@ -422,11 +427,12 @@ export class Engine {
   }
 
   escalate(inc, actorId, type, reason) {
-    const ev = { id: this.deps.uuid(), incidentId: inc.id, type, status: ESC.SIMULATED, label: SIMULATED_LABEL, reason, attemptedAt: this.iso(), acknowledgedAt: null, recordedBy: actorId || 'system', metadata: { adapter: 'simulated', country: inc.countryCode, emergencyNumber: COUNTRIES[inc.countryCode]?.emergency || null } };
+    const ev = { id: this.deps.uuid(), incidentId: inc.id, type, status: ESC.REQUIRED, label: ESCALATION_LABEL, reason, attemptedAt: this.iso(), acknowledgedAt: null, recordedBy: actorId || 'system', metadata: { channel: 'operators', country: inc.countryCode, emergencyNumber: COUNTRIES[inc.countryCode]?.emergency || null } };
     this.db.escalations.push(ev);
-    inc.escalationStatus = ESC.SIMULATED;
+    if (![ESC.ATTEMPTED, ESC.DELIVERED, ESC.ACKNOWLEDGED].includes(inc.escalationStatus)) inc.escalationStatus = ESC.REQUIRED;
+    for (const op of this.db.users.filter((u) => ['operator', 'admin'].includes(u.role) && u.status === 'ACTIVE')) this.notify(inc.id, op.id, 'ESCALATION', { type });
     inc.updatedAt = this.iso();
-    this.audit(actorId, 'ESCALATION_SIMULATED', 'incident', inc.id, reason, { type });
+    this.audit(actorId, 'ESCALATION_RAISED', 'incident', inc.id, reason, { type });
     this.emit('escalation.attempted', inc.id);
     return ev;
   }
@@ -891,7 +897,7 @@ export class Engine {
 
   listVolunteers(actor) {
     this.requireRole(actor, 'admin', 'operator');
-    return this.db.volunteers.map((v) => ({ userId: v.userId, displayName: this.user(v.userId)?.displayName, accountStatus: this.user(v.userId)?.status, verificationStatus: v.verificationStatus, trainingDone: v.trainingCompleted.length, trainingTotal: TRAINING_MODULES.length, available: v.available, noShowCount: v.noShowCount, suspendedReason: v.suspendedReason, eligibility: this.volunteerEligibility(v) }));
+    return this.db.volunteers.filter((v) => this.user(v.userId)?.status !== 'DELETED').map((v) => ({ userId: v.userId, displayName: this.user(v.userId)?.displayName, email: this.user(v.userId)?.email, request: (({ contactPhone, area, submittedAt } = {}) => ({ contactPhone, area, submittedAt }))([...this.db.verifications].reverse().find((r) => r.volunteerId === v.userId) || {}), accountStatus: this.user(v.userId)?.status, verificationStatus: v.verificationStatus, trainingDone: v.trainingCompleted.length, trainingTotal: TRAINING_MODULES.length, available: v.available, noShowCount: v.noShowCount, suspendedReason: v.suspendedReason, eligibility: this.volunteerEligibility(v) }));
   }
 
   reviewVolunteer(actor, volunteerId, { decision, reason }) {
@@ -915,6 +921,31 @@ export class Engine {
     } else v.suspendedReason = null;
     this.audit(a.id, 'VOLUNTEER_REVIEW', 'volunteer', volunteerId, reason || null, { decision });
     return { ok: true, verificationStatus: v.verificationStatus, suspended: !!v.suspendedReason };
+  }
+
+  listStaff(actor) {
+    this.requireRole(actor, 'admin');
+    return this.db.users.filter((u) => ['operator', 'admin'].includes(u.role) && u.status !== 'DELETED').map((u) => ({ id: u.id, displayName: u.displayName, email: u.email, role: u.role, status: u.status, mfaEnrolled: !!u.mfaEnrolled, createdAt: u.createdAt }));
+  }
+
+  createStaff(actor, { displayName, email, role, passwordHash }) {
+    const a = this.requireRole(actor, 'admin');
+    if (!['operator', 'admin'].includes(role)) fail(400, 'INVALID_ROLE');
+    const u = this.createUser({ displayName, email, role, passwordHash });
+    u.mfaEnrolled = false;
+    this.audit(a.id, 'STAFF_CREATED', 'user', u.id, null, { role });
+    return { id: u.id };
+  }
+
+  setStaffStatus(actor, userId, status) {
+    const a = this.requireRole(actor, 'admin');
+    if (!['ACTIVE', 'SUSPENDED'].includes(status)) fail(400, 'INVALID_STATUS');
+    const u = this.user(userId);
+    if (!u || !['operator', 'admin'].includes(u.role)) fail(404, 'NOT_FOUND');
+    if (u.id === a.id) fail(409, 'CANNOT_CHANGE_SELF');
+    u.status = status; u.updatedAt = this.iso();
+    this.audit(a.id, 'STAFF_STATUS', 'user', u.id, status);
+    return { ok: true };
   }
 
   reportAbuse(actor, { incidentId = null, category, details }) {

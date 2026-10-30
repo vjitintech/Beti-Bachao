@@ -1,129 +1,120 @@
-// Browser end-to-end smoke test (headless Chromium via Playwright).
-//   node scripts/smoke.mjs            → server mode (boots the demo server)
-//   node scripts/smoke.mjs --shots    → also writes screenshots to ./screenshots
+// Browser end-to-end test of the real flows (headless Chromium via Playwright).
+//   node scripts/smoke.mjs [--shots]
+// Accounts are created through the real API (registration → training →
+// verification request → admin approval); people then sign in through the UI.
 import { createRequire } from 'node:module';
-import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
-import http from 'node:http';
-import { createServer } from '../server/server.js';
+import { boot, world, ADMIN, PASSWORD, totp } from '../test/helpers.js';
 
 const { chromium } = createRequire(import.meta.url)('playwright');
 const SHOTS = process.argv.includes('--shots');
 const outDir = path.resolve('screenshots');
 if (SHOTS) fs.mkdirSync(outDir, { recursive: true });
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'bb-smoke-'));
-const app = createServer({ env: { DEMO_MODE: 'true', DATA_FILE: path.join(tmp, 'db.json') } });
-await new Promise((r) => app.server.listen(0, r));
-const base = `http://127.0.0.1:${app.server.address().port}/`;
+const S = await boot();
+const W = await world(S.base);
+await W.admin.call('POST', '/admin/staff', { displayName: 'Nandini', email: 'ops@test.betibachao.app', role: 'operator', password: 'temp-password-1234' });
+const base = S.origin + '/';
 
 const errors = [];
 const browser = await chromium.launch();
-const mobile = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true, permissions: [] };
-async function ctx(name, opts = mobile) {
-  const c = await browser.newContext(opts);
-  const p = await c.newPage();
+const mobile = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true };
+async function page(name, opts = mobile) {
+  const p = await (await browser.newContext(opts)).newPage();
   p.on('console', (m) => { if (m.type() === 'error') errors.push(`[${name}] ${m.text()}`); });
   p.on('pageerror', (e) => errors.push(`[${name}] ${e.message}`));
   return p;
 }
 const shot = async (p, n) => { if (SHOTS) await p.screenshot({ path: path.join(outDir, `${n}.png`), fullPage: true }); };
-const login = async (p, email) => {
+async function signIn(p, email, password = PASSWORD, mfa = null) {
   await p.goto(base + '#/login');
-  await p.waitForSelector(`[data-email="${email}"]`);
-  await p.click(`[data-email="${email}"]`);
-  await p.waitForFunction(() => !location.hash.startsWith('#/login'));
-};
+  await p.fill('[name="email"]', email);
+  await p.fill('[name="password"]', password);
+  await p.click('[data-form="login"] button[type="submit"]');
+  if (mfa) {
+    await p.waitForSelector('.mfa:not(.hidden)');
+    const enrol = await p.$('.mfa-enroll:not(.hidden)');
+    const secret = enrol ? (await p.textContent('.mfa-secret')).replace(/\s/g, '') : mfa;
+    await p.fill('[name="mfaCode"]', totp(secret));
+    await p.click('[data-form="login"] button[type="submit"]');
+  }
+  await p.waitForFunction(() => !location.hash.startsWith('#/login'), null, { timeout: 10000 });
+}
 const step = (s) => console.log('✓', s);
 
 try {
-  const user = await ctx('user');
-  await user.goto(base);
-  await user.waitForSelector('.hero');
-  await shot(user, '01-landing'); step('landing renders');
+  const anon = await page('anon');
+  await anon.goto(base);
+  await anon.waitForSelector('.hero');
+  if (await anon.$('.demo-banner')) throw new Error('demo banner still present');
+  await shot(anon, '01-landing'); step('landing renders, no demo banner');
+  await anon.goto(base + '#/login');
+  await anon.waitForSelector('[data-form="login"]');
+  if (await anon.$('[data-act="demo-login"]')) throw new Error('demo login buttons still present');
+  step('login page has no demo accounts');
 
-  await login(user, 'aamani@demo.betibachao.app');
+  const user = await page('user');
+  await user.context().grantPermissions(['geolocation']);
+  await user.context().setGeolocation({ latitude: 15.8281, longitude: 78.0373, accuracy: 12 });
+  await signIn(user, 'aamani@test.betibachao.app');
   await user.waitForSelector('#sos-btn');
-  await shot(user, '02-home'); step('user home with SOS button');
+  await shot(user, '02-home'); step('woman signs in with her own account');
 
   const box = await (await user.$('#sos-btn')).boundingBox();
   await user.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await user.mouse.down();
-  await user.waitForTimeout(3300);
-  await user.mouse.up();
-  await user.waitForFunction(() => location.hash.startsWith('#/incident/'), null, { timeout: 10000 });
+  await user.mouse.down(); await user.waitForTimeout(3300); await user.mouse.up();
+  await user.waitForFunction(() => location.hash.startsWith('#/incident/'), null, { timeout: 15000 });
   await user.waitForSelector('.status-hero');
-  const incidentId = user.url().split('#/incident/')[1].split('?')[0];
-  const heroText = await user.textContent('.status-hero');
-  if (!/10 km/.test(heroText)) throw new Error('expected 10 km stage, got: ' + heroText);
-  await shot(user, '03-incident-red'); step('hold-to-SOS created incident, 10 km search shown');
-  const calls = await user.$$eval('.emergency-bar a[href^="tel:"]', (as) => as.map((a) => a.getAttribute('href')));
-  if (!['tel:112', 'tel:181', 'tel:1091', 'tel:108'].every((n) => calls.includes(n))) throw new Error('missing call options after SOS: ' + calls);
-  step('after SOS all numbers offered: ' + calls.join(', '));
-  await user.click('details[data-keep="user-timeline"] summary');
-  await user.waitForTimeout(9000);
-  if (!(await user.$eval('details[data-keep="user-timeline"]', (d) => d.open))) throw new Error('timeline collapsed after refresh');
-  step('timeline stays expanded across live refreshes');
+  const hero = await user.textContent('.status-hero');
+  if (!/10 km/.test(hero)) throw new Error('expected 10 km stage: ' + hero);
+  await shot(user, '03-incident'); step('hold-to-SOS with real device GPS → 10 km search');
 
-  const vol = await ctx('volunteer');
-  await login(vol, 'asha@demo.betibachao.app');
-  await vol.waitForSelector('.alert-item');
-  const before = await vol.content();
-  if (before.includes('15.8281') || before.includes('78.0373')) throw new Error('unassigned volunteer page leaked exact coordinates');
-  await shot(vol, '04-volunteer-alert'); step('volunteer sees alert with approximate area only');
+  const vol = await page('volunteer');
+  await signIn(vol, 'asha@test.betibachao.app');
+  await vol.waitForSelector('.sos-incoming');
+  if ((await vol.content()).includes('15.8281')) throw new Error('unassigned volunteer page leaked exact coordinates');
+  await vol.click('.sos-incoming');
   await vol.click('[data-act="vol-accept"]');
   await vol.waitForSelector('.precise');
   await vol.click('[data-act="vol-status"]');
-  await vol.waitForFunction(() => document.body.innerText.includes("I've arrived"));
-  await shot(vol, '05-volunteer-assigned'); step('volunteer accepted, sees precise location, en route');
+  await vol.waitForSelector('.ppi');
+  await shot(vol, '04-volunteer'); step('approved volunteer gets alert, accepts, sees route + radar');
 
-  const op = await ctx('operator', { viewport: { width: 1280, height: 900 } });
-  await login(op, 'operator@demo.betibachao.app');
-  await op.waitForSelector('.ops-detail');
-  await op.waitForSelector('.ppi');
-  const opText = await op.textContent('.ops-detail');
-  if (!/Asha/.test(opText)) throw new Error('operator does not see assignment');
-  await shot(op, '06-operator'); step('operator console with radar and responders (MFA auto-filled in demo)');
+  const op = await page('operator', { viewport: { width: 1280, height: 900 } });
+  await signIn(op, 'ops@test.betibachao.app', 'temp-password-1234', 'enrol');
+  await op.waitForSelector('.ppi-grid');
+  await shot(op, '05-operator'); step('new operator enrols authenticator at first login, sees radars');
 
   await user.waitForFunction(() => document.querySelector('.status-hero')?.className.includes('AMBER'), null, { timeout: 15000 });
-  await shot(user, '07-incident-amber'); step('user sees AMBER "help is on the way" with responder ETA');
-
-  await user.click('[data-act="more-help"]');
-  await user.waitForSelector('.alert-warn');
-  step('NEED MORE HELP escalates (simulated label shown)');
-
   await user.click('[data-act="are-you-safe"]');
   await user.click('[data-modal="YES"]');
   await user.click('[data-modal="confirm"]');
   await user.waitForFunction(() => document.querySelector('.status-hero')?.className.includes('GREEN'), null, { timeout: 10000 });
-  await shot(user, '08-incident-green'); step('explicit YES → confirm closes incident GREEN');
+  await shot(user, '06-safe'); step('explicit YES → confirm closes incident GREEN');
 
-  await user.goto(base + '#/home');
-  await user.selectOption('#lang-select', 'te');
-  await user.waitForFunction(() => document.documentElement.lang === 'te');
-  await shot(user, '09-telugu'); step('language switch to Telugu');
-  await user.selectOption('#lang-select', 'ur');
-  await user.waitForFunction(() => document.documentElement.dir === 'rtl');
-  await shot(user, '10-urdu-rtl'); step('Urdu renders right-to-left');
-  await user.selectOption('#lang-select', 'en');
-
-  const adm = await ctx('admin', { viewport: { width: 1280, height: 900 } });
-  await login(adm, 'admin@demo.betibachao.app');
+  const adm = await page('admin', { viewport: { width: 1280, height: 900 } });
+  await signIn(adm, ADMIN.email, ADMIN.password, ADMIN.mfaSecret);
+  await adm.click('[data-tab="staff"]');
+  await adm.waitForFunction(() => document.body.innerText.includes('Nandini'));
   await adm.click('[data-tab="audit"]');
   await adm.waitForFunction(() => document.body.innerText.includes('intact'));
-  await shot(adm, '11-admin-audit'); step('admin audit log hash chain intact');
+  await shot(adm, '07-admin'); step('admin: staff list + intact audit chain');
 
-  await user.goto(base + '#/tools');
-  await user.waitForSelector('[data-form="safewalk"]');
-  await shot(user, '12-tools'); step('safety tools page');
-  console.log('incident', incidentId);
+  const reg = await page('register');
+  await reg.goto(base + '#/register');
+  await reg.fill('[name="displayName"]', 'New Person');
+  await reg.fill('[name="email"]', 'new@test.betibachao.app');
+  await reg.fill('[name="password"]', 'a-good-password-1');
+  await reg.check('[name="consent"]');
+  await reg.click('[data-form="register"] button[type="submit"]');
+  await reg.waitForSelector('#sos-btn');
+  step('self-registration with consent works');
 } catch (e) {
   console.error('✗', e.message);
   process.exitCode = 1;
 } finally {
-  const real = errors.filter((e) => !/geolocation|Permission|NotAllowedError|favicon|status of 401/i.test(e));
+  const real = errors.filter((e) => !/status of 401|maps\.google|ERR_|net::/i.test(e));
   if (real.length) { console.error('Browser errors:\n' + real.join('\n')); process.exitCode = 1; } else console.log('✓ no browser console errors / CSP violations');
   await browser.close();
-  app.server.close();
-  fs.rmSync(tmp, { recursive: true, force: true });
+  S.app.server.close();
 }

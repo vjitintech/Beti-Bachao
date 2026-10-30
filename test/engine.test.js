@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { Engine, emptyDb, S, SIMULATED_LABEL } from '../public/core/engine.js';
-import { seedDemo, DEMO_CENTER, offset } from '../public/core/seed.js';
+import { seedDemo, DEMO_CENTER, offset } from './fixtures.js';
 
 function setup() {
   let clock = Date.parse('2026-10-30T10:00:00Z');
@@ -60,7 +60,7 @@ test('AT-02 no acceptance expands to 20 km then 30 km then NO_RESPONDER_AVAILABL
   t.advance(61);
   assert.equal(incident.status, S.NO_RESPONDER_AVAILABLE);
   const esc = t.db.escalations.find((x) => x.type === 'NO_RESPONDER');
-  assert.equal(esc.status, 'SIMULATED');
+  assert.equal(esc.status, 'REQUIRED');
   assert.equal(esc.label, SIMULATED_LABEL);
 });
 
@@ -281,7 +281,7 @@ test('account deletion purges precise location history', () => {
 });
 
 test('live tracking: team sees each responder distance; only assigned responders get positions; demo travel closes distance', async () => {
-  const { simulateDemoMovement } = await import('../public/core/seed.js');
+  const { simulateDemoMovement } = await import('./fixtures.js');
   const t = setup();
   t.db.config.targetResponders = 3;
   const { incident } = t.e.createIncident(t.aamani, { idempotencyKey: 'k', location: t.loc() });

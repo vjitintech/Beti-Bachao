@@ -15,7 +15,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   enRouteStallMinSec: 600,
   locationStaleSec: 120,
   lowAccuracyM: 100,
-  volunteerLocationMaxAgeMin: 30,
+  volunteerLocationMaxAgeMin: 180, // on-duty volunteers' last known position; refreshed every 2 min while the app is open
   approxGridDeg: 0.02, // ≈2 km grid for unassigned volunteers
   roadFactor: 1.4,
   responderSpeedKmh: 25,

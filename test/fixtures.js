@@ -1,4 +1,4 @@
-// Synthetic demo data only. Fictional names, no real phone numbers or addresses.
+// Test fixtures only (never shipped to users): fictional people for automated tests.
 // Default centre: Kurnool, Andhra Pradesh (proposed pilot region).
 
 export const DEMO_CENTER = { lat: 15.8281, lng: 78.0373, label: 'Kurnool (synthetic demo area)' };

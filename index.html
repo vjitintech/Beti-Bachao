@@ -3,12 +3,39 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta http-equiv="refresh" content="0; url=./public/">
+  <meta name="theme-color" content="#6d1a4a">
   <title>Beti Bachao</title>
-  <link rel="canonical" href="./public/">
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; margin: 0; background: #fbf7f9; color: #1d1320; }
+    main { max-width: 560px; margin: 0 auto; padding: 32px 18px; text-align: center; }
+    h1 { margin: .4rem 0; } .lead { color: #5b4c5e; }
+    .card { background: #fff; border: 1px solid #eadde4; border-radius: 16px; padding: 18px; margin: 16px 0; text-align: start; }
+    .nums { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .nums a { display: block; padding: 14px; border-radius: 12px; text-decoration: none; text-align: center; font-weight: 700; border: 1px solid #d7193f; color: #d7193f; }
+    .nums a.main { background: #d7193f; color: #fff; } .nums a.med { border-color: #13834a; color: #13834a; }
+    .nums small { display: block; font-weight: 500; font-size: .8rem; }
+    .btn { display: inline-block; background: #6d1a4a; color: #fff; padding: 14px 22px; border-radius: 12px; text-decoration: none; font-weight: 700; }
+  </style>
 </head>
 <body>
-  <p>Opening Beti Bachao… <a href="./public/">Tap here if it doesn't open</a>.</p>
-  <p>In an emergency call <a href="tel:112">112</a>.</p>
+<main>
+  <svg width="72" height="72" viewBox="0 0 512 512" aria-hidden="true"><rect width="512" height="512" rx="112" fill="#8e2462"/><path d="M256 78 L404 132 V250 C404 344 340 410 256 440 C172 410 108 344 108 250 V132 Z" fill="none" stroke="#fff" stroke-width="26"/><path d="M256 330 C256 330 176 284 176 230 C176 202 198 182 222 182 C238 182 250 191 256 203 C262 191 274 182 290 182 C314 182 336 202 336 230 C336 284 256 330 256 330 Z" fill="#ffb547"/></svg>
+  <h1>Beti Bachao</h1>
+  <p class="lead">Every SOS acknowledged. Every response tracked. Never marked safe without you.</p>
+  <div class="card">
+    <h2>In danger right now? Call:</h2>
+    <div class="nums">
+      <a class="main" href="tel:112">📞 112<small>Police · Ambulance · Fire</small></a>
+      <a href="tel:181">📞 181<small>Women helpline · 24×7</small></a>
+      <a href="tel:1091">📞 1091<small>Women police helpline</small></a>
+      <a class="med" href="tel:108">🚑 108<small>Ambulance · medical help</small></a>
+    </div>
+  </div>
+  <div class="card" id="app-link">
+    <h2>The Beti Bachao app</h2>
+    <p>The app runs on the Beti Bachao server so SOS alerts reach real, verified volunteers. This page only shows emergency numbers.</p>
+    <p id="app-url-hint">The live app link will appear here once the service is launched.</p>
+  </div>
+</main>
 </body>
 </html>
