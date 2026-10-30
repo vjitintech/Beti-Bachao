@@ -3,6 +3,7 @@ import { t, setLang, detectLang, LANGS, lang } from './i18n.js';
 import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg } from './ui.js';
 import { geo, syntheticLocation, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js';
 import { TRAINING_MODULES } from '../core/engine.js';
+import { DEMO_BLURBS } from '../core/seed.js';
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'policy', volSel: null };
 const app = () => $('#app');
@@ -32,8 +33,8 @@ function emergencyBar() {
   const c = country();
   return `<div class="emergency-bar" role="region" aria-label="Emergency calling">
     <p class="eb-title">${esc(c.name)} · ${esc(t('helplines'))} <a href="#/settings" class="eb-change">change country</a></p>
-    <a class="btn btn-call" href="${telHref(c.emergency)}">📞 ${esc(t('call_emergency', { n: c.emergency }))}<small class="eb-sub">Police · Ambulance · Fire</small></a>
-    ${(c.extra || []).slice(0, 2).map((h) => `<a class="btn btn-call-alt" href="${telHref(h.number)}"><strong>${esc(h.number)}</strong><small class="eb-sub">${esc(h.label)}</small></a>`).join('')}
+    <a class="btn btn-call" href="${telHref(c.emergency)}">📞 ${esc(t('call_emergency', { n: c.emergency }))}<small class="eb-sub">${esc(c.emergencyLabel || 'Emergency services')}</small></a>
+    ${(c.extra || []).map((h) => `<a class="btn btn-call-alt" href="${telHref(h.number)}"><strong>${esc(h.number)}</strong><small class="eb-sub">${esc(h.label)}</small></a>`).join('')}
     ${c.verified ? '' : `<span class="verify-note">${esc(c.name)}: number configured — verify locally before relying on it</span>`}
   </div>`;
 }
@@ -104,7 +105,7 @@ async function viewLogin(params) {
     <section class="narrow">
       <h1>${esc(t('login'))}</h1>
       ${demo ? `<div class="card"><h3>Demo accounts</h3><p class="muted">Synthetic people only. ${st.cfg.standalone ? 'No password needed in standalone mode.' : `Password: <code>${esc(demo.password)}</code>. Operator/Admin need the demo MFA code (auto-filled).`}</p>
-        ${groups.map(([r, list]) => list.length ? `<div class="demo-group"><h4>${esc(pretty(r))}</h4><div class="chip-row">${list.map((a) => `<button class="chip ${accounts.includes(a) && want ? 'chip-hl' : ''}" data-act="demo-login" data-email="${esc(a.email)}" data-role="${esc(a.role)}">${esc(a.displayName)}</button>`).join('')}</div></div>` : '').join('')}
+        ${groups.map(([r, list]) => list.length ? `<div class="demo-group"><h4>${esc(pretty(r))}</h4><div class="chip-row">${list.map((a) => `<button class="chip ${accounts.includes(a) && want ? 'chip-hl' : ''}" data-act="demo-login" data-email="${esc(a.email)}" data-role="${esc(a.role)}"><span class="chip-name">${esc(a.displayName.replace(/ \(.*\)$/, ''))}</span>${DEMO_BLURBS[a.email] ? `<small class="chip-blurb">${esc(DEMO_BLURBS[a.email])}</small>` : ''}</button>`).join('')}</div></div>` : '').join('')}
       </div>` : ''}
       <form class="card form" data-form="login" autocomplete="on">
         <label>Email<input name="email" type="email" required autocomplete="username"></label>
@@ -309,7 +310,8 @@ async function viewIncident(id, params) {
       ${open && v.search?.secondsLeft != null && (v.responders?.length || 0) < 2 ? `<p class="small"><span data-live="stage-countdown" data-deadline="${esc(v.search.deadline)}">${esc(t('next_stage_in', { s: v.search.secondsLeft }))}</span></p>` : ''}
       <ol class="stage-bar" aria-label="Search stages">${stages}</ol>
     </section>
-    ${v.escalations?.length ? `<div class="alert alert-warn"><strong>Escalation:</strong> ${v.escalations.map((e) => `${esc(pretty(e.type))} — <em>${esc(e.label)}</em>`).join('<br>')}<div class="row"><a class="btn btn-call" href="${telHref(country().emergency)}">📞 ${esc(t('call_emergency', { n: country().emergency }))}</a></div></div>` : ''}
+    ${open ? emergencyBar() : ''}
+    ${v.escalations?.length ? `<div class="alert alert-warn"><strong>Escalation:</strong> ${v.escalations.map((e) => `${esc(pretty(e.type))} — <em>${esc(e.label)}</em>`).join('<br>')}<p class="small">Call one of the numbers above yourself — this app has not contacted them.</p></div>` : ''}
     ${open ? `
     <section class="card">
       <h2>${esc(t('responders'))}</h2>
@@ -324,11 +326,11 @@ async function viewIncident(id, params) {
       <button class="btn btn-secondary" data-act="record-toggle">🎙️ ${esc(recorder.recording ? t('stop') : t('record'))}</button>
       <button class="btn btn-ghost" data-act="cancel-sos">${esc(t('cancel_sos'))}</button>
     </section>
+    ${contacts.list().length ? `<div class="card"><h2>📞 ${esc(t('contacts'))}</h2><div class="row">${contacts.list().map((c) => `<a class="btn btn-secondary" href="${telHref(c.phone)}">📞 ${esc(c.name)}</a>`).join('')}</div></div>` : ''}
     <div class="card"><div class="row">${smsButtons()}<button class="btn btn-ghost" data-act="native-share">📤 Share…</button></div></div>
     ${locationCard(v.location, { live: true })}
-    ` : `<section class="card"><p>${v.closureReason === 'USER_CONFIRMED_SAFE' ? '💚 You confirmed you are safe. Responders have been released.' : 'This SOS has ended.'}</p><a class="btn btn-primary" href="#/home">${esc(t('home'))}</a></section>`}
-    ${emergencyBar()}
-    <details class="card"><summary>${esc(t('timeline'))} (${tl.length})</summary><ol class="timeline">${tl.map((x) => `<li><time>${esc(fmtTime(x.at))}</time> ${esc(pretty(x.text))}${x.reason ? ` <small class="muted">— ${esc(x.reason)}</small>` : ''}</li>`).join('')}</ol></details>
+    ` : `<section class="card"><p>${v.closureReason === 'USER_CONFIRMED_SAFE' ? '💚 You confirmed you are safe. Responders have been released.' : 'This SOS has ended.'}</p><a class="btn btn-primary" href="#/home">${esc(t('home'))}</a></section>${emergencyBar()}`}
+    <details class="card" data-keep="user-timeline"><summary>${esc(t('timeline'))} (${tl.length})</summary><ol class="timeline">${tl.map((x) => `<li><time>${esc(fmtTime(x.at))}</time> ${esc(pretty(x.text))}${x.reason ? ` <small class="muted">— ${esc(x.reason)}</small>` : ''}</li>`).join('')}</ol></details>
   `);
 }
 
@@ -469,7 +471,7 @@ async function viewVolunteer() {
       ${alerts.length ? `<ul class="alert-list">${alerts.map((a) => `<li><button class="alert-item status-${esc(a.color)} ${sel?.id === a.id ? 'sel' : ''}" data-act="vol-select" data-id="${esc(a.id)}"><span class="dot"></span><span>${a.severity === 'HIGH' ? '🔥 ' : ''}${esc(a.open ? pretty(a.status) : 'Ended')} · ${esc(a.distanceBand)}</span><small>${esc(fmtTime(a.createdAt))}${a.assignment ? ' · <b>assigned</b>' : ''}</small></button></li>`).join('')}</ul>` : '<p class="muted">No alerts. Stay on duty with a fresh location to receive them.</p>'}
     </section>
     ${sel ? volunteerDetail(sel) : ''}
-    <details class="card"><summary>Volunteer Code of Conduct</summary><ol>${CONDUCT.map((c) => `<li>${esc(c)}</li>`).join('')}</ol></details>
+    <details class="card" data-keep="conduct"><summary>Volunteer Code of Conduct</summary><ol>${CONDUCT.map((c) => `<li>${esc(c)}</li>`).join('')}</ol></details>
   `);
 }
 
@@ -550,7 +552,7 @@ function opsDetail(d, tl, cfg) {
         <label>Note (10+ chars)<textarea name="note" required minlength="10" maxlength="500"></textarea></label><button class="btn btn-ghost danger-text">Close with exception</button></form>
       <button class="btn btn-danger" data-act="op-escalate" data-id="${esc(d.id)}">Mark escalation required</button>
     </div>` : `<p>Closed: ${esc(pretty(d.closureReason))}</p>`}
-    <details><summary>Timeline (${tl.length})</summary><ol class="timeline">${tl.map((x) => `<li><time>${esc(fmtTime(x.at))}</time> ${esc(pretty(x.text))}${x.reason ? ` <small class="muted">— ${esc(x.reason)}</small>` : ''}</li>`).join('')}</ol></details>
+    <details data-keep="ops-timeline"><summary>Timeline (${tl.length})</summary><ol class="timeline">${tl.map((x) => `<li><time>${esc(fmtTime(x.at))}</time> ${esc(pretty(x.text))}${x.reason ? ` <small class="muted">— ${esc(x.reason)}</small>` : ''}</li>`).join('')}</ol></details>
   </section>`;
 }
 
@@ -644,7 +646,9 @@ async function render() {
   }
   const y = window.scrollY;
   const focusedForm = document.activeElement?.closest?.('form') && document.activeElement.name;
+  const openKeys = new Set($$('details[data-keep][open]').map((d) => d.dataset.keep));
   app().innerHTML = html;
+  for (const d of $$('details[data-keep]')) if (openKeys.has(d.dataset.keep)) d.open = true;
   if (st.softRefresh) window.scrollTo(0, y);
   if (focusedForm) document.querySelector(`[name="${focusedForm}"]`)?.focus();
   st.softRefresh = false;

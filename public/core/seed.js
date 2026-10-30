@@ -4,6 +4,21 @@
 export const DEMO_CENTER = { lat: 15.8281, lng: 78.0373, label: 'Kurnool (synthetic demo area)' };
 export const DEMO_PASSWORD = 'demo1234';
 
+// One-line role descriptions for the demo login screen (max 30 characters).
+export const DEMO_BLURBS = {
+  'priya@demo.betibachao.app': 'Woman who raises the SOS',
+  'lakshmi@demo.betibachao.app': 'Second woman, parallel SOS',
+  'asha@demo.betibachao.app': 'Verified · 3 km · 1st ring',
+  'ravi@demo.betibachao.app': 'Verified · 7.5 km · 1st ring',
+  'meena@demo.betibachao.app': 'Verified · 14 km · 2nd ring',
+  'imran@demo.betibachao.app': 'Verified · 24 km · 3rd ring',
+  'kiran@demo.betibachao.app': 'Not verified · never alerted',
+  'deepa@demo.betibachao.app': 'Training pending · no alerts',
+  'suresh@demo.betibachao.app': 'Off duty · no alerts',
+  'operator@demo.betibachao.app': 'Monitors & escalates SOS',
+  'admin@demo.betibachao.app': 'Approves volunteers, rules',
+};
+
 // bearing in degrees, distance in km from centre
 const VOLUNTEERS = [
   { name: 'Asha (demo volunteer)', email: 'asha@demo.betibachao.app', km: 3, brg: 40, verified: true, trained: true, available: true },

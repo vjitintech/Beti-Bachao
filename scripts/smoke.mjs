@@ -57,6 +57,13 @@ try {
   const heroText = await user.textContent('.status-hero');
   if (!/10 km/.test(heroText)) throw new Error('expected 10 km stage, got: ' + heroText);
   await shot(user, '03-incident-red'); step('hold-to-SOS created incident, 10 km search shown');
+  const calls = await user.$$eval('.emergency-bar a[href^="tel:"]', (as) => as.map((a) => a.getAttribute('href')));
+  if (!['tel:112', 'tel:181', 'tel:1091'].every((n) => calls.includes(n))) throw new Error('missing call options after SOS: ' + calls);
+  step('after SOS all numbers offered: ' + calls.join(', '));
+  await user.click('details[data-keep="user-timeline"] summary');
+  await user.waitForTimeout(9000);
+  if (!(await user.$eval('details[data-keep="user-timeline"]', (d) => d.open))) throw new Error('timeline collapsed after refresh');
+  step('timeline stays expanded across live refreshes');
 
   const vol = await ctx('volunteer');
   await login(vol, 'asha@demo.betibachao.app');
