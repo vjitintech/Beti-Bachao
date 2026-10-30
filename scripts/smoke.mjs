@@ -42,7 +42,7 @@ try {
   await user.waitForSelector('.hero');
   await shot(user, '01-landing'); step('landing renders');
 
-  await login(user, 'priya@demo.betibachao.app');
+  await login(user, 'aamani@demo.betibachao.app');
   await user.waitForSelector('#sos-btn');
   await shot(user, '02-home'); step('user home with SOS button');
 

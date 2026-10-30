@@ -1,9 +1,9 @@
-import { createApi, uuid } from './api.js?v=mvubs8pw';
-import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mvubs8pw';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg } from './ui.js?v=mvubs8pw';
-import { geo, syntheticLocation, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mvubs8pw';
-import { TRAINING_MODULES } from '../core/engine.js?v=mvubs8pw';
-import { DEMO_BLURBS } from '../core/seed.js?v=mvubs8pw';
+import { createApi, uuid } from './api.js?v=mvud316b';
+import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mvud316b';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg } from './ui.js?v=mvud316b';
+import { geo, syntheticLocation, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mvud316b';
+import { TRAINING_MODULES } from '../core/engine.js?v=mvud316b';
+import { DEMO_BLURBS } from '../core/seed.js?v=mvud316b';
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'policy', volSel: null };
 const app = () => $('#app');
@@ -148,11 +148,12 @@ function locationCard(loc, { live = false } = {}) {
       ${isDemo() ? `<label class="switch"><input type="checkbox" data-change="synthetic" ${p.synthetic ? 'checked' : ''}> Use synthetic demo location (Kurnool)</label>` : ''}</div>`;
   }
   const ageSec = loc.ageSec ?? Math.round((Date.now() - Date.parse(loc.observedAt)) / 1000);
+  const staleNow = loc.stale || ageSec > 120;
   return `<div class="card loc-card">
     <div class="loc-head"><strong>📍 ${esc(t('location'))}</strong><span class="badge ${loc.source === 'synthetic' ? 'badge-info' : 'badge-ok'}">${esc(loc.source === 'synthetic' ? 'Synthetic (demo)' : t('location_on'))}</span></div>
     <div class="loc-grid">
       <div><span class="k">${esc(t('accuracy', { m: loc.accuracyM }))}</span>${loc.lowAccuracy || loc.accuracyM > 100 ? `<span class="badge badge-warn">${esc(t('low_accuracy'))}</span>` : ''}</div>
-      <div><span class="k">${esc(t('updated_ago', { s: ageSec }))}</span>${loc.stale || ageSec > 120 ? `<span class="badge badge-warn">${esc(t('stale'))}</span>` : ''}</div>
+      <div><span class="k" data-live="age" data-at="${esc(loc.observedAt)}"></span>${staleNow ? `<span class="badge badge-warn">${esc(t('stale'))}</span>` : ''}</div>
       <div class="full"><span class="k">${esc(loc.vertical || t('floor_unknown'))}</span>${loc.altitudeNote ? `<small class="muted">${esc(loc.altitudeNote)}</small>` : ''}</div>
     </div>
     ${live ? `<form class="inline-form" data-form="floor"><label>Floor (optional, if safe)<input name="floor" type="number" min="-5" max="200" inputmode="numeric"></label><button class="btn btn-ghost btn-sm">Add</button></form>` : ''}
@@ -182,8 +183,6 @@ async function viewHome() {
         <span class="sos-label">${esc(t('sos'))}</span>
       </button>
       <p id="sos-hint" class="sos-hint">${esc(t('hold_to_send'))}</p>
-      <label class="switch danger-switch"><input type="checkbox" id="sev-high"> ${esc(t('immediate_danger'))}</label>
-      <div class="row center"><button class="btn btn-dark" data-act="silent-sos">🤫 ${esc(t('silent_sos'))}</button>${medicalNumber() ? `<a class="btn btn-medical-solid" href="${telHref(medicalNumber())}">🚑 ${esc(t('medical_help'))} · ${esc(medicalNumber())}</a>` : ''}</div>
       ${contacts.list().length ? '' : `<a class="alert alert-info alert-link" href="#/settings">👥 ${esc(t('add_contacts_hint'))}</a>`}
       <p class="hint-strong">${esc(t('call_now_hint'))}</p>
     </section>
@@ -212,7 +211,7 @@ function smsButtons() {
 }
 
 // ------------------------------------------------------------------ SOS
-async function triggerSOS({ severity = 'NORMAL', silent = false, trigger = 'button' } = {}) {
+async function triggerSOS({ severity = 'HIGH', silent = false, trigger = 'button' } = {}) {
   if (st.sendingSos) return;
   st.sendingSos = true;
   const isRetry = !!store.get('pendingSos', null);
@@ -237,7 +236,9 @@ async function triggerSOS({ severity = 'NORMAL', silent = false, trigger = 'butt
     if (geo.last && Date.now() - Date.parse(geo.last.observedAt) < 30000) loc = geo.last;
     else { try { loc = await Promise.race([geo.once(6000), new Promise((r) => setTimeout(() => r(null), 4000))]); } catch { loc = null; } }
     geo.start();
-    if (isDemo() && loc) { try { await st.api.demoRelocate(loc.lat, loc.lng); } catch {} }
+    // Demo only: if the phone can't get a GPS fix, use the synthetic area so the walkthrough still reaches volunteers.
+    if (isDemo() && !loc && st.cfg.demoCenter) loc = syntheticLocation(st.cfg.demoCenter);
+    if (isDemo() && loc && loc.source !== 'synthetic') { try { await st.api.demoRelocate(loc.lat, loc.lng); } catch {} }
   }
   const body = { idempotencyKey: pending.key, location: loc, severity: pending.severity, trigger: pending.trigger, silent: pending.silent, battery: await battery() };
   try {
@@ -288,7 +289,7 @@ function bindHold() {
   const tick = () => {
     const p = Math.min(1, (performance.now() - start) / HOLD);
     ring.style.strokeDashoffset = `${C * (1 - p)}`;
-    if (p >= 1) { reset(); vibrate(300); triggerSOS({ severity: $('#sev-high')?.checked ? 'HIGH' : 'NORMAL', trigger: 'hold' }); return; }
+    if (p >= 1) { reset(); vibrate(300); triggerSOS({ trigger: 'hold' }); return; }
     raf = requestAnimationFrame(tick);
   };
   const reset = () => { cancelAnimationFrame(raf); start = 0; ring.style.strokeDashoffset = `${C}`; btn.classList.remove('holding'); };
@@ -300,7 +301,7 @@ function bindHold() {
     if (e.key !== 'Enter' && e.key !== ' ') return;
     e.preventDefault();
     const r = await modal({ title: 'Send SOS now?', body: `<p>${esc(t('call_now_hint'))}</p>`, actions: [{ id: 'send', label: 'Send SOS', kind: 'danger' }, { id: 'no', label: t('cancel') }] });
-    if (r.id === 'send') triggerSOS({ severity: $('#sev-high')?.checked ? 'HIGH' : 'NORMAL', trigger: 'keyboard' });
+    if (r.id === 'send') triggerSOS({ trigger: 'keyboard' });
   });
 }
 
@@ -309,6 +310,7 @@ async function viewIncident(id, params) {
   let v;
   try { v = await st.api.getIncident(id); } catch (e) { return shell(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
   st.incident = v;
+  if (v.search?.deadline && v.search.secondsLeft != null) st.skew = (Date.parse(v.search.deadline) - v.search.secondsLeft * 1000) - Date.now();
   let tl = [];
   try { tl = (await st.api.timeline(id)).items; } catch {}
   const silent = params.get('silent') === '1';
@@ -321,9 +323,10 @@ async function viewIncident(id, params) {
       <div class="status-dot" aria-hidden="true"></div>
       <h1>${esc(statusText(v))}</h1>
       ${open && v.search?.radiusKm ? `<p>${esc(t('searching_within', { km: v.search.radiusKm }))} · ${esc(t('volunteers_alerted', { n: v.alertedCount }))}</p>` : ''}
-      ${open && v.search?.secondsLeft != null && (v.responders?.length || 0) < 2 ? `<p class="small"><span data-live="stage-countdown" data-deadline="${esc(v.search.deadline)}">${esc(t('next_stage_in', { s: v.search.secondsLeft }))}</span></p>` : ''}
+      ${open && v.search?.secondsLeft != null && (v.responders?.length || 0) < 2 ? `<p class="small"><span data-live="stage-countdown" data-deadline="${esc(v.search.deadline)}"></span></p>` : ''}
       <ol class="stage-bar" aria-label="Search stages">${stages}</ol>
     </section>
+    ${open && v.status === 'LOCATION_UNAVAILABLE' ? `<div class="alert alert-danger" role="alert"><strong>📍 We don't have your location yet, so volunteers can't be matched.</strong> Call a number below now, and allow location for this site.<div class="row"><button class="btn btn-secondary" data-act="share-location">${esc(t('allow_location'))}</button></div></div>` : ''}
     ${open ? emergencyBar() : ''}
     ${v.escalations?.length ? `<div class="alert alert-warn"><strong>Escalation:</strong> ${v.escalations.map((e) => `${esc(pretty(e.type))} — <em>${esc(e.label)}</em>`).join('<br>')}<p class="small">Call one of the numbers above yourself — this app has not contacted them.</p></div>` : ''}
     ${open ? `
@@ -355,6 +358,7 @@ async function streamLocation() {
   const loc = currentLoc();
   if (!loc) return;
   st.lastLocPost = Date.now();
+  if (isDemo() && !v.location && loc.source !== 'synthetic') { try { await st.api.demoRelocate(loc.lat, loc.lng); } catch {} }
   try { await st.api.addLocation(v.id, loc); } catch {}
 }
 
@@ -385,7 +389,9 @@ async function viewTools() {
   return shell(`
     <h1>${esc(t('tools'))}</h1>
     <section class="card"><h2>⏱️ ${esc(t('safe_walk'))}</h2>
-      <p class="muted">If you don't check in before the timer ends, a 30-second countdown starts and then an SOS is sent automatically. Keep this page open.</p>
+      <p><strong>For walking or travelling alone</strong> — e.g. walking home at night or taking a cab.</p>
+      <ol class="small"><li>Set how long the trip should take (say 15 minutes) and tap Start.</li><li>When you arrive safely, tap <b>"I'm OK — check in"</b>.</li><li>If you <b>don't</b> check in in time — because something happened or your phone was taken — a 30-second countdown starts and then an SOS is sent automatically.</li></ol>
+      <p class="muted small">Keep this app open during the trip.</p>
       ${sw ? `<p><strong data-live="safewalk"></strong></p><div class="row"><button class="btn btn-primary" data-act="safewalk-checkin">${esc(t('check_in'))}</button><button class="btn btn-ghost" data-act="safewalk-stop">${esc(t('stop'))}</button></div>`
         : `<form class="inline-form" data-form="safewalk"><label>${esc(t('minutes'))}<input name="minutes" type="number" min="1" max="240" value="15" required></label><button class="btn btn-primary">${esc(t('start'))}</button></form>`}
     </section>
@@ -461,7 +467,9 @@ async function viewVolunteer() {
   const check = (ok, label) => `<li class="${ok ? 'ok' : 'no'}">${ok ? '✅' : '⬜'} ${esc(label)}</li>`;
   const sel = alerts.find((a) => a.id === st.volSel) || alerts.find((a) => a.open);
   const reasons = el.reasons;
+  const fresh = alerts.filter((a) => a.open && !a.alertResponse && !a.assignment);
   return shell(`
+    ${fresh.length ? `<button class="alert alert-danger alert-link sos-incoming" data-act="vol-select" data-id="${esc(fresh[0].id)}">🚨 New SOS nearby (${esc(fresh[0].distanceBand)}) — tap to respond</button>` : ''}
     <h1>Volunteer</h1>
     <section class="card">
       <div class="row space"><h2>Readiness</h2><span class="badge ${el.eligible ? 'badge-ok' : 'badge-warn'}">${el.eligible ? 'Ready to receive alerts' : 'Not receiving alerts'}</span></div>
@@ -500,7 +508,7 @@ function volunteerDetail(a) {
     ${a.otherResponders?.length ? `<p>Other responders: ${a.otherResponders.map((o) => `${esc(pretty(o.role))} ${esc(pretty(o.status))} (${esc(o.distanceBand)})`).join(', ')}</p>` : ''}
     ${asg && a.location ? `
       <div class="precise"><strong>Exact location (shared because you are assigned — access is logged)</strong>
-        <p>±${esc(a.location.accuracyM)} m · ${esc(ago(a.location.ageSec))} old ${a.location.stale ? '<span class="badge badge-warn">stale</span>' : ''} · ${esc(a.location.vertical)}</p>
+        <p>±${esc(a.location.accuracyM)} m · <span data-live="age" data-fmt="short" data-at="${esc(a.location.observedAt)}"></span> old ${a.location.stale ? '<span class="badge badge-warn">stale</span>' : ''} · ${esc(a.location.vertical)}</p>
         ${a.battery ? `<p>Her battery: ${Math.round(a.battery.level * 100)}%${a.battery.charging ? ' (charging)' : ''}</p>` : ''}
         <a class="btn btn-secondary" href="${esc(a.navigationUrl)}" target="_blank" rel="noopener">🧭 Navigate</a>
       </div>
@@ -524,14 +532,14 @@ async function viewOps() {
   try { list = (await st.api.opIncidents(all)).items; } catch (e) { return shell(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
   const selId = st.opSel && list.some((i) => i.id === st.opSel) ? st.opSel : list[0]?.id;
   let d = null, tl = [], cfg = null;
-  if (selId) { try { d = await st.api.getIncident(selId); tl = (await st.api.timeline(selId)).items; cfg = (await st.api.adminConfig()).config; } catch {} }
+  if (selId) { try { d = await st.api.getIncident(selId); if (d.search?.deadline && d.search.secondsLeft != null) st.skew = (Date.parse(d.search.deadline) - d.search.secondsLeft * 1000) - Date.now(); tl = (await st.api.timeline(selId)).items; cfg = (await st.api.adminConfig()).config; } catch {} }
   return shell(`
     <div class="row space"><h1>Operations console</h1><label class="switch"><input type="checkbox" data-change="ops-all" ${all ? 'checked' : ''}> Show closed</label></div>
     <div class="ops-layout">
       <section class="card ops-list"><h2>Incidents (${list.length})</h2>
         <ul>${list.map((i) => `<li><button class="alert-item status-${esc(i.color)} ${i.id === selId ? 'sel' : ''}" data-act="op-select" data-id="${esc(i.id)}"><span class="dot"></span>
           <span>${i.duress ? '🚩 DURESS · ' : ''}${i.severity === 'HIGH' ? '🔥 ' : ''}${esc(pretty(i.status))}</span>
-          <small>${esc(fmtTime(i.createdAt))} · ${i.radiusKm ? esc(i.radiusKm) + ' km' : '—'} · ${esc(i.responders)} resp · ${i.location ? `±${esc(i.location.accuracyM)}m ${esc(ago(i.location.ageSec))}` : 'no location'}${i.flags.includes('LOCATION_STALE') ? ' · stale' : ''}</small></button></li>`).join('') || '<li class="muted">No active incidents.</li>'}</ul>
+          <small>${esc(fmtTime(i.createdAt))} · ${i.radiusKm ? esc(i.radiusKm) + ' km' : '—'} · ${esc(i.responders)} resp · ${i.location ? `±${esc(i.location.accuracyM)}m` : 'no location'}${i.flags.includes('LOCATION_STALE') ? ' · stale' : ''}</small></button></li>`).join('') || '<li class="muted">No active incidents.</li>'}</ul>
       </section>
       ${d ? opsDetail(d, tl, cfg) : '<section class="card"><p class="muted">Select an incident.</p></section>'}
     </div>`);
@@ -546,9 +554,9 @@ function opsDetail(d, tl, cfg) {
     <p>Trigger: ${esc(d.trigger)}${d.silent ? ' (silent)' : ''} · Escalation: <strong>${esc(d.escalationStatus)}</strong> · Alerted: ${esc(d.alertedCount)} · Battery: ${d.battery ? Math.round(d.battery.level * 100) + '%' : 'unknown'}</p>
     ${d.location ? `<div class="ops-map">${radarSvg({ center: d.location, radii: cfg?.radiusStagesKm || [10, 20, 30], activeStage: d.search?.stage, markers })}
       <div class="legend"><span class="pin-l pin-incident"></span>Her location <span class="pin-l pin-alerted"></span>Alerted <span class="pin-l pin-assigned"></span>Assigned <span class="pin-l pin-declined"></span>Declined</div></div>
-      <p>📍 ${esc(d.location.lat.toFixed(5))}, ${esc(d.location.lng.toFixed(5))} · ±${esc(d.location.accuracyM)} m · ${esc(d.location.source)} · ${esc(ago(d.location.ageSec))} old ${d.location.stale ? '<span class="badge badge-warn">STALE</span>' : ''} · ${esc(d.location.vertical)} <a href="https://maps.google.com/?q=${esc(d.location.lat)},${esc(d.location.lng)}" target="_blank" rel="noopener">map</a></p>
+      <p>📍 ${esc(d.location.lat.toFixed(5))}, ${esc(d.location.lng.toFixed(5))} · ±${esc(d.location.accuracyM)} m · ${esc(d.location.source)} · <span data-live="age" data-fmt="short" data-at="${esc(d.location.observedAt)}"></span> old ${d.location.stale ? '<span class="badge badge-warn">STALE</span>' : ''} · ${esc(d.location.vertical)} <a href="https://maps.google.com/?q=${esc(d.location.lat)},${esc(d.location.lng)}" target="_blank" rel="noopener">map</a></p>
       ${d.locationHistory.some((l) => l.suspect) ? `<p class="badge badge-warn">Suspect location jumps ignored: ${d.locationHistory.filter((l) => l.suspect).map((l) => esc(l.suspectReason)).join('; ')}</p>` : ''}` : '<div class="alert alert-warn">No usable location. Contact the user through official channels if possible.</div>'}
-    ${d.search?.secondsLeft != null ? `<p>Search stage ${d.search.stage + 1}/3 (${esc(d.search.radiusKm)} km) · next expansion in <span data-live="stage-countdown-raw" data-deadline="${esc(d.search.deadline)}">${esc(d.search.secondsLeft)}s</span></p>` : ''}
+    ${d.search?.secondsLeft != null ? `<p>Search stage ${d.search.stage + 1}/3 (${esc(d.search.radiusKm)} km) · next expansion in <span data-live="stage-countdown-raw" data-deadline="${esc(d.search.deadline)}"></span></p>` : ''}
     <h3>Responders</h3>
     <table class="tbl"><thead><tr><th>Volunteer</th><th>Role</th><th>Status</th><th>Dist.</th><th></th></tr></thead><tbody>
       ${d.assignments.map((a) => `<tr><td>${esc(a.volunteerName)}</td><td>${esc(a.role)}</td><td>${esc(pretty(a.status))}${a.stallFlagged ? ' ⚠️ stalled' : ''}</td><td>${a.distanceKm != null ? esc(a.distanceKm) + ' km' : '—'}</td><td>${['ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ASSISTING'].includes(a.status) && !d.closed ? `<button class="btn btn-ghost btn-sm" data-act="op-reassign" data-id="${esc(d.id)}" data-aid="${esc(a.id)}">Remove</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">None yet</td></tr>'}
@@ -616,12 +624,12 @@ function viewDemo() {
   return shell(`
     <h1>🧪 Demo controls</h1>
     <section class="card"><h2>Suggested walkthrough</h2><ol>
-      <li>Log in as <b>Priya</b> → hold SOS (synthetic Kurnool location). Watch the 10 km search.</li>
+      <li>Log in as <b>Aamani</b> → hold SOS (synthetic Kurnool location). Watch the 10 km search.</li>
       <li>Advance time to see 10 → 20 → 30 km expansion, or act as a volunteer below.</li>
       <li>Open a second tab, log in as <b>Asha</b> (volunteer): note she only sees an approximate area until she accepts.</li>
       <li>Open a third tab as <b>Operator</b>: radar, escalations labelled <em>SIMULATED</em>, manual handoff record.</li>
-      <li>As Priya choose "I need more help" (escalates) and later "Yes, I am safe" → GREEN and closed.</li>
-      <li>Try the duress PIN: set PINs in Settings, then cancel with the duress PIN — Priya sees "cancelled", the operator sees 🚩 DURESS.</li>
+      <li>As Aamani choose "I need more help" (escalates) and later "Yes, I am safe" → GREEN and closed.</li>
+      <li>Try the duress PIN: set PINs in Settings, then cancel with the duress PIN — Aamani sees "cancelled", the operator sees 🚩 DURESS.</li>
     </ol></section>
     <section class="card"><h2>Clock & failures</h2><div class="row">
       <button class="btn btn-secondary" data-act="demo-advance" data-s="30">+30 s</button><button class="btn btn-secondary" data-act="demo-advance" data-s="60">+60 s</button><button class="btn btn-secondary" data-act="demo-advance" data-s="180">+3 min</button>
@@ -659,10 +667,15 @@ async function render() {
     case 'demo': if (!guard()) return; html = viewDemo(); break;
     default: html = shell('<p>Page not found.</p>');
   }
+  // Background refresh: only touch the screen when something actually changed.
+  if (st.softRefresh && html === st.lastHtml) { st.softRefresh = false; updateLive(); return; }
+  st.lastHtml = html;
   const y = window.scrollY;
   const focusedForm = document.activeElement?.closest?.('form') && document.activeElement.name;
   const openKeys = new Set($$('details[data-keep][open]').map((d) => d.dataset.keep));
+  if (st.softRefresh && patchMain(html)) { for (const d of $$('details[data-keep]')) if (openKeys.has(d.dataset.keep)) d.open = true; st.softRefresh = false; bindHold(); updateLive(); return; }
   app().innerHTML = html;
+  rememberMain();
   for (const d of $$('details[data-keep]')) if (openKeys.has(d.dataset.keep)) d.open = true;
   if (st.softRefresh) window.scrollTo(0, y);
   if (focusedForm) document.querySelector(`[name="${focusedForm}"]`)?.focus();
@@ -670,6 +683,27 @@ async function render() {
   bindHold();
   updateLive();
   if (parts[0] === 'login' && isDemo() && params.get('as')) $('[data-form="login"] [name="email"]')?.focus();
+}
+
+// Background refresh: swap only the blocks whose content changed, so the
+// screen doesn't flash or jump. Returns false if the layout changed too much.
+const srcHtml = new WeakMap(); // element → HTML it was rendered from (before live values were filled in)
+function rememberMain() { for (const c of $('#main')?.children || []) srcHtml.set(c, c.outerHTML); }
+function patchMain(html) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  const nextMain = tpl.content.querySelector('#main');
+  const curMain = $('#main');
+  if (!nextMain || !curMain || nextMain.children.length !== curMain.children.length) return false;
+  [...nextMain.children].forEach((n, i) => {
+    const c = curMain.children[i];
+    const src = n.outerHTML;
+    if (srcHtml.get(c) === src) return; // unchanged block: leave it exactly as it is
+    const fresh = n.cloneNode(true);
+    c.replaceWith(fresh);
+    srcHtml.set(fresh, src);
+  });
+  return true;
 }
 
 // Re-render without losing typing: skip if the user is in a form field.
@@ -688,8 +722,13 @@ function updateLive() {
     const left = Math.max(0, Math.round((sw.endsAt - Date.now()) / 1000));
     el.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
   }
+  const now = Date.now() + (st.skew || 0);
+  for (const el of $$('[data-live="age"]')) {
+    const s = Math.max(0, Math.round((now - Date.parse(el.dataset.at)) / 1000));
+    el.textContent = el.dataset.fmt === 'short' ? ago(s) : t('updated_ago', { s });
+  }
   for (const el of $$('[data-live="stage-countdown"],[data-live="stage-countdown-raw"]')) {
-    const left = Math.max(0, Math.round((Date.parse(el.dataset.deadline) - Date.now()) / 1000));
+    const left = Math.max(0, Math.round((Date.parse(el.dataset.deadline) - now) / 1000));
     el.textContent = el.dataset.live === 'stage-countdown' ? t('next_stage_in', { s: left }) : `${left}s`;
   }
 }
@@ -713,7 +752,6 @@ const actions = {
     try { await geo.once(); geo.start(); toast(t('location_on'), 'ok'); } catch (e) { toast(e.code === 1 ? 'Location permission denied. You can still send SOS and call.' : 'Could not get a location fix.', 'error', 6000); }
     render();
   },
-  'silent-sos'() { triggerSOS({ silent: true, trigger: 'silent', severity: $('#sev-high')?.checked ? 'HIGH' : 'NORMAL' }); },
   siren() { siren.on ? siren.stop() : siren.start(); render(); },
   async 'fake-call'() { fakeCall(prefs.get().fakeCaller, 3); },
   async 'record-toggle'() {

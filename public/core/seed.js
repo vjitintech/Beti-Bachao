@@ -6,8 +6,7 @@ export const DEMO_PASSWORD = 'demo1234';
 
 // One-line role descriptions for the demo login screen (max 30 characters).
 export const DEMO_BLURBS = {
-  'priya@demo.betibachao.app': 'Woman who raises the SOS',
-  'lakshmi@demo.betibachao.app': 'Second woman, parallel SOS',
+  'aamani@demo.betibachao.app': 'Woman who raises the SOS',
   'asha@demo.betibachao.app': 'Verified · 3 km · 1st ring',
   'ravi@demo.betibachao.app': 'Verified · 7.5 km · 1st ring',
   'meena@demo.betibachao.app': 'Verified · 14 km · 2nd ring',
@@ -40,8 +39,7 @@ export function offset(center, km, bearingDeg) {
 
 export function seedDemo(engine, { passwordHash = null, mfaSecret = null } = {}) {
   const mk = (displayName, email, role, extra = {}) => engine.createUser({ displayName, email, role, passwordHash, demo: true, countryCode: 'IN', ...extra });
-  const priya = mk('Priya (demo user)', 'priya@demo.betibachao.app', 'user');
-  mk('Lakshmi (demo user)', 'lakshmi@demo.betibachao.app', 'user');
+  const aamani = mk('Aamani (demo user)', 'aamani@demo.betibachao.app', 'user');
   for (const v of VOLUNTEERS) {
     const u = mk(v.name, v.email, 'volunteer');
     const p = engine.vol(u.id);
@@ -55,7 +53,7 @@ export function seedDemo(engine, { passwordHash = null, mfaSecret = null } = {})
   mk('Operator Nandini (demo)', 'operator@demo.betibachao.app', 'operator', { mfaSecret });
   mk('Admin Farah (demo)', 'admin@demo.betibachao.app', 'admin', { mfaSecret });
   engine.audit('system', 'DEMO_SEEDED', 'system', 'demo', 'synthetic data only');
-  return { priya };
+  return { aamani };
 }
 
 // Keep demo volunteers' locations fresh and optionally move them around a new centre.

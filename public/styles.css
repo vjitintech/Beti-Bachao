@@ -246,3 +246,7 @@ body.strobe::after { content: ""; position: fixed; inset: 0; z-index: 40; pointe
 
 .eb-main { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .woman-icon { width: 22px; height: 30px; fill: currentColor; flex: none; }
+
+button.alert { width: 100%; text-align: start; font: inherit; cursor: pointer; }
+.sos-incoming { animation: heartbeat 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .sos-incoming { animation: none; } }

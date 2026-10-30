@@ -38,10 +38,10 @@ test('server: health, security headers, CSRF and auth', async () => {
   assert.equal(h.status, 200);
   assert.match(h.headers.get('content-security-policy'), /default-src 'self'/);
   assert.equal((await c.call('GET', '/me')).status, 401);
-  const noCsrf = await c.call('POST', '/auth/login', { email: 'priya@demo.betibachao.app', password: 'demo1234' }, { csrf: false });
+  const noCsrf = await c.call('POST', '/auth/login', { email: 'aamani@demo.betibachao.app', password: 'demo1234' }, { csrf: false });
   assert.equal(noCsrf.status, 403);
-  assert.equal((await c.login('priya@demo.betibachao.app', { password: 'wrong' })).status, 401);
-  const ok = await c.login('priya@demo.betibachao.app');
+  assert.equal((await c.login('aamani@demo.betibachao.app', { password: 'wrong' })).status, 401);
+  const ok = await c.login('aamani@demo.betibachao.app');
   assert.equal(ok.status, 200);
   assert.match(ok.headers.get('set-cookie'), /HttpOnly; SameSite=Strict/);
   assert.equal((await c.call('GET', '/me')).body.user.role, 'user');
@@ -60,7 +60,7 @@ test('server: operator login requires MFA', async () => {
 
 test('server: SOS → volunteer privacy → accept → safety confirmation end-to-end', async () => {
   const user = client(shared.base), ravi = client(shared.base), asha = client(shared.base), deepa = client(shared.base);
-  await user.login('priya@demo.betibachao.app');
+  await user.login('aamani@demo.betibachao.app');
   await ravi.login('ravi@demo.betibachao.app');
   await asha.login('asha@demo.betibachao.app');
   await deepa.login('deepa@demo.betibachao.app');
@@ -96,7 +96,7 @@ test('server: SOS → volunteer privacy → accept → safety confirmation end-t
 
 test('server: durable stage timer survives restart', async () => {
   const user = client(shared.base);
-  await user.login('lakshmi@demo.betibachao.app');
+  await user.login('aamani@demo.betibachao.app');
   const sos = await user.call('POST', '/incidents', { idempotencyKey: 'restart-1', location: { ...DEMO_CENTER, accuracyM: 20, source: 'synthetic' } });
   const id = sos.body.incident.id;
   await new Promise((r) => shared.app.server.close(r));
@@ -108,7 +108,7 @@ test('server: durable stage timer survives restart', async () => {
   const again = await boot();
   await new Promise((r) => setTimeout(r, 200));
   const c = client(again.base);
-  await c.login('lakshmi@demo.betibachao.app');
+  await c.login('aamani@demo.betibachao.app');
   const v = await c.call('GET', `/incidents/${id}`);
   assert.equal(v.body.status, 'ALERTING_20KM');
   shared = again;

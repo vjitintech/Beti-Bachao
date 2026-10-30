@@ -9,7 +9,7 @@ Beti Bachao is not "another panic button". It coordinates the whole response —
 ## What's in it
 
 **For women & girls (installable phone app, 14 languages)**
-- **Hold-to-SOS** (3 s, prevents pocket triggers) · **Silent SOS** (no sound, dark discreet screen) · **"I'm in immediate danger"** (escalates instantly, faster search timers)
+- **Hold-to-SOS** (3 s, prevents pocket triggers). Every SOS is treated as immediate danger: instant escalation and fast search timers
 - **Shake ×3** and **voice keyword** triggers ("bachao", "kapadandi", "help"…) with a 5 s cancellable countdown
 - **Safe-walk timer**: miss your check-in → 30 s countdown → automatic SOS
 - **Duress PIN**: entering it "cancels" the SOS on screen, but secretly keeps help coming and flags the operator 🚩
@@ -40,9 +40,9 @@ node scripts/version.mjs   # run after editing public/ so phones load fresh file
 npm start           # production-style: MFA on, no demo routes (set ADMIN_EMAIL/ADMIN_PASSWORD on first boot)
 ```
 
-Demo accounts (password `demo1234`, one tap on the login screen): Priya & Lakshmi (users), Asha 3 km, Ravi 7.5 km, Meena 14 km, Imran 24 km (eligible volunteers), Kiran (unverified), Deepa (untrained), Suresh (off duty), Operator, Admin. Operator/admin MFA codes are auto-filled in demo mode only.
+Demo accounts (password `demo1234`, one tap on the login screen): Aamani (the woman raising SOS), Asha 3 km, Ravi 7.5 km, Meena 14 km, Imran 24 km (eligible volunteers), Kiran (unverified), Deepa (untrained), Suresh (off duty), Operator, Admin. Operator/admin MFA codes are auto-filled in demo mode only.
 
-**Try the full story**: log in as Priya in one tab, Asha in a second, Operator in a third. Hold SOS → watch 10 km search → advance time in *Demo* to see 20/30 km → Asha accepts (now sees exact location) → En route → Priya taps *I need more help* (escalation) → *Yes, I am safe* → GREEN.
+**Try the full story**: log in as Aamani in one tab, Asha in a second, Operator in a third. Hold SOS → watch 10 km search → advance time in *Demo* to see 20/30 km → Asha accepts (now sees exact location) → En route → Aamani taps *I need more help* (escalation) → *Yes, I am safe* → GREEN.
 
 ### Static hosting (GitHub Pages)
 
