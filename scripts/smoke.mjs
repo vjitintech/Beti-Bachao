@@ -80,7 +80,7 @@ try {
   const op = await ctx('operator', { viewport: { width: 1280, height: 900 } });
   await login(op, 'operator@demo.betibachao.app');
   await op.waitForSelector('.ops-detail');
-  await op.waitForSelector('.radar');
+  await op.waitForSelector('.ppi');
   const opText = await op.textContent('.ops-detail');
   if (!/Asha/.test(opText)) throw new Error('operator does not see assignment');
   await shot(op, '06-operator'); step('operator console with radar and responders (MFA auto-filled in demo)');
