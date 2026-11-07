@@ -10,11 +10,15 @@ Beti Bachao is not "another panic button". It coordinates the whole response: SO
 
 **➡ For 24×7 real use: [docs/DEPLOY.md](docs/DEPLOY.md)** (one-click Render deploy, about 10 minutes).
 
+**📱 Phone & tablet apps:** [Android APK](https://github.com/vjitintech/Beti-Bachao/releases/download/android-latest/BetiBachao-debug.apk) · iPhone/iPad (TestFlight build via GitHub Actions) — see [docs/MOBILE_APPS.md](docs/MOBILE_APPS.md). Women and volunteers use the apps; operators and admins use the web dashboard.
+
 ## Features
 
-**For women & girls** (installable phone app, 14 languages)
+**For women & girls** (Android & iPhone/iPad apps, 14 languages)
 - **Hold-to-SOS** (3 s, prevents pocket triggers). Every SOS is treated as immediate danger, alerts operators instantly, and searches quickly.
-- **Auto-message**: the moment SOS starts, the phone's SMS app opens pre-filled with "I am in danger" plus a Google Maps link, addressed to all trusted contacts.
+- **Auto-message**: the moment SOS starts, "I am in danger" + a Google Maps link goes to all trusted contacts. On **Android it's sent automatically** (optionally to 112 too), on iPhone the SMS opens ready to send, and the server SMS gateway sends it as a backup.
+- **SOS without opening the app**: Android Quick Settings tile, home-screen widget, power button ×5, lock-screen button; iPhone "Hey Siri, Beti Bachao SOS" / Action Button. Live location keeps updating with the screen locked.
+- **Rate responders** after she's safe; "felt unsafe" opens a misconduct review.
 - **Shake ×3**, **voice keyword** ("bachao", "kapadandi", "help"…), and **reach-home check-in timer** triggers.
 - **Duress PIN**: "cancels" on screen but secretly keeps help coming and flags operators 🚩.
 - **Live tracking**: PPI radar with every responder's distance and ETA counting down, plus an embedded Google Map.
@@ -23,11 +27,11 @@ Beti Bachao is not "another panic button". It coordinates the whole response: SO
 - Siren, fake call, evidence recorder (stays on the phone).
 - Helplines 112 · 181 · 1091 · 108 (India); other countries configurable.
 
-**For volunteers**: register → 5 training modules → verification request (trust team calls; no ID uploads) → admin approval → on duty → **phone push alerts** even when the app is closed → accept → embedded route map and team radar → En route / Arrived / Assisting → stand-down.
+**For volunteers**: register → 5 training modules → **video verification call** booked by the admin (Jitsi), where the volunteer shows the **Aadhaar card front and back**. The admin approves with a checklist, and only the masked last 4 digits are ever stored; no images, no police check. **No responder access at all until approved** → on duty → **loud alarm push alerts** even when the phone is locked (SMS fallback after 30 s) → accept → embedded route map and team radar → En route / Arrived / Assisting → stand-down.
 
-**For operators** (authenticator-app login): live queue, ① SEARCH radar (who was alerted) and ② APPROACH radar (who is coming), push alerts on every escalation, reassign responders, record 112 handoffs, audited closure exceptions.
+**For operators** (web dashboard, authenticator-app login): live queue, optional local-AI summary / translation / fake-SOS risk flag (Colibri, advisory only), ① SEARCH radar (who was alerted) and ② APPROACH radar (who is coming), push alerts on every escalation, reassign responders, record 112 handoffs, audited closure exceptions.
 
-**For admins**: add operators, approve or suspend volunteers, dispatch policy (radii, timers, responder targets), abuse reports, hash-chained audit log, daily backup download.
+**For admins** (web dashboard): add operators, book verification calls and approve or suspend volunteers, reset passwords, responder ratings, dispatch policy (radii, timers, responder targets), abuse reports, hash-chained audit log, daily backup download.
 
 **Languages**: English, हिन्दी, తెలుగు, தமிழ், ಕನ್ನಡ, മലയാളം, বাংলা, मराठी, ગુજરાતી, اردو, العربية, Español, Français, Português.
 
@@ -37,7 +41,7 @@ Node.js ≥ 20, **no npm install needed** (zero dependencies).
 
 ```bash
 ADMIN_EMAIL=you@example.org ADMIN_PASSWORD='a-long-password' npm start   # http://localhost:8080
-npm test          # 32 engine, API and Web Push tests
+npm test          # 47 engine, API, app-integration, push, APNs and PostgreSQL tests
 npm run smoke     # headless-browser end-to-end walkthrough (needs Playwright/Chromium)
 node scripts/version.mjs   # run after editing public/ so phones load fresh files
 ```
@@ -48,12 +52,15 @@ node scripts/version.mjs   # run after editing public/ so phones load fresh file
 public/core/engine.js   ← all safety rules: state machine, staged search, privacy filter, escalation, tracking, audit
 server/server.js        ← API /api/v1, sessions, TOTP MFA + enrolment, CSRF, rate limits, SSE, durable scheduler, backups
 server/webpush.js       ← Web Push (VAPID + aes128gcm) with Node crypto — no libraries
-server/store.js         ← atomic JSON store on a persistent disk (single instance)
+server/store.js         ← atomic JSON store; server/pgstore.js + pg.js mirror it to PostgreSQL (DATABASE_URL)
+server/fcm.js, apns.js  ← Android (Firebase) and iPhone (APNs) push, no SDKs
+server/sms.js, routing.js, ai.js, backup.js ← SMS gateway, OSRM ETA, Colibri AI, encrypted backups
+mobile/                 ← Capacitor Android + iOS apps; native/android (Java), native/ios (Swift)
 public/js/              ← PWA: screens, radar, maps, device safety features, 14 languages
 db/migrations/          ← PostgreSQL + PostGIS schema for scaling beyond one server
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/API.md](docs/API.md), [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md), [docs/RETENTION.md](docs/RETENTION.md), [docs/LAUNCH_CHECKLIST.md](docs/LAUNCH_CHECKLIST.md).
+Optional integrations: [docs/INTEGRATIONS.md](docs/INTEGRATIONS.md). See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/API.md](docs/API.md), [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md), [docs/RETENTION.md](docs/RETENTION.md), [docs/LAUNCH_CHECKLIST.md](docs/LAUNCH_CHECKLIST.md).
 
 ## Safety rules enforced in code (and tested)
 

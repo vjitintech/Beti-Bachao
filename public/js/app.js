@@ -1,9 +1,9 @@
-import { createApi, uuid } from './api.js?v=mw5x582t';
-import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mw5x582t';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mw5x582t';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mw5x582t';
-import { TRAINING_MODULES } from '../core/engine.js?v=mw5x582t';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mw5x582t';
+import { createApi, uuid } from './api.js?v=mw5xbapv';
+import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mw5xbapv';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mw5xbapv';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mw5xbapv';
+import { TRAINING_MODULES } from '../core/engine.js?v=mw5xbapv';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mw5xbapv';
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'policy', volSel: null };
 const app = () => $('#app');

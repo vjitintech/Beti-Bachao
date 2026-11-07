@@ -13,6 +13,7 @@ import { generateVapidKeys, sendPush, isValidSubscription } from './webpush.js';
 import { JsonStore } from './store.js';
 import { Fcm, parseServiceAccount } from './fcm.js';
 import { createApns } from './apns.js';
+import { openPostgres, attachPostgres } from './pgstore.js';
 import { createSms } from './sms.js';
 import { createRouting } from './routing.js';
 import { createAi } from './ai.js';
@@ -29,6 +30,7 @@ export function createServer(opts = {}) {
   const SESSION_TTL_MS = 12 * 3600 * 1000;
   const RATE_MULT = Math.max(1, Number(env.RATE_LIMIT_MULTIPLIER) || 1); // tests only
   const store = new JsonStore(env.DATA_FILE || path.join(ROOT, 'data', 'db.json'));
+  if (opts.pg) attachPostgres(store, opts.pg, { url: opts.pgUrl || null });
   const limiter = new RateLimiter();
   const deps = { uuid, hash: sha256, hashSecret, now: () => Date.now(), notify: (n) => { queuePush(n); return { ok: true }; } };
   let engine = new Engine(store.db, deps);
@@ -406,7 +408,7 @@ export function createServer(opts = {}) {
     if (!out) throw new EngineError(502, 'AI_UNAVAILABLE', 'The AI server did not answer');
     return { text: out, target, machineTranslated: true };
   }, { limit: [120, 3600e3] });
-  route('GET', '/admin/integrations/status', ({ actor }) => { engine.requireRole(actor, 'admin'); return { fcm: !!fcm, apns: apns ? apns.origin : null, sms: sms?.name || null, routing: !!routing, ai: ai ? ai.model : null, backups: backups ? backups.dir : null }; });
+  route('GET', '/admin/integrations/status', ({ actor }) => { engine.requireRole(actor, 'admin'); return { database: store.pg ? { kind: 'postgresql', ...store.pg.status } : { kind: 'file' }, fcm: !!fcm, apns: apns ? apns.origin : null, sms: sms?.name || null, routing: !!routing, ai: ai ? ai.model : null, backups: backups ? backups.dir : null }; });
 
   route('GET', '/admin/staff', ({ actor }) => ({ items: engine.listStaff(actor) }));
   route('GET', '/admin/backup', ({ actor, res }) => {
@@ -460,6 +462,7 @@ export function createServer(opts = {}) {
   route('GET', '/admin/abuse-reports', ({ actor }) => ({ items: engine.listAbuse(actor) }));
   route('POST', '/admin/abuse-reports/:id/resolve', ({ actor, p, body }) => engine.resolveAbuse(actor, p.id, body));
   route('GET', '/admin/integrations', ({ actor }) => { engine.requireRole(actor, 'admin', 'operator'); return { items: [
+    { name: 'Database', status: store.pg ? (store.pg.status.ok ? 'POSTGRESQL' : 'POSTGRESQL ERROR') : 'LOCAL FILE', note: store.pg ? (store.pg.status.ok ? `Every change is saved to PostgreSQL${store.pg.status.lastWriteAt ? ` (last ${store.pg.status.lastWriteAt})` : ''}.` : `Last write failed: ${store.pg.status.lastError}. Data is kept locally and retried.`) : 'Set DATABASE_URL so data survives redeploys on hosts that wipe disks.' },
     { name: 'Police / ambulance (112)', status: 'MANUAL', note: 'Not contacted automatically. Operators phone 112 and record the handoff in the console.' },
     { name: 'App push (Firebase, Android + iPhone)', status: fcm ? 'ACTIVE' : 'NOT CONFIGURED', note: fcm ? `${store.db.devices.length} app device(s) registered.` : 'Set FCM_SERVICE_ACCOUNT to send alarm alerts to the phone apps.' },
     { name: 'iPhone push (Apple APNs)', status: apns ? 'ACTIVE' : 'NOT CONFIGURED', note: apns ? `${store.db.devices.filter((d) => d.platform === 'ios').length} iPhone/iPad device(s) registered.` : 'Set APNS_KEY, APNS_KEY_ID and APNS_TEAM_ID to send alerts to the iPhone app.' },
@@ -549,8 +552,11 @@ export function createServer(opts = {}) {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   const port = Number(process.env.PORT || 8080);
-  const { server } = createServer();
-  server.listen(port, () => console.log(`Beti Bachao listening on port ${port}`));
-  const stop = () => server.close(() => process.exit(0));
+  const env = process.env;
+  const dataFile = env.DATA_FILE || path.join(ROOT, 'data', 'db.json');
+  const pg = env.DATABASE_URL ? await openPostgres(env.DATABASE_URL, dataFile).catch((e) => { console.error('[db] Cannot reach PostgreSQL:', e.message); process.exit(1); }) : null;
+  const { server, store } = createServer({ pg, pgUrl: env.DATABASE_URL });
+  server.listen(port, () => console.log(`Beti Bachao listening on port ${port}${pg ? ' (PostgreSQL storage)' : ''}`));
+  const stop = () => server.close(async () => { if (store.pg) { await store.pg.flush().catch(() => {}); store.pg.close(); } process.exit(0); });
   process.on('SIGINT', stop); process.on('SIGTERM', stop);
 }

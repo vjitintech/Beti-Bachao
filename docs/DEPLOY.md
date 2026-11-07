@@ -29,8 +29,9 @@ Put it behind HTTPS (a reverse proxy such as Caddy or NGINX, or the platform's T
 
 ## After launch
 
-- **Volunteers** register → finish 5 training modules → **Request verification** (they enter a phone number). The admin calls them, checks ID on a video call or in person, then **Admin → Volunteers → Approve**. Never ask volunteers to upload ID documents.
-- **Volunteers must tap "Go on duty" and enable alerts** (🔔). On iPhone they must first **Share → Add to Home Screen** and open the app from there (iOS 16.4+) for alerts to work.
+- **Phone apps:** give women and volunteers the Android/iPhone app ([MOBILE_APPS.md](MOBILE_APPS.md)) and set the `BB_SERVER_URL` repository variable to this server's address. Optional extras (PostgreSQL, SMS, push, road ETA, local AI): [INTEGRATIONS.md](INTEGRATIONS.md).
+- **Volunteers** register → finish 5 training modules → **Request verification**. In **Admin → Volunteers → Book video call** you create a video-call link (the volunteer sees it in the app). On the call they show their **Aadhaar card front and back**. Tick the checklist → **Approve**. Until then they get no SOS alerts or duty access. Don't take screenshots and don't store the card; only the optional last 4 digits are kept.
+- **Volunteers must tap "Go on duty"** and allow location "all the time" and notifications.
 - **Women** register with **"I need safety"**, add trusted contacts, and set Cancel/Duress PINs in Settings.
 - **Backups:** Admin → Integrations → **Download backup**, daily during the pilot. Store copies encrypted.
 - **Updates:** pushing to `main` on GitHub redeploys on Render automatically. Run `node scripts/version.mjs` before pushing changes to `public/` so phones load fresh files.
@@ -41,6 +42,7 @@ Put it behind HTTPS (a reverse proxy such as Caddy or NGINX, or the platform's T
 | Does | Doesn't (yet) |
 |---|---|
 | Real accounts, verified volunteers, staged 10/20/30 km search, live tracking, operator console | Contact police/ambulance automatically. Operators phone 112 and record the handoff |
-| Phone push alerts (Android Chrome; iPhone when installed to Home Screen) | Send SMS automatically. The woman's own SMS app opens pre-filled; she taps Send |
-| Works in any modern mobile browser and installs like an app | Background GPS or a power-button SOS. Those need a native Android/iOS app |
-| Single server with a data file on a persistent disk | Scale to multiple servers. Move to PostgreSQL (`db/migrations/001_init.sql`) before a large rollout |
+| Android app: SOS SMS sent automatically, background GPS, tile/widget/power-button SOS, alarm push | iPhone: send SMS by itself (Apple forbids it). The SMS opens ready to send, and the server SMS gateway covers it |
+| iPhone/iPad app: background GPS, Siri / Action Button SOS, time-sensitive push | Dial 112 automatically (no phone OS allows it). The call button is one tap |
+| Website still works in any mobile browser as a fallback | |
+| Single server; data on a persistent disk and/or PostgreSQL (`DATABASE_URL`) | Run several servers at once (one instance only for now) |
