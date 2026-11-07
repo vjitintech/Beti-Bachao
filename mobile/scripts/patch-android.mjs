@@ -51,6 +51,8 @@ const components = `
             <intent-filter><action android:name="android.service.quicksettings.action.QS_TILE" /></intent-filter>
             <meta-data android:name="android.service.quicksettings.TOGGLEABLE_TILE" android:value="false" />
         </service>
+        <!-- Our service raises the loud SOS alarm; drop the push plugin's own receiver (iPhone-only use). -->
+        <service android:name="com.capacitorjs.plugins.pushnotifications.MessagingService" tools:node="remove" />
         <service android:name=".AlertMessagingService" android:exported="false">
             <intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT" /></intent-filter>
         </service>
@@ -59,6 +61,7 @@ const components = `
     </application>`;
 must(man, '</application>', 'AndroidManifest.xml');
 man = man.replace('</application>', components);
+if (!man.includes('xmlns:tools=')) man = man.replace('<manifest ', '<manifest xmlns:tools="http://schemas.android.com/tools" ');
 fs.writeFileSync(manPath, man);
 
 // 4) app/build.gradle: native dependencies, version, release signing from CI secrets

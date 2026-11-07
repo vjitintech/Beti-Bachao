@@ -1,0 +1,84 @@
+name: iPhone/iPad app
+# Builds the Beti Bachao iOS app (iPhone + iPad) on macOS.
+#  - Always: an unsigned Simulator build (.app zip) to prove the app compiles and to run in Xcode's Simulator.
+#  - With Apple signing secrets: a signed .ipa for TestFlight / App Store.
+# Optional repository settings:
+#   Variables: BB_SERVER_URL (server address baked into the app), APPLE_TEAM_ID
+#   Secrets:   IOS_CERT_P12_BASE64, IOS_CERT_PASSWORD, IOS_PROFILE_BASE64 (App Store distribution)
+on:
+  push:
+    branches: [main]
+    paths: ['mobile/**', 'public/**', '.github/workflows/ios.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: macos-15
+    defaults: { run: { working-directory: mobile } }
+    env:
+      BB_SERVER_URL: ${{ vars.BB_SERVER_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Install Capacitor
+        run: npm install --no-audit --no-fund
+      - name: Bundle app screens
+        run: node scripts/prepare-www.mjs
+      - name: Generate iOS project
+        run: npx cap add ios
+      - name: Add native safety modules
+        run: |
+          gem list -i xcodeproj >/dev/null || sudo gem install xcodeproj --no-document
+          node scripts/patch-ios.mjs
+      - name: Sync
+        run: npx cap sync ios
+      - name: Build for Simulator (unsigned)
+        working-directory: mobile/ios/App
+        run: |
+          set -o pipefail
+          xcodebuild -workspace App.xcworkspace -scheme App -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build | tail -80
+          mkdir -p ../../../dist
+          (cd build/Build/Products/Debug-iphonesimulator && zip -qry ../../../../../../../dist/BetiBachao-simulator.app.zip App.app)
+          ls -la ../../../dist
+      - name: Signed .ipa (if Apple secrets are set)
+        working-directory: mobile/ios/App
+        env:
+          P12: ${{ secrets.IOS_CERT_P12_BASE64 }}
+          P12_PASS: ${{ secrets.IOS_CERT_PASSWORD }}
+          PROFILE: ${{ secrets.IOS_PROFILE_BASE64 }}
+          TEAM: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          if [ -z "$P12" ] || [ -z "$PROFILE" ] || [ -z "$TEAM" ]; then echo "No Apple signing secrets — skipping .ipa"; exit 0; fi
+          KC="$RUNNER_TEMP/bb.keychain-db"; security create-keychain -p bb "$KC"; security set-keychain-settings -lut 21600 "$KC"; security unlock-keychain -p bb "$KC"
+          echo "$P12" | base64 -d > "$RUNNER_TEMP/c.p12"; security import "$RUNNER_TEMP/c.p12" -P "$P12_PASS" -A -t cert -f pkcs12 -k "$KC"
+          security list-keychain -d user -s "$KC"; security set-key-partition-list -S apple-tool:,apple: -k bb "$KC"
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles; echo "$PROFILE" | base64 -d > ~/Library/MobileDevice/Provisioning\ Profiles/bb.mobileprovision
+          UUID=$(security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/bb.mobileprovision | plutil -extract UUID raw -)
+          sed -i '' 's/<string>development<\/string>/<string>production<\/string>/' App/App.entitlements
+          xcodebuild -workspace App.xcworkspace -scheme App -configuration Release -archivePath build/App.xcarchive \
+            DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_STYLE=Manual PROVISIONING_PROFILE="$UUID" CODE_SIGN_IDENTITY="Apple Distribution" archive | tail -40
+          cat > build/export.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict><key>method</key><string>app-store-connect</string><key>teamID</key><string>$TEAM</string>
+          <key>signingStyle</key><string>manual</string><key>provisioningProfiles</key><dict><key>app.betibachao.safety</key><string>$UUID</string></dict></dict></plist>
+          EOF
+          xcodebuild -exportArchive -archivePath build/App.xcarchive -exportOptionsPlist build/export.plist -exportPath build/ipa
+          cp build/ipa/*.ipa ../../../dist/BetiBachao.ipa
+      - uses: actions/upload-artifact@v4
+        with: { name: beti-bachao-ios, path: dist/ }
+      - name: Publish "ios-latest" download
+        if: github.ref == 'refs/heads/main'
+        env: { GH_TOKEN: '${{ github.token }}' }
+        working-directory: .
+        run: |
+          gh release delete ios-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create ios-latest dist/* --prerelease --target "$GITHUB_SHA" \
+            --title "Beti Bachao iPhone/iPad (latest build #${{ github.run_number }})" \
+            --notes "Simulator build for testing in Xcode. Installing on a real iPhone needs an Apple Developer account (TestFlight). Built from ${GITHUB_SHA::7}."

@@ -2,10 +2,25 @@
   "appId": "app.betibachao.safety",
   "appName": "Beti Bachao",
   "webDir": "www",
-  "server": { "androidScheme": "https" },
-  "android": { "allowMixedContent": false, "captureInput": true, "webContentsDebuggingEnabled": false },
-  "ios": { "contentInset": "never", "limitsNavigationsToAppBoundDomains": false },
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  },
+  "ios": {
+    "contentInset": "never",
+    "limitsNavigationsToAppBoundDomains": false
+  },
   "plugins": {
-    "PushNotifications": { "presentationOptions": ["badge", "sound", "alert"] }
+    "PushNotifications": {
+      "presentationOptions": [
+        "alert",
+        "sound",
+        "badge"
+      ]
+    }
   }
 }

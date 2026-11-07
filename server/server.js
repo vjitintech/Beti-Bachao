@@ -12,6 +12,7 @@ import { COUNTRIES } from '../public/core/config.js';
 import { generateVapidKeys, sendPush, isValidSubscription } from './webpush.js';
 import { JsonStore } from './store.js';
 import { Fcm, parseServiceAccount } from './fcm.js';
+import { createApns } from './apns.js';
 import { createSms } from './sms.js';
 import { createRouting } from './routing.js';
 import { createAi } from './ai.js';
@@ -34,6 +35,7 @@ export function createServer(opts = {}) {
   const fetchImpl = opts.fetchImpl || fetch;
   // Optional integrations — each is off until its environment variables are set.
   const fcm = (() => { try { const sa = parseServiceAccount(env.FCM_SERVICE_ACCOUNT); return sa ? new Fcm(sa, { fetchImpl }) : null; } catch (e) { console.error('[fcm]', e.message); return null; } })();
+  const apns = (() => { try { return createApns(env, opts.apnsConnect ? { connect: opts.apnsConnect } : {}); } catch (e) { console.error('[apns]', e.message); return null; } })();
   const sms = (() => { try { return createSms(env, { fetchImpl }); } catch (e) { console.error('[sms]', e.message); return null; } })();
   const routing = createRouting(env, { fetchImpl });
   const ai = createAi(env, { fetchImpl });
@@ -81,8 +83,10 @@ export function createServer(opts = {}) {
     const make = PUSH_TEXT[n.kind];
     if (!make) return;
     const payload = { ...make(n), kind: n.kind, incidentId: n.incidentId };
-    if (fcm) for (const d of store.db.devices.filter((x) => x.userId === n.recipientId)) {
-      fcm.send(d, payload).then((r) => {
+    for (const d of store.db.devices.filter((x) => x.userId === n.recipientId)) {
+      const sender = d.platform === 'ios' && apns ? apns : fcm;
+      if (!sender) continue;
+      sender.send(d, payload).then((r) => {
         if (r.gone) { store.db.devices = store.db.devices.filter((x) => x.token !== d.token); store.markDirty(); }
         else if (!r.ok) engine.audit('system', 'FCM_FAILED', 'notification', n.id, `status ${r.status} ${r.error || ''}`);
       }).catch((e) => console.error('[fcm]', e.message));
@@ -253,7 +257,7 @@ export function createServer(opts = {}) {
     engine.audit(u.id, 'ADMIN_SETUP', 'user', u.id);
     return { ok: true };
   }, { auth: false, limit: [10, 3600e3] });
-  route('GET', '/public-config', () => ({ setupNeeded: !store.db.users.some((u) => u.role === 'admin'), demo: false, mfaRequired: MFA_REQUIRED, countries: COUNTRIES, defaultCountry: engine.cfg.countryCode, simulatedLabel: SIMULATED_LABEL, radiusStagesKm: engine.cfg.radiusStagesKm, vapidPublicKey: store.db.vapid.publicKey, features: { appPush: !!fcm, sms: !!sms, smsReset: !!sms, roadEta: !!routing, ai: !!ai } }), { auth: false });
+  route('GET', '/public-config', () => ({ setupNeeded: !store.db.users.some((u) => u.role === 'admin'), demo: false, mfaRequired: MFA_REQUIRED, countries: COUNTRIES, defaultCountry: engine.cfg.countryCode, simulatedLabel: SIMULATED_LABEL, radiusStagesKm: engine.cfg.radiusStagesKm, vapidPublicKey: store.db.vapid.publicKey, features: { appPush: !!(fcm || apns), iosPush: !!(apns || fcm), sms: !!sms, smsReset: !!sms, roadEta: !!routing, ai: !!ai } }), { auth: false });
 
   route('POST', '/auth/register', async ({ body, res }) => {
     if (!['user', 'volunteer'].includes(body.role)) throw new EngineError(400, 'INVALID_ROLE', 'Only user or volunteer accounts can self-register');
@@ -323,7 +327,7 @@ export function createServer(opts = {}) {
     if (mine.length >= 5) store.db.devices = store.db.devices.filter((d) => d !== mine[0]);
     store.db.devices.push({ userId: actor.id, platform: body.platform, token, appVersion: String(body.appVersion || '').slice(0, 20), createdAt: new Date().toISOString() });
     engine.audit(actor.id, 'DEVICE_REGISTERED', 'user', actor.id, body.platform);
-    return { ok: true, push: !!fcm };
+    return { ok: true, push: body.platform === 'ios' ? !!(apns || fcm) : !!fcm };
   }, { limit: [30, 3600e3] });
   route('POST', '/me/location', ({ actor, body }) => engine.ingestDeviceLocation(actor, body), { limit: [600, 3600e3] });
   route('GET', '/me/contacts', ({ actor }) => engine.getContacts(actor));
@@ -402,7 +406,7 @@ export function createServer(opts = {}) {
     if (!out) throw new EngineError(502, 'AI_UNAVAILABLE', 'The AI server did not answer');
     return { text: out, target, machineTranslated: true };
   }, { limit: [120, 3600e3] });
-  route('GET', '/admin/integrations/status', ({ actor }) => { engine.requireRole(actor, 'admin'); return { fcm: !!fcm, sms: sms?.name || null, routing: !!routing, ai: ai ? ai.model : null, backups: backups ? backups.dir : null }; });
+  route('GET', '/admin/integrations/status', ({ actor }) => { engine.requireRole(actor, 'admin'); return { fcm: !!fcm, apns: apns ? apns.origin : null, sms: sms?.name || null, routing: !!routing, ai: ai ? ai.model : null, backups: backups ? backups.dir : null }; });
 
   route('GET', '/admin/staff', ({ actor }) => ({ items: engine.listStaff(actor) }));
   route('GET', '/admin/backup', ({ actor, res }) => {
@@ -458,6 +462,7 @@ export function createServer(opts = {}) {
   route('GET', '/admin/integrations', ({ actor }) => { engine.requireRole(actor, 'admin', 'operator'); return { items: [
     { name: 'Police / ambulance (112)', status: 'MANUAL', note: 'Not contacted automatically. Operators phone 112 and record the handoff in the console.' },
     { name: 'App push (Firebase, Android + iPhone)', status: fcm ? 'ACTIVE' : 'NOT CONFIGURED', note: fcm ? `${store.db.devices.length} app device(s) registered.` : 'Set FCM_SERVICE_ACCOUNT to send alarm alerts to the phone apps.' },
+    { name: 'iPhone push (Apple APNs)', status: apns ? 'ACTIVE' : 'NOT CONFIGURED', note: apns ? `${store.db.devices.filter((d) => d.platform === 'ios').length} iPhone/iPad device(s) registered.` : 'Set APNS_KEY, APNS_KEY_ID and APNS_TEAM_ID to send alerts to the iPhone app.' },
     { name: 'SMS gateway', status: sms ? sms.name.toUpperCase() : 'NOT CONFIGURED', note: sms ? 'Sends SOS SMS for iPhone users, alert fallback to volunteers, reset codes.' : 'Set SMS_PROVIDER (msg91/twilio). Android phones still send SOS SMS themselves.' },
     { name: 'Road-route ETA', status: routing ? 'ACTIVE' : 'ESTIMATE', note: routing ? 'OSRM routing.' : 'Set ROUTING_URL (OSRM). Until then straight-line estimate.' },
     { name: 'Local AI (Colibri)', status: ai ? 'ACTIVE' : 'OFF', note: ai ? `Model ${ai.model}. Advisory only.` : 'Set AI_BASE_URL to enable operator summaries, translation and risk flags.' },
