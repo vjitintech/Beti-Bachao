@@ -5,20 +5,30 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xx
 export class ApiError extends Error { constructor(status, code, message) { super(message || code); this.status = status; this.code = code; } }
 
 // ------------------------------------------------------------------ server
+import { isNative, native, serverUrl } from './native.js?v=mw5worwg';
+
 class ServerApi {
-  constructor() { this.mode = 'server'; this.listeners = new Set(); this.es = null; }
+  constructor() { this.mode = isNative ? 'app' : 'server'; this.listeners = new Set(); this.es = null; this.token = null; }
+  base() { return isNative ? `${serverUrl()}/api/v1` : 'api/v1'; }
+  async init() { if (isNative) this.token = await native.getToken(); }
+  async setToken(t) { this.token = t || null; if (isNative) await native.setToken(this.token); }
   async req(method, path, body) {
     let res;
+    const headers = { 'Content-Type': 'application/json', 'X-BB-CSRF': '1', ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}) };
     try {
-      res = await fetch('api/v1' + path, { method, credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-BB-CSRF': '1' }, body: body ? JSON.stringify(body) : undefined });
+      res = await fetch(this.base() + path, { method, credentials: isNative ? 'omit' : 'same-origin', headers, body: body ? JSON.stringify(body) : undefined });
     } catch { throw new ApiError(0, 'NETWORK', 'No connection'); }
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new ApiError(res.status, data.error?.code || 'ERROR', data.error?.message || 'Request failed');
+    if (!res.ok) {
+      if (res.status === 401 && this.token && path !== '/auth/login') await this.setToken(null);
+      throw new ApiError(res.status, data.error?.code || 'ERROR', data.error?.message || 'Request failed');
+    }
     return data;
   }
   connect() {
     if (this.es) this.es.close();
-    this.es = new EventSource('api/v1/events');
+    const url = this.base() + '/events' + (isNative && this.token ? `?access_token=${encodeURIComponent(this.token)}` : '');
+    this.es = new EventSource(url);
     this.es.addEventListener('incident', (e) => { const d = JSON.parse(e.data); this.listeners.forEach((f) => f(d)); });
     this.es.addEventListener('hello', () => this.listeners.forEach((f) => f({ type: 'resync' })));
   }
@@ -27,9 +37,21 @@ class ServerApi {
 
   publicConfig() { return this.req('GET', '/public-config'); }
   me() { return this.req('GET', '/me'); }
-  login(email, password, mfaCode) { return this.req('POST', '/auth/login', { email, password, mfaCode }); }
-  register(b) { return this.req('POST', '/auth/register', b); }
-  logout() { this.disconnect(); return this.req('POST', '/auth/logout'); }
+  async login(email, password, mfaCode) { const r = await this.req('POST', '/auth/login', { email, password, mfaCode, ...(isNative ? { client: 'mobile' } : {}) }); if (r.token) await this.setToken(r.token); return r; }
+  async register(b) { const r = await this.req('POST', '/auth/register', { ...b, ...(isNative ? { client: 'mobile' } : {}) }); if (r.token) await this.setToken(r.token); return r; }
+  async logout() { this.disconnect(); try { await this.req('POST', '/auth/logout'); } finally { await this.setToken(null); } }
+  changePassword(b) { return this.req('POST', '/auth/change-password', b); }
+  resetRequest(email) { return this.req('POST', '/auth/reset/request', { email }); }
+  resetConfirm(b) { return this.req('POST', '/auth/reset/confirm', b); }
+  getContacts() { return this.req('GET', '/me/contacts'); }
+  saveContacts(b) { return this.req('PUT', '/me/contacts', b); }
+  registerDevice(b) { return this.req('POST', '/me/devices', b); }
+  rate(id, b) { return this.req('POST', `/incidents/${id}/rate`, b); }
+  scheduleCall(id, scheduledAt) { return this.req('POST', `/admin/volunteers/${id}/schedule-call`, { scheduledAt }); }
+  findUsers(q) { return this.req('GET', `/admin/users?q=${encodeURIComponent(q)}`); }
+  resetUserPassword(id) { return this.req('POST', `/admin/users/${id}/reset-password`); }
+  aiSummary(id) { return this.req('POST', `/operator/incidents/${id}/ai-summary`); }
+  translate(text, target) { return this.req('POST', '/ai/translate', { text, target }); }
   setPins(b) { return this.req('PATCH', '/me/pins', b); }
   myIncidents() { return this.req('GET', '/me/incidents'); }
   exportData() { return this.req('GET', '/me/export'); }
@@ -75,8 +97,9 @@ class ServerApi {
 
 export async function createApi() {
   const api = new ServerApi();
+  await api.init();
   try {
-    const res = await fetch('api/v1/health', { cache: 'no-store' });
+    const res = await fetch(api.base() + '/health', { cache: 'no-store' });
     api.unreachable = !(res.ok && (res.headers.get('content-type') || '').includes('json'));
   } catch { api.unreachable = true; }
   return api;

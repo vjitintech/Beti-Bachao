@@ -27,7 +27,8 @@ test('server: security headers, CSRF, consent and password rules', async () => {
   assert.equal((await c.call('POST', '/auth/register', { displayName: 'X', email: 'x@test.app', role: 'user', password: 'longenough123' })).status, 400, 'consent required');
   assert.equal((await c.call('POST', '/auth/register', { displayName: 'X', email: 'x@test.app', role: 'user', password: 'short', consent: true })).status, 400);
   assert.equal((await c.call('POST', '/auth/register', { displayName: 'X', email: 'x@test.app', role: 'admin', password: 'longenough123', consent: true })).status, 400, 'cannot self-register as admin');
-  const ok = await c.call('POST', '/auth/register', { displayName: 'X', email: 'x@test.app', role: 'user', password: 'longenough123', consent: true });
+  assert.equal((await c.call('POST', '/auth/register', { displayName: 'X', email: 'x@test.app', role: 'user', password: 'longenough123', consent: true })).status, 400, 'mobile number required');
+  const ok = await c.call('POST', '/auth/register', { displayName: 'X', email: 'x@test.app', role: 'user', phone: '+919811111111', password: 'longenough123', consent: true });
   assert.equal(ok.status, 200);
   assert.match(ok.headers.get('set-cookie'), /HttpOnly; SameSite=Strict/);
 });

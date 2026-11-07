@@ -91,11 +91,44 @@ try {
   await user.click('[data-modal="confirm"]');
   await user.waitForFunction(() => document.querySelector('.status-hero')?.className.includes('GREEN'), null, { timeout: 10000 });
   await shot(user, '06-safe'); step('explicit YES → confirm closes incident GREEN');
+  await user.waitForSelector('.rate-form');
+  await user.check('.rate-form input[name="stars"][value="5"]');
+  await user.click('.rate-form button');
+  await user.waitForFunction(() => document.body.innerText.includes('thank you'));
+  step('she rates the volunteer after closing');
+
+  const nv = await page('new-volunteer');
+  await nv.goto(base + '#/register?as=volunteer');
+  await nv.fill('[name="displayName"]', 'Lata');
+  await nv.fill('[name="email"]', 'lata@test.betibachao.app');
+  await nv.fill('[name="phone"]', '+919812345678');
+  await nv.fill('[name="password"]', 'a-good-password-1');
+  await nv.check('[name="consent"]');
+  await nv.click('[data-form="register"] button[type="submit"]');
+  await nv.waitForSelector('.onb');
+  if (await nv.$('[data-act="vol-avail"]')) throw new Error('unapproved volunteer can go on duty');
+  for (let i = 0; i < 5; i++) { await nv.click('.onb [data-act="vol-train"]'); await nv.check('.modal [name="ack"]'); await nv.click('[data-modal="done"]'); await nv.waitForTimeout(300); }
+  await nv.click('[data-act="vol-verify"]');
+  await nv.fill('.modal [name="phone"]', '+919812345678');
+  await nv.click('[data-modal="ok"]');
+  await nv.waitForFunction(() => document.body.innerText.includes('Waiting for the admin to book'));
+  await shot(nv, '08-volunteer-onboarding'); step('new volunteer: training + verification request, duty locked');
 
   const adm = await page('admin', { viewport: { width: 1280, height: 900 } });
   await signIn(adm, ADMIN.email, ADMIN.password, ADMIN.mfaSecret);
   await adm.click('[data-tab="staff"]');
   await adm.waitForFunction(() => document.body.innerText.includes('Nandini'));
+  await adm.click('[data-tab="volunteers"]');
+  await adm.waitForSelector('[data-act="adm-call"]');
+  await adm.click('[data-act="adm-call"]');
+  await adm.click('[data-modal="go"]');
+  await adm.waitForFunction(() => document.body.innerText.includes('Join'));
+  await adm.click('[data-act="adm-approve"]');
+  await adm.check('.modal [name="front"]'); await adm.check('.modal [name="back"]'); await adm.check('.modal [name="face"]');
+  await adm.fill('.modal [name="last4"]', '4321');
+  await adm.click('[data-modal="go"]');
+  await adm.waitForFunction(() => document.body.innerText.includes('XXXX-XXXX-4321'));
+  await shot(adm, '07b-admin-volunteers'); step('admin books video call and approves with Aadhaar checklist (masked)');
   await adm.click('[data-tab="audit"]');
   await adm.waitForFunction(() => document.body.innerText.includes('intact'));
   await shot(adm, '07-admin'); step('admin: staff list + intact audit chain');
@@ -104,6 +137,7 @@ try {
   await reg.goto(base + '#/register');
   await reg.fill('[name="displayName"]', 'New Person');
   await reg.fill('[name="email"]', 'new@test.betibachao.app');
+  await reg.fill('[name="phone"]', '+919876543210');
   await reg.fill('[name="password"]', 'a-good-password-1');
   await reg.check('[name="consent"]');
   await reg.click('[data-form="register"] button[type="submit"]');

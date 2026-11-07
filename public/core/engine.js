@@ -15,8 +15,8 @@
 //   • escalation adapter is SIMULATED until a real integration is approved
 //   • append-only, hash-chained audit log
 
-import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mvular6a';
-import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mvular6a';
+import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mw5worwg';
+import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mw5worwg';
 
 export const S = Object.freeze({
   CREATED: 'CREATED',
@@ -97,6 +97,11 @@ export class EngineError extends Error {
   }
 }
 const fail = (status, code, msg) => { throw new EngineError(status, code, msg); };
+export function normPhone(p) {
+  const s = String(p || '').replace(/[^\d+]/g, '');
+  const digits = s.replace(/\D/g, '');
+  return digits.length >= 8 && digits.length <= 15 && s.length <= 16 ? s : null;
+}
 
 export function emptyDb() {
   return {
@@ -208,20 +213,43 @@ export class Engine {
   }
 
   // ---------- accounts ----------
-  createUser({ displayName, email, role, passwordHash = null, mfaSecret = null, status = 'ACTIVE', countryCode = null, demo = false }) {
+  createUser({ displayName, email, role, passwordHash = null, mfaSecret = null, status = 'ACTIVE', countryCode = null, demo = false, phone = null }) {
     if (!['user', 'volunteer', 'operator', 'admin'].includes(role)) fail(400, 'INVALID_ROLE');
     const em = String(email || '').trim().toLowerCase();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) fail(400, 'INVALID_EMAIL', 'A valid email is required');
     if (this.db.users.some((u) => u.email === em)) fail(409, 'EMAIL_TAKEN', 'An account with this email exists');
     const name = String(displayName || '').trim().slice(0, 60);
     if (!name) fail(400, 'INVALID_NAME', 'Display name is required');
-    const u = { id: this.deps.uuid(), displayName: name, email: em, role, passwordHash, mfaSecret, status, countryCode, demo, pins: null, createdAt: this.iso(), updatedAt: this.iso() };
+    const ph = phone ? normPhone(phone) : null;
+    if (phone && !ph) fail(400, 'INVALID_PHONE', 'Enter a valid mobile number');
+    const u = { id: this.deps.uuid(), displayName: name, email: em, role, passwordHash, mfaSecret, status, countryCode, demo, phone: ph, contacts: [], prefs: { serverSms: true }, pins: null, createdAt: this.iso(), updatedAt: this.iso() };
     this.db.users.push(u);
     if (role === 'volunteer') {
       this.db.volunteers.push({ userId: u.id, available: false, trainingCompleted: [], verificationStatus: 'NOT_STARTED', verificationExpiresAt: null, capabilities: ['escort', 'first-aid-basic'], lastLocation: null, lastLocationAt: null, noShowCount: 0, suspendedReason: null });
     }
     this.audit(u.id, 'USER_CREATED', 'user', u.id, null, { role });
     return u;
+  }
+
+  getContacts(actor) {
+    const u = this.requireRole(actor, 'user', 'volunteer');
+    return { contacts: u.contacts || [], prefs: u.prefs || { serverSms: true }, phone: u.phone || null };
+  }
+
+  setContacts(actor, { contacts, prefs, phone } = {}) {
+    const u = this.requireRole(actor, 'user', 'volunteer');
+    if (contacts !== undefined) {
+      if (!Array.isArray(contacts) || contacts.length > 10) fail(400, 'INVALID_CONTACTS', 'Up to 10 contacts');
+      u.contacts = contacts.map((c) => {
+        const ph = normPhone(c.phone);
+        if (!ph) fail(400, 'INVALID_PHONE', `Invalid phone for ${String(c.name || '').slice(0, 30)}`);
+        return { name: String(c.name || '').trim().slice(0, 40) || 'Contact', phone: ph };
+      });
+    }
+    if (prefs) u.prefs = { ...(u.prefs || {}), serverSms: prefs.serverSms !== false };
+    if (phone !== undefined) { const ph = normPhone(phone); if (phone && !ph) fail(400, 'INVALID_PHONE'); u.phone = ph; }
+    this.audit(u.id, 'CONTACTS_UPDATED', 'user', u.id, null, { count: u.contacts.length });
+    return this.getContacts(actor);
   }
 
   setPins(actor, { cancelPin, duressPin }) {
@@ -254,12 +282,37 @@ export class Engine {
   volunteerProfile(actor) {
     this.requireRole(actor, 'volunteer');
     const v = this.vol(actor.id);
-    return { ...v, eligibility: this.volunteerEligibility(v), trainingModules: TRAINING_MODULES };
+    const rec = [...this.db.verifications].reverse().find((r) => r.volunteerId === actor.id);
+    return { ...v, eligibility: this.volunteerEligibility(v), trainingModules: TRAINING_MODULES, approved: v.verificationStatus === 'VERIFIED' && !v.suspendedReason,
+      verification: rec ? { status: rec.status, submittedAt: rec.submittedAt, call: rec.call || null, rejectReason: rec.rejectReason || null } : null };
+  }
+
+  // Admin books the video call where the volunteer shows Aadhaar front and back.
+  // The call is a private Jitsi room; it is never recorded and no ID image is stored.
+  scheduleVerificationCall(actor, volunteerId, { scheduledAt }) {
+    const a = this.requireRole(actor, 'admin');
+    const rec = [...this.db.verifications].reverse().find((r) => r.volunteerId === volunteerId && r.status === 'PENDING');
+    if (!rec) fail(404, 'NO_PENDING_REQUEST', 'This volunteer has no pending verification request');
+    const t = Date.parse(scheduledAt);
+    if (Number.isNaN(t)) fail(400, 'INVALID_TIME', 'Choose a date and time for the call');
+    const room = 'BetiBachao-Verify-' + this.deps.uuid().replace(/-/g, '').slice(0, 20);
+    rec.call = { roomUrl: `https://meet.jit.si/${room}`, scheduledAt: new Date(t).toISOString(), scheduledBy: a.id };
+    this.notify(null, volunteerId, 'VERIFICATION_CALL', { scheduledAt: rec.call.scheduledAt });
+    this.audit(a.id, 'VERIFICATION_CALL_SCHEDULED', 'volunteer', volunteerId, null, { scheduledAt: rec.call.scheduledAt });
+    return rec.call;
+  }
+
+  requireApprovedVolunteer(actor) {
+    this.requireRole(actor, 'volunteer');
+    const v = this.vol(actor.id);
+    if (v.verificationStatus !== 'VERIFIED' || v.suspendedReason) fail(403, 'NOT_APPROVED', 'Your volunteer account is waiting for admin approval after the verification call.');
+    return v;
   }
 
   setAvailability(actor, { available, location }) {
     this.requireRole(actor, 'volunteer');
     const v = this.vol(actor.id);
+    if (available === true) this.requireApprovedVolunteer(actor);
     if (typeof available === 'boolean') v.available = available;
     if (location) {
       if (!isValidLatLng(location.lat, location.lng)) fail(400, 'INVALID_LOCATION');
@@ -287,15 +340,33 @@ export class Engine {
     if (v.verificationStatus === 'VERIFIED') fail(409, 'ALREADY_VERIFIED');
     const phone = String(contactPhone || '').replace(/[^\d+]/g, '');
     if (phone.replace(/\D/g, '').length < 8 || phone.length > 16) fail(400, 'INVALID_PHONE', 'A valid phone number is required');
-    const rec = { id: this.deps.uuid(), volunteerId: actor.id, provider: 'MANUAL_REVIEW', status: 'PENDING', referenceToken: 'req_' + this.deps.uuid().slice(0, 8), contactPhone: phone, area: String(area || '').slice(0, 60), submittedAt: this.iso(), reviewedAt: null, expiresAt: null };
+    const u = this.user(actor.id); if (!u.phone) u.phone = phone;
+    if ([...this.db.verifications].some((r) => r.volunteerId === actor.id && r.status === 'PENDING')) fail(409, 'ALREADY_REQUESTED', 'Your verification request is already waiting for the admin.');
+    const rec = { id: this.deps.uuid(), volunteerId: actor.id, provider: 'VIDEO_CALL_AADHAAR_SIGHTED', status: 'PENDING', referenceToken: 'req_' + this.deps.uuid().slice(0, 8), contactPhone: phone, area: String(area || '').slice(0, 60), submittedAt: this.iso(), reviewedAt: null, expiresAt: null };
     this.db.verifications.push(rec);
     v.verificationStatus = 'PENDING';
     this.audit(actor.id, 'VERIFICATION_SUBMITTED', 'volunteer', actor.id);
     return rec;
   }
 
+  // Background location from the phone app: routed to the right place by role/state.
+  ingestDeviceLocation(actor, loc) {
+    const u = this.requireRole(actor, 'user', 'volunteer');
+    if (u.role === 'user') {
+      const open = this.db.incidents.find((i) => i.requesterId === u.id && this.isOpen(i));
+      if (!open) return { routed: 'none' };
+      this.addLocation(actor, open.id, loc);
+      return { routed: 'incident', incidentId: open.id };
+    }
+    const asg = this.db.assignments.find((a) => a.volunteerId === u.id && ACTIVE_ASG.has(a.status));
+    if (asg) { this.updateResponderLocation(actor, asg.id, loc); return { routed: 'assignment' }; }
+    const v = this.vol(u.id);
+    if (v?.available) { this.setAvailability(actor, { location: loc }); return { routed: 'duty' }; }
+    return { routed: 'none' };
+  }
+
   // ---------- incidents ----------
-  createIncident(actor, { idempotencyKey, location = null, severity = 'NORMAL', trigger = 'button', silent = false, battery = null, note = null } = {}) {
+  createIncident(actor, { idempotencyKey, location = null, severity = 'NORMAL', trigger = 'button', silent = false, battery = null, note = null, deviceSmsSent = false } = {}) {
     const u = this.requireRole(actor, 'user');
     if (!idempotencyKey || typeof idempotencyKey !== 'string' || idempotencyKey.length > 100) fail(400, 'IDEMPOTENCY_KEY_REQUIRED');
     const dup = this.db.incidents.find((i) => i.requesterId === u.id && i.idempotencyKey === idempotencyKey);
@@ -316,12 +387,13 @@ export class Engine {
       id: this.deps.uuid(), requesterId: u.id, status: S.CREATED, searchStage: null, stageStartedAt: null, stageDeadline: null,
       severity: sev, trigger: String(trigger).slice(0, 20), silent: !!silent, escalationStatus: ESC.NONE, idempotencyKey,
       countryCode: u.countryCode || this.cfg.countryCode, battery: sanitizeBattery(battery), note: note ? String(note).slice(0, 280) : null,
-      duress: false, flags: [], createdAt: this.iso(), updatedAt: this.iso(), closedAt: null, safeConfirmedAt: null, closureReason: null,
+      duress: false, flags: [], deviceSmsSent: !!deviceSmsSent, contactsSmsAt: null, createdAt: this.iso(), updatedAt: this.iso(), closedAt: null, safeConfirmedAt: null, closureReason: null,
     };
     this.db.incidents.push(inc);
     this.db.transitions.push({ id: this.deps.uuid(), incidentId: inc.id, from: null, to: S.CREATED, actorId: u.id, at: inc.createdAt, reason: `SOS via ${inc.trigger}`, source: 'api' });
     this.audit(u.id, 'SOS_CREATED', 'incident', inc.id, null, { severity: sev, trigger: inc.trigger });
     this.emit('incident.created', inc.id);
+    this.emit('contacts.sms_needed', inc.id);
 
     // Immediate danger never waits for the volunteer search.
     if (sev === 'HIGH') this.escalate(inc, u.id, 'IMMEDIATE_DANGER', 'User reported immediate danger at SOS time');
@@ -439,7 +511,7 @@ export class Engine {
 
   // ---------- volunteer response ----------
   acceptIncident(actor, incidentId) {
-    this.requireRole(actor, 'volunteer');
+    this.requireApprovedVolunteer(actor);
     const inc = this.incident(incidentId);
     const alert = this.db.notifications.find((n) => n.incidentId === inc.id && n.recipientId === actor.id && n.kind === 'ALERT');
     if (!alert) { this.audit(actor.id, 'ACCEPT_DENIED_NOT_ALERTED', 'incident', inc.id); fail(403, 'NOT_ALERTED', 'You were not alerted for this incident'); }
@@ -600,6 +672,52 @@ export class Engine {
     return { ok: true, closed: false };
   }
 
+  rateResponder(actor, incidentId, { ref, stars, feltUnsafe = false, comment = '' } = {}) {
+    const u = this.requireRole(actor, 'user');
+    const inc = this.incident(incidentId);
+    if (inc.requesterId !== u.id) fail(403, 'FORBIDDEN');
+    if (this.isOpen(inc)) fail(409, 'STILL_OPEN', 'You can rate after the SOS is closed');
+    const a = this.db.assignments.find((x) => x.id === ref && x.incidentId === inc.id);
+    if (!a) fail(404, 'NOT_FOUND');
+    if (a.rating) fail(409, 'ALREADY_RATED');
+    const n = Number(stars);
+    if (!Number.isInteger(n) || n < 1 || n > 5) fail(400, 'INVALID_RATING', 'Choose 1 to 5 stars');
+    a.rating = { stars: n, feltUnsafe: !!feltUnsafe, comment: String(comment || '').slice(0, 500), at: this.iso() };
+    this.audit(u.id, 'RESPONDER_RATED', 'assignment', a.id, null, { stars: n, feltUnsafe: !!feltUnsafe });
+    if (feltUnsafe) {
+      const r = this.reportAbuse(actor, { incidentId: inc.id, category: 'VOLUNTEER_MISCONDUCT', details: `She reported feeling unsafe with a responder. ${a.rating.comment}`.trim() });
+      this.db.abuseReports.find((x) => x.id === r.id).volunteerId = a.volunteerId;
+    }
+    return { ok: true };
+  }
+
+  volunteerStats(volunteerId) {
+    const mine = this.db.assignments.filter((a) => a.volunteerId === volunteerId);
+    const rated = mine.filter((a) => a.rating);
+    const avg = rated.length ? +(rated.reduce((s, a) => s + a.rating.stars, 0) / rated.length).toFixed(1) : null;
+    const unsafe = rated.filter((a) => a.rating.feltUnsafe).length;
+    const reports = this.db.abuseReports.filter((r) => r.volunteerId === volunteerId && r.status === 'OPEN').length;
+    const v = this.vol(volunteerId);
+    const responses = mine.length, arrived = mine.filter((a) => a.arrivedAt).length, dropped = mine.filter((a) => a.status === 'CANCELLED' && !/incident cancelled|suspended/.test(a.cancellationReason || '')).length;
+    const reviewNeeded = unsafe > 0 || reports > 0 || (rated.length >= 3 && avg < 3) || (v?.noShowCount || 0) >= 3;
+    return { responses, arrived, dropped, ratings: rated.length, avgRating: avg, feltUnsafe: unsafe, openReports: reports, noShows: v?.noShowCount || 0, reviewNeeded };
+  }
+
+  // Heuristic prank-risk for operators (never blocks an SOS): history of cancels/false alarms/repeats.
+  prankRisk(inc) {
+    const since = this.now() - 30 * 864e5;
+    const past = this.db.incidents.filter((i) => i.requesterId === inc.requesterId && i.id !== inc.id && Date.parse(i.createdAt) > since);
+    const cancels = past.filter((i) => i.status === 'USER_CANCELLED' && !i.duress).length;
+    const falseAlarms = past.filter((i) => i.closureReason === 'VERIFIED_FALSE_ALARM').length;
+    const lastHour = past.filter((i) => this.now() - Date.parse(i.createdAt) < 3600e3).length;
+    const reasons = [];
+    if (falseAlarms) reasons.push(`${falseAlarms} verified false alarm(s) in 30 days`);
+    if (cancels >= 3) reasons.push(`${cancels} cancelled SOS in 30 days`);
+    if (lastHour >= 2) reasons.push(`${lastHour} other SOS in the last hour`);
+    const score = falseAlarms * 3 + (cancels >= 3 ? cancels : 0) + lastHour * 2;
+    return { level: score >= 6 ? 'HIGH' : score >= 3 ? 'MEDIUM' : 'LOW', reasons, note: 'Advisory only — always respond as a real emergency.' };
+  }
+
   closeIncident(inc, actorId, reason) {
     for (const a of this.activeAssignments(inc.id)) { a.status = 'COMPLETED'; a.completedAt = this.iso(); this.notify(inc.id, a.volunteerId, 'INCIDENT_CLOSED'); }
     this.transition(inc, S.CLOSED, actorId, reason, 'api');
@@ -708,11 +826,25 @@ export class Engine {
       label: a.volunteerId === selfId ? 'You' : `Verified volunteer ${String.fromCharCode(65 + i)}`,
       isYou: a.volunteerId === selfId, role: a.role, status: a.status, verified: v?.verificationStatus === 'VERIFIED',
       distanceKm: d != null ? +d.toFixed(d < 1 ? 2 : 1) : null, distanceBand: distanceBand(d),
-      approxEtaMin: onScene ? 0 : approxEtaMinutes(d, this.cfg), etaLabel: 'approximate (straight-line estimate)',
-      locationUpdatedAt: v?.lastLocationAt || null,
+      ...this.etaFor(a, d, onScene),
+      locationUpdatedAt: v?.lastLocationAt || null, ref: a.id,
       position: withPosition && v?.lastLocation ? { lat: +v.lastLocation.lat.toFixed(4), lng: +v.lastLocation.lng.toFixed(4) } : undefined,
       ...this.motion(a, loc, withPosition),
     };
+  }
+
+  // Road-route ETA when a routing provider is configured and fresh; otherwise straight-line estimate.
+  etaFor(a, d, onScene) {
+    if (onScene) return { approxEtaMin: 0, etaLabel: 'on scene' };
+    const r = a.routeEta;
+    if (r && this.now() - Date.parse(r.at) < 180000 && Number.isFinite(r.min)) return { approxEtaMin: Math.max(1, Math.round(r.min)), etaLabel: 'road route estimate', roadKm: r.km };
+    return { approxEtaMin: approxEtaMinutes(d, this.cfg), etaLabel: 'approximate (straight-line estimate)' };
+  }
+
+  setRouteEta(assignmentId, { min, km, source }) {
+    const a = this.db.assignments.find((x) => x.id === assignmentId);
+    if (!a || !ACTIVE_ASG.has(a.status)) return;
+    a.routeEta = { min, km, source, at: this.iso() };
   }
 
   // Multi-target tracking data: bearing from her, ground speed, closing/opening, recent track.
@@ -760,6 +892,7 @@ export class Engine {
         responders: active.map((a, i) => this.responderTrack(a, loc, i, { withPosition: true })),
         radiusStagesKm: this.cfg.radiusStagesKm,
         escalations: this.db.escalations.filter((e) => e.incidentId === inc.id).map((e) => ({ type: e.type, status: e.status, label: e.label, attemptedAt: e.attemptedAt })),
+        rateable: this.isOpen(inc) ? [] : this.db.assignments.filter((a) => a.incidentId === inc.id && (a.arrivedAt || a.status === 'COMPLETED')).map((a, i) => ({ ref: a.id, label: `Verified volunteer ${String.fromCharCode(65 + i)}`, rated: !!a.rating, stars: a.rating?.stars || null })),
       };
     }
 
@@ -786,7 +919,8 @@ export class Engine {
     this.auditPreciseAccess(u.id, inc);
     return {
       ...base, role: u.role, status: inc.status, color: this.colorOf(inc), duress: inc.duress, escalationStatus: inc.escalationStatus, flags: inc.flags, trigger: inc.trigger, silent: inc.silent, battery: inc.battery, note: inc.note,
-      requester: { id: inc.requesterId, displayName: this.user(inc.requesterId)?.displayName },
+      requester: { id: inc.requesterId, displayName: this.user(inc.requesterId)?.displayName, phone: this.user(inc.requesterId)?.phone || null },
+      prankRisk: this.prankRisk(inc), ai: inc.ai || null,
       search: searchView, alertedCount, closed: !this.isOpen(inc), closureReason: inc.closureReason,
       location: this.locationView(loc, now),
       locationHistory: this.db.locations.filter((l) => l.incidentId === inc.id).slice(-20).map((l) => ({ lat: l.lat, lng: l.lng, accuracyM: l.accuracyM, observedAt: l.observedAt, suspect: l.suspect, suspectReason: l.suspectReason })),
@@ -822,7 +956,7 @@ export class Engine {
   }
 
   volunteerAlerts(actor) {
-    this.requireRole(actor, 'volunteer');
+    this.requireApprovedVolunteer(actor);
     const ids = new Set(this.db.notifications.filter((n) => n.recipientId === actor.id && n.kind === 'ALERT').map((n) => n.incidentId));
     for (const a of this.db.assignments) if (a.volunteerId === actor.id) ids.add(a.incidentId);
     return [...ids].map((id) => this.viewIncident(actor, id)).sort((a, b) => (b.open - a.open) || b.createdAt.localeCompare(a.createdAt)).slice(0, 30);
@@ -897,10 +1031,10 @@ export class Engine {
 
   listVolunteers(actor) {
     this.requireRole(actor, 'admin', 'operator');
-    return this.db.volunteers.filter((v) => this.user(v.userId)?.status !== 'DELETED').map((v) => ({ userId: v.userId, displayName: this.user(v.userId)?.displayName, email: this.user(v.userId)?.email, request: (({ contactPhone, area, submittedAt } = {}) => ({ contactPhone, area, submittedAt }))([...this.db.verifications].reverse().find((r) => r.volunteerId === v.userId) || {}), accountStatus: this.user(v.userId)?.status, verificationStatus: v.verificationStatus, trainingDone: v.trainingCompleted.length, trainingTotal: TRAINING_MODULES.length, available: v.available, noShowCount: v.noShowCount, suspendedReason: v.suspendedReason, eligibility: this.volunteerEligibility(v) }));
+    return this.db.volunteers.filter((v) => this.user(v.userId)?.status !== 'DELETED').map((v) => ({ userId: v.userId, displayName: this.user(v.userId)?.displayName, email: this.user(v.userId)?.email, request: (({ contactPhone, area, submittedAt, status, call, checklist } = {}) => ({ contactPhone, area, submittedAt, status, call, aadhaarMasked: checklist?.aadhaarMasked || null }))([...this.db.verifications].reverse().find((r) => r.volunteerId === v.userId) || {}), stats: this.volunteerStats(v.userId), accountStatus: this.user(v.userId)?.status, verificationStatus: v.verificationStatus, trainingDone: v.trainingCompleted.length, trainingTotal: TRAINING_MODULES.length, available: v.available, noShowCount: v.noShowCount, suspendedReason: v.suspendedReason, eligibility: this.volunteerEligibility(v) }));
   }
 
-  reviewVolunteer(actor, volunteerId, { decision, reason }) {
+  reviewVolunteer(actor, volunteerId, { decision, reason, checklist = null }) {
     const a = this.requireRole(actor, 'admin');
     const v = this.vol(volunteerId);
     if (!v) fail(404, 'NOT_FOUND');
@@ -908,10 +1042,14 @@ export class Engine {
     if (decision !== 'APPROVE' && (!reason || reason.trim().length < 5)) fail(400, 'REASON_REQUIRED');
     const rec = [...this.db.verifications].reverse().find((r) => r.volunteerId === volunteerId);
     if (decision === 'APPROVE') {
+      const c = checklist || {};
+      if (!(c.aadhaarFrontSeen === true && c.aadhaarBackSeen === true && c.faceMatches === true)) fail(400, 'CHECKLIST_REQUIRED', 'Confirm you saw the Aadhaar front and back on the video call and the face matches');
+      if (c.last4 != null && c.last4 !== '' && !/^\d{4}$/.test(String(c.last4))) fail(400, 'INVALID_LAST4', 'Only the last 4 digits may be recorded');
+      if (rec) rec.checklist = { aadhaarFrontSeen: true, aadhaarBackSeen: true, faceMatches: true, aadhaarMasked: c.last4 ? `XXXX-XXXX-${c.last4}` : null, callCompleted: true, reviewedBy: a.id };
       v.verificationStatus = 'VERIFIED'; v.verificationExpiresAt = this.iso(this.now() + 365 * 864e5); v.suspendedReason = null;
       if (rec) { rec.status = 'VERIFIED'; rec.reviewedAt = this.iso(); rec.expiresAt = v.verificationExpiresAt; }
     } else if (decision === 'REJECT') {
-      v.verificationStatus = 'REJECTED'; if (rec) { rec.status = 'REJECTED'; rec.reviewedAt = this.iso(); }
+      v.verificationStatus = 'REJECTED'; v.available = false; if (rec) { rec.status = 'REJECTED'; rec.reviewedAt = this.iso(); rec.rejectReason = reason; }
     } else if (decision === 'SUSPEND') {
       v.suspendedReason = reason; v.available = false;
       for (const asg of this.db.assignments.filter((x) => x.volunteerId === volunteerId && ACTIVE_ASG.has(x.status))) {
@@ -920,7 +1058,26 @@ export class Engine {
       }
     } else v.suspendedReason = null;
     this.audit(a.id, 'VOLUNTEER_REVIEW', 'volunteer', volunteerId, reason || null, { decision });
+    this.notify(null, volunteerId, 'VERIFICATION_RESULT', { decision });
     return { ok: true, verificationStatus: v.verificationStatus, suspended: !!v.suspendedReason };
+  }
+
+  findUsers(actor, q) {
+    this.requireRole(actor, 'admin');
+    const s = String(q || '').trim().toLowerCase();
+    if (s.length < 3) return [];
+    return this.db.users.filter((u) => u.status !== 'DELETED' && (u.email.includes(s) || (u.phone || '').includes(s) || u.displayName.toLowerCase().includes(s))).slice(0, 20)
+      .map((u) => ({ id: u.id, displayName: u.displayName, email: u.email, phone: u.phone, role: u.role, status: u.status }));
+  }
+
+  adminResetPassword(actor, userId, passwordHash) {
+    const a = this.requireRole(actor, 'admin');
+    const u = this.user(userId);
+    if (!u || u.status === 'DELETED') fail(404, 'NOT_FOUND');
+    u.passwordHash = passwordHash; u.mustChangePassword = true; u.updatedAt = this.iso();
+    if (['operator', 'admin'].includes(u.role)) { u.mfaEnrolled = false; u.mfaSecret = null; u.pendingMfaSecret = null; }
+    this.audit(a.id, 'PASSWORD_RESET_BY_ADMIN', 'user', u.id);
+    return { ok: true };
   }
 
   listStaff(actor) {

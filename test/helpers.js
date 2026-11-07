@@ -30,7 +30,7 @@ export function client(base) {
   return {
     call,
     login: (email, password = PASSWORD, extra = {}) => call('POST', '/auth/login', { email, password, ...extra }),
-    register: (displayName, email, role) => call('POST', '/auth/register', { displayName, email, role, password: PASSWORD, countryCode: 'IN', consent: true }),
+    register: (displayName, email, role, phone = '+919000000' + String(Math.floor(Math.random() * 900) + 100)) => call('POST', '/auth/register', { displayName, email, role, phone, password: PASSWORD, countryCode: 'IN', consent: true }),
     adminLogin: () => call('POST', '/auth/login', { email: ADMIN.email, password: ADMIN.password, mfaCode: totp(ADMIN.mfaSecret) }),
   };
 }
@@ -49,7 +49,10 @@ export async function onboardVolunteer(base, admin, name, email, km, brg = 45) {
   for (const m of TRAINING) await v.call('POST', '/volunteer/training', { moduleId: m });
   await v.call('POST', '/volunteer/verification', { contactPhone: '+91 90000 00000', area: 'Kurnool' });
   const me = (await v.call('GET', '/me')).body.user;
-  const r = await admin.call('POST', `/admin/volunteers/${me.id}/review`, { decision: 'APPROVE' });
+  const before = await v.call('PATCH', '/volunteer/availability', { available: true, location: offset(km, brg) });
+  if (before.status !== 403) throw new Error('unapproved volunteer must not go on duty');
+  await admin.call('POST', `/admin/volunteers/${me.id}/schedule-call`, { scheduledAt: new Date(Date.now() + 3600e3).toISOString() });
+  const r = await admin.call('POST', `/admin/volunteers/${me.id}/review`, { decision: 'APPROVE', checklist: { aadhaarFrontSeen: true, aadhaarBackSeen: true, faceMatches: true, last4: '1234' } });
   if (r.status !== 200) throw new Error('approve failed ' + JSON.stringify(r.body));
   await v.call('PATCH', '/volunteer/availability', { available: true, location: offset(km, brg) });
   return v;

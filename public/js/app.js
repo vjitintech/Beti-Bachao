@@ -1,8 +1,9 @@
-import { createApi, uuid } from './api.js?v=mvular6a';
-import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mvular6a';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mvular6a';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mvular6a';
-import { TRAINING_MODULES } from '../core/engine.js?v=mvular6a';
+import { createApi, uuid } from './api.js?v=mw5worwg';
+import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mw5worwg';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mw5worwg';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mw5worwg';
+import { TRAINING_MODULES } from '../core/engine.js?v=mw5worwg';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mw5worwg';
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'policy', volSel: null };
 const app = () => $('#app');
@@ -173,9 +174,21 @@ async function viewLogin(params) {
           <p class="phrase mfa-secret"></p><p class="small"><a class="mfa-uri" href="#">Open in authenticator app</a></p></div>
         <label class="mfa hidden">Authenticator code<input name="mfaCode" inputmode="numeric" pattern="\\d{6}" autocomplete="one-time-code"></label>
         <button class="btn btn-primary" type="submit">${esc(t('login'))}</button>
-        <p class="muted">New here? <a href="#/register${want ? `?as=${esc(want)}` : ''}">Create an account</a></p>
+        <p class="muted">New here? <a href="#/register${want ? `?as=${esc(want)}` : ''}">Create an account</a> · <a href="#" data-act="forgot">Forgot password?</a></p>
       </form>
     </section>`);
+}
+
+function viewChangePassword() {
+  return shell(`<section class="narrow"><h1>Choose a new password</h1><p class="muted">Your password was reset. Choose a new one to continue.</p>
+    <form class="card form" data-form="change-pw"><label>Temporary / current password<input name="cur" type="password" required autocomplete="current-password"></label>
+    <label>New password (${['operator', 'admin'].includes(st.me?.role) ? 12 : 10}+ characters)<input name="pw" type="password" minlength="10" required autocomplete="new-password"></label>
+    <button class="btn btn-primary">Save</button></form></section>`, { nav: false });
+}
+
+function viewConnect() {
+  return shell(`<section class="narrow"><h1>Connect to Beti Bachao</h1><p class="muted">Enter the address of your Beti Bachao server (from your admin, e.g. https://beti-bachao.onrender.com).</p>
+    <form class="card form" data-form="connect"><label>Server address<input name="url" type="url" required placeholder="https://…" value="${esc(serverUrl())}"></label><button class="btn btn-primary">Connect</button></form></section>`, { nav: false });
 }
 
 function viewSetup(params) {
@@ -201,6 +214,7 @@ function viewRegister(params) {
       <form class="card form" data-form="register">
         <label>Display name<input name="displayName" required maxlength="60"></label>
         <label>Email<input name="email" type="email" required></label>
+        <label>Mobile number (for SOS SMS and password reset)<input name="phone" type="tel" required autocomplete="tel" placeholder="+91 98xxxxxxxx"></label>
         <label>Password (10+ characters)<input name="password" type="password" minlength="10" required autocomplete="new-password"></label>
         <fieldset><legend>I am joining as</legend>
           <label class="radio"><input type="radio" name="role" value="user" ${asVol ? '' : 'checked'}> ${esc(t('need_safety'))}</label>
@@ -280,6 +294,24 @@ function smsButtons() {
     <a class="btn btn-ghost" href="${esc(whatsappHref(msg))}" target="_blank" rel="noopener">🟢 ${esc(t('share_whatsapp'))}</a>`;
 }
 
+// ------------------------------------------------------------------ native app glue
+// Gives the native layer everything it needs to raise an SOS while the app is
+// closed (lock-screen button, quick tile, widget, power button, Siri).
+async function syncNative() {
+  if (!native.available() || !st.me) return;
+  const p = prefs.get();
+  await native.configure({ serverUrl: serverUrl(), token: st.api.token, role: st.me.role, displayName: st.me.displayName,
+    contacts: contacts.list(), sms112: !!p.sms112, autoSms: p.autoSms !== false, shake: !!p.shake, powerButton: p.powerButton !== false,
+    message: sosMessage(null), emergencyNumber: country().emergency });
+  if (st.me.role === 'user') { if (p.armed) native.startSafety('armed'); }
+}
+async function syncContactsToServer() { try { await st.api.saveContacts({ contacts: contacts.list() }); } catch {} syncNative(); }
+async function registerAppPush() {
+  if (!native.available()) return;
+  const r = await native.getPushToken();
+  if (r?.token) { try { await st.api.registerDevice({ platform, token: r.token, appVersion: r.appVersion }); } catch {} }
+}
+
 // ------------------------------------------------------------------ SOS
 async function triggerSOS({ severity = 'HIGH', silent = false, trigger = 'button' } = {}) {
   if (st.sendingSos) return;
@@ -290,11 +322,15 @@ async function triggerSOS({ severity = 'HIGH', silent = false, trigger = 'button
   // Open the pre-filled "I am in danger + location" SMS to trusted contacts right away,
   // while the tap/hold still counts as a user gesture. Browsers cannot send SMS silently;
   // the phone's SMS app opens ready to send. The SOS continues in the background.
-  if (!isRetry && prefs.get().autoSms && contacts.list().length) {
+  let deviceSmsSent = false;
+  if (!isRetry && prefs.get().autoSms !== false && (contacts.list().length || prefs.get().sms112)) {
     const nums = contacts.list().map((c) => c.phone);
     const loc0 = geo.last;
     store.set('autoSmsAt', Date.now());
-    openExternal(smsHref(nums, sosMessage(loc0)));
+    if (native.available()) {
+      const r = await native.sendSos({ numbers: nums, message: sosMessage(loc0), sms112: !!prefs.get().sms112 });
+      deviceSmsSent = !!(r && r.sent > 0);
+    } else if (nums.length) openExternal(smsHref(nums, sosMessage(loc0)));
   }
   if (!silent) vibrate([200, 100, 200]);
   keepAwake(true);
@@ -306,11 +342,12 @@ async function triggerSOS({ severity = 'HIGH', silent = false, trigger = 'button
     else { try { loc = await Promise.race([geo.once(6000), new Promise((r) => setTimeout(() => r(null), 4000))]); } catch { loc = null; } }
     geo.start();
   }
-  const body = { idempotencyKey: pending.key, location: loc, severity: pending.severity, trigger: pending.trigger, silent: pending.silent, battery: await battery() };
+  const body = { idempotencyKey: pending.key, location: loc, severity: pending.severity, trigger: pending.trigger, silent: pending.silent, battery: await battery(), deviceSmsSent };
   try {
     const r = await st.api.createIncident(body);
     store.set('pendingSos', null);
     store.set('lastIncident', r.incident.id);
+    if (native.available()) native.startSafety('sos'); // background GPS even with the screen locked
     st.sendingSos = false;
     if (!silent && p.autoRecord && recorder.supported && !recorder.recording) { recorder.start('audio').catch(() => {}); }
     go(`#/incident/${r.incident.id}${silent ? '?silent=1' : ''}`);
@@ -410,7 +447,13 @@ async function viewIncident(id, params) {
     <div class="card"><div class="row">${smsButtons()}<button class="btn btn-ghost" data-act="native-share">📤 Share…</button></div></div>
     ${locationCard(v.location, { live: true })}
     ${v.location ? `<section class="card"><h2>📍 Your live location (as shared)</h2>${googleMap(v.location, 'Your live location', 'mine')}</section>` : ''}
-    ` : `<section class="card"><p>${v.closureReason === 'USER_CONFIRMED_SAFE' ? '💚 You confirmed you are safe. Responders have been released.' : 'This SOS has ended.'}</p><a class="btn btn-primary" href="#/home">${esc(t('home'))}</a></section>${emergencyBar()}`}
+    ` : `<section class="card"><p>${v.closureReason === 'USER_CONFIRMED_SAFE' ? '💚 You confirmed you are safe. Responders have been released.' : 'This SOS has ended.'}</p><a class="btn btn-primary" href="#/home">${esc(t('home'))}</a></section>
+    ${(v.rateable || []).length ? `<section class="card"><h2>How did the volunteers do?</h2><p class="muted small">Your rating is private and helps the trust team keep volunteers safe and accountable.</p>
+      ${v.rateable.map((r) => r.rated ? `<p>${esc(r.label)}: ${'★'.repeat(r.stars || 0)} — thank you</p>` : `<form class="card form rate-form" data-form="rate" data-id="${esc(v.id)}" data-ref="${esc(r.ref)}"><strong>${esc(r.label)}</strong>
+        <div class="stars" role="radiogroup" aria-label="Rating">${[1, 2, 3, 4, 5].map((n) => `<label class="star"><input type="radio" name="stars" value="${n}" required> ${'★'.repeat(n)}</label>`).join('')}</div>
+        <label class="switch"><input type="checkbox" name="feltUnsafe"> I felt unsafe with this volunteer (the trust team will review)</label>
+        <label>Comment (optional)<input name="comment" maxlength="500"></label><button class="btn btn-primary btn-sm">Submit rating</button></form>`).join('')}</section>` : ''}
+    ${emergencyBar()}`}
     <details class="card" data-keep="user-timeline"><summary>${esc(t('timeline'))} (${tl.length})</summary><ol class="timeline">${tl.map((x) => `<li><time>${esc(fmtTime(x.at))}</time> ${esc(pretty(x.text))}${x.reason ? ` <small class="muted">— ${esc(x.reason)}</small>` : ''}</li>`).join('')}</ol></details>
   `);
 }
@@ -452,6 +495,7 @@ async function askSafe() {
       if (c.id !== 'confirm') return;
       await st.api.safety(v.id, { response: 'YES', confirm: true });
       siren.stop(); keepAwake(false); geo.stop();
+      if (native.available()) prefs.get().armed ? native.startSafety('armed') : native.stopSafety();
       if (recorder.recording) await recorder.stop();
       toast(t('status_green'), 'ok');
     } else {
@@ -512,7 +556,11 @@ async function viewSettings() {
       <form data-form="pins" class="inline-form"><label>${esc(t('cancel_pin'))}<input name="cancelPin" inputmode="numeric" pattern="\\d{4,6}" required maxlength="6" type="password"></label><label>${esc(t('duress_pin'))}<input name="duressPin" inputmode="numeric" pattern="\\d{4,6}" maxlength="6" type="password"></label><button class="btn btn-secondary">${esc(t('save'))}</button></form>
     </section>
     <section class="card form"><h2>⚡ ${esc(t('triggers'))}</h2>
-      <label class="switch"><input type="checkbox" data-change="autoSms" ${p.autoSms ? 'checked' : ''}> ${esc(t('auto_sms'))}</label>
+      <label class="switch"><input type="checkbox" data-change="autoSms" ${p.autoSms !== false ? 'checked' : ''}> ${esc(t('auto_sms'))}${platform === 'android' ? ' <small>(sent automatically by this phone)</small>' : ''}</label>
+      ${platform === 'android' ? `<label class="switch"><input type="checkbox" data-change="sms112" ${p.sms112 ? 'checked' : ''}> Also send an SOS SMS with my location to <b>112</b> (India ERSS accepts SMS)</label>` : ''}
+      ${st.cfg?.features?.sms ? `<label class="switch"><input type="checkbox" data-change="serverSms" ${p.serverSms !== false ? 'checked' : ''}> If my phone can't send SMS, let Beti Bachao text my contacts</label>` : ''}
+      ${native.available() ? `<label class="switch"><input type="checkbox" data-change="armed" ${p.armed ? 'checked' : ''}> <b>Background protection</b>: SOS button on the lock screen${platform === 'android' ? ', quick-settings tile and press power button 5 times' : ' and "Hey Siri, Beti Bachao SOS"'}</label>
+        <button class="btn btn-ghost btn-sm" data-act="native-perms">Check phone permissions</button>` : ''}
       <label class="switch"><input type="checkbox" data-change="shake" ${p.shake ? 'checked' : ''}> ${esc(t('shake_trigger'))}</label>
       <label class="switch"><input type="checkbox" data-change="voice" ${p.voice ? 'checked' : ''} ${voice.supported ? '' : 'disabled'}> ${esc(t('voice_trigger'))} ${voice.supported ? '' : '<small>(not supported in this browser)</small>'}</label>
       <label class="switch"><input type="checkbox" data-change="autoRecord" ${p.autoRecord ? 'checked' : ''}> ${esc(t('auto_record'))}</label>
@@ -540,19 +588,43 @@ const CONDUCT = [
   'You are accountable for your status, arrival and handover.',
 ];
 
+function viewVolunteerOnboarding(prof) {
+  const ver = prof.verification;
+  const trained = prof.trainingCompleted.length >= prof.trainingModules.length;
+  const step = (n, done, title, body) => `<li class="onb-step ${done ? 'done' : ''}"><span class="onb-n">${done ? '✓' : n}</span><div><strong>${esc(title)}</strong>${body}</div></li>`;
+  const call = ver?.call;
+  return shell(`
+    <h1>Become a verified volunteer</h1>
+    <p class="muted">You can respond to SOS alerts only after the admin approves you. Until then, alerts and duty are locked.</p>
+    ${prof.verificationStatus === 'REJECTED' ? `<div class="alert alert-danger">Your verification was not approved${ver?.rejectReason ? `: ${esc(ver.rejectReason)}` : ''}. Contact the Beti Bachao team.</div>` : ''}
+    <ol class="onb">
+      ${step(1, trained, `Training (${prof.trainingCompleted.length}/${prof.trainingModules.length})`, trained ? '' : `<ul class="training">${prof.trainingModules.map((m) => `<li>${prof.trainingCompleted.includes(m.id) ? '✅' : `<button class="btn btn-ghost btn-sm" data-act="vol-train" data-id="${esc(m.id)}">Start</button>`} ${esc(m.title)}</li>`).join('')}</ul>`)}
+      ${step(2, !!ver, 'Request verification', ver ? `<p class="small muted">Requested ${esc(new Date(ver.submittedAt).toLocaleString())}</p>` : `<p class="small">The admin will book a short video call.</p><button class="btn btn-primary" data-act="vol-verify" ${trained ? '' : 'disabled'}>Request verification</button>`)}
+      ${step(3, !!call, 'Video verification call', call ? `<p>📅 <strong>${esc(new Date(call.scheduledAt).toLocaleString())}</strong></p>
+          <p class="small">On the call, show the <strong>front and back of your Aadhaar card</strong> to the camera, next to your face. The call is not recorded and no photo of your Aadhaar is kept.</p>
+          <a class="btn btn-primary" href="${esc(call.roomUrl)}" target="_blank" rel="noopener">📹 Join video call</a>` : '<p class="small muted">Waiting for the admin to book a time. You will get a notification and SMS.</p>')}
+      ${step(4, prof.approved, 'Admin approval', prof.approved ? '' : '<p class="small muted">After the call, the admin approves your account. Then you can go on duty.</p>')}
+    </ol>
+    <details class="card" data-keep="conduct"><summary>Volunteer Code of Conduct</summary><ol>${CONDUCT.map((c) => `<li>${esc(c)}</li>`).join('')}</ol></details>`);
+}
+
 async function viewVolunteer() {
   let prof, alerts = [];
-  try { prof = await st.api.volunteerProfile(); alerts = (await st.api.volunteerAlerts()).items; } catch (e) { return shell(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
+  try { prof = await st.api.volunteerProfile(); } catch (e) { return shell(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
+  if (!prof.approved) { if (native.available()) native.stopSafety(); return viewVolunteerOnboarding(prof); }
+  try { alerts = (await st.api.volunteerAlerts()).items; } catch (e) { return shell(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
   const el = prof.eligibility;
   const check = (ok, label) => `<li class="${ok ? 'ok' : 'no'}">${ok ? '✅' : '⬜'} ${esc(label)}</li>`;
   const sel = alerts.find((a) => a.id === st.volSel) || alerts.find((a) => a.open);
   const reasons = el.reasons;
   const fresh = alerts.filter((a) => a.open && !a.alertResponse && !a.assignment);
   st.activeAsg = alerts.find((a) => a.open && a.assignment)?.assignment.id || null;
+  if (native.available()) { const mode = st.activeAsg ? 'assigned' : prof.available ? 'duty' : null; if (mode !== st.nativeMode) { st.nativeMode = mode; mode ? native.startSafety(mode) : native.stopSafety(); } }
   return shell(`
     ${fresh.length ? `<button class="alert alert-danger alert-link sos-incoming" data-act="vol-select" data-id="${esc(fresh[0].id)}">🚨 New SOS nearby (${esc(fresh[0].distanceBand)}) — tap to respond</button>` : ''}
     <h1>Volunteer</h1>
-    ${pushCard('Get SOS alerts even when the app is closed')}
+    ${native.available() ? '' : pushCard('Get SOS alerts even when the app is closed')}
+    ${native.available() && platform === 'android' ? '<button class="alert alert-info alert-link" data-act="native-alert-setup">🔔 Make SOS alerts ring loudly on the lock screen — tap to check settings</button>' : ''}
     <section class="card">
       <div class="row space"><h2>Readiness</h2><span class="badge ${el.eligible ? 'badge-ok' : 'badge-warn'}">${el.eligible ? 'Ready to receive alerts' : 'Not receiving alerts'}</span></div>
       <ul class="checklist">
@@ -662,6 +734,13 @@ function opsDetail(d, tl, cfg) {
     <table class="tbl"><thead><tr><th>Volunteer</th><th>Role</th><th>Status</th><th>Dist.</th><th></th></tr></thead><tbody>
       ${d.assignments.map((a) => `<tr><td>${esc(a.volunteerName)}</td><td>${esc(a.role)}</td><td>${esc(pretty(a.status))}${a.stallFlagged ? ' ⚠️ stalled' : ''}</td><td>${a.distanceKm != null ? esc(a.distanceKm) + ' km' : '—'}</td><td>${['ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ASSISTING'].includes(a.status) && !d.closed ? `<button class="btn btn-ghost btn-sm" data-act="op-reassign" data-id="${esc(d.id)}" data-aid="${esc(a.id)}">Remove</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">None yet</td></tr>'}
     </tbody></table>
+    <div class="ai-box">
+      <p><strong>Prank-risk (advisory):</strong> <span class="badge ${d.prankRisk?.level === 'HIGH' ? 'badge-danger' : d.prankRisk?.level === 'MEDIUM' ? 'badge-warn' : 'badge-ok'}">${esc(d.prankRisk?.level || 'LOW')}</span> ${esc((d.prankRisk?.reasons || []).join('; '))} <small class="muted">${esc(d.prankRisk?.note || '')}</small>
+      ${d.ai?.risk ? `<br><strong>AI note check:</strong> ${esc(d.ai.risk.risk)} — ${esc(d.ai.risk.reason)}` : ''}</p>
+      ${st.cfg?.features?.ai ? `<button class="btn btn-sm btn-secondary" data-act="ai-summary" data-id="${esc(d.id)}">🤖 AI summary & next steps</button>` : ''}
+      ${d.ai?.summary ? `<pre class="ai-text">${esc(d.ai.summary.text)}</pre><small class="muted">AI (${esc(d.ai.summary.model)}) — advisory, verify before acting.</small>` : ''}
+    </div>
+    ${d.requester?.phone ? `<p>📞 Her number: <a href="tel:${esc(d.requester.phone)}">${esc(d.requester.phone)}</a>${d.duress ? ' <strong class="danger-text">— DURESS: do not call openly</strong>' : ''}</p>` : ''}
     <h3>Escalations</h3>
     <ul>${d.escalations.map((e) => `<li><strong>${esc(e.type)}</strong> · ${esc(e.status)} · <em>${esc(e.label)}</em> · ${esc(fmtTime(e.attemptedAt))}${e.reason ? ` — ${esc(e.reason)}` : ''}</li>`).join('') || '<li class="muted">None</li>'}</ul>
     <h3>Notifications</h3>
@@ -683,7 +762,7 @@ function opsDetail(d, tl, cfg) {
 // ------------------------------------------------------------------ admin
 async function viewAdmin() {
   const tab = st.adminTab;
-  const tabs = [['policy', 'Policy'], ['volunteers', 'Volunteers'], ['staff', 'Operators'], ['abuse', 'Abuse reports'], ['audit', 'Audit log'], ['integrations', 'Integrations']];
+  const tabs = [['policy', 'Policy'], ['volunteers', 'Volunteers'], ['users', 'Users'], ['staff', 'Operators'], ['abuse', 'Abuse reports'], ['audit', 'Audit log'], ['integrations', 'Integrations']];
   let body = '';
   try {
     if (tab === 'policy') {
@@ -698,11 +777,24 @@ async function viewAdmin() {
         <div class="full"><button class="btn btn-primary">Save policy</button></div></form>`;
     } else if (tab === 'volunteers') {
       const { items } = await st.api.adminVolunteers();
-      body = `<section class="card"><h2>Volunteers</h2><table class="tbl"><thead><tr><th>Name</th><th>Verification</th><th>Training</th><th>Duty</th><th>Eligible</th><th>No-shows</th><th>Actions</th></tr></thead><tbody>
-        ${items.map((v) => `<tr><td>${esc(v.displayName)}</td><td>${esc(pretty(v.verificationStatus))}</td><td>${v.trainingDone}/${v.trainingTotal}</td><td>${v.available ? 'On' : 'Off'}</td><td>${v.eligibility.eligible ? '✅' : `<small>${esc(v.eligibility.reasons.join(', '))}</small>`}</td><td>${v.noShowCount}</td>
-          <td class="actions">${v.verificationStatus === 'PENDING' ? `<button class="btn btn-sm btn-primary" data-act="adm-review" data-id="${esc(v.userId)}" data-d="APPROVE">Approve</button><button class="btn btn-sm btn-ghost" data-act="adm-review" data-id="${esc(v.userId)}" data-d="REJECT">Reject</button>` : ''}
-          ${v.suspendedReason ? `<button class="btn btn-sm btn-ghost" data-act="adm-review" data-id="${esc(v.userId)}" data-d="REINSTATE">Reinstate</button>` : `<button class="btn btn-sm btn-ghost danger-text" data-act="adm-review" data-id="${esc(v.userId)}" data-d="SUSPEND">Suspend</button>`}</td></tr>`).join('')}
+      const order = { PENDING: 0, NOT_STARTED: 1, VERIFIED: 2, REJECTED: 3 };
+      items.sort((a, b) => (b.stats?.reviewNeeded - a.stats?.reviewNeeded) || (order[a.verificationStatus] - order[b.verificationStatus]));
+      body = `<section class="card"><h2>Volunteers</h2><p class="muted small">Verification: book a video call → on the call the volunteer shows the Aadhaar front and back next to their face → approve with the checklist. Never photograph, record or store the Aadhaar.</p>
+        <table class="tbl"><thead><tr><th>Name</th><th>Phone · area</th><th>Status</th><th>Call</th><th>Training</th><th>Rating</th><th>Duty</th><th>Actions</th></tr></thead><tbody>
+        ${items.map((v) => `<tr class="${v.stats?.reviewNeeded ? 'row-flag' : ''}"><td>${esc(v.displayName)}${v.stats?.reviewNeeded ? ' <span class="badge badge-danger">review</span>' : ''}<br><small>${esc(v.email || '')}</small></td>
+          <td>${esc(v.request?.contactPhone || '—')}<br><small>${esc(v.request?.area || '')}</small></td>
+          <td>${esc(pretty(v.verificationStatus))}${v.request?.aadhaarMasked ? `<br><small>${esc(v.request.aadhaarMasked)}</small>` : ''}${v.suspendedReason ? '<br><small class="danger-text">suspended</small>' : ''}</td>
+          <td>${v.request?.call ? `<small>${esc(new Date(v.request.call.scheduledAt).toLocaleString())}</small><br><a href="${esc(v.request.call.roomUrl)}" target="_blank" rel="noopener">Join</a>` : '—'}</td>
+          <td>${v.trainingDone}/${v.trainingTotal}</td>
+          <td>${v.stats?.avgRating != null ? `${esc(v.stats.avgRating)}★ (${v.stats.ratings})` : '—'}${v.stats?.feltUnsafe ? `<br><small class="danger-text">${v.stats.feltUnsafe} felt unsafe</small>` : ''}${v.stats?.noShows ? `<br><small>${v.stats.noShows} no-show</small>` : ''}</td>
+          <td>${v.available ? 'On' : 'Off'}</td>
+          <td class="actions">${v.verificationStatus === 'PENDING' ? `<button class="btn btn-sm btn-secondary" data-act="adm-call" data-id="${esc(v.userId)}">📹 ${v.request?.call ? 'Re-book' : 'Book'} call</button><button class="btn btn-sm btn-primary" data-act="adm-approve" data-id="${esc(v.userId)}" data-name="${esc(v.displayName)}">Approve</button><button class="btn btn-sm btn-ghost" data-act="adm-review" data-id="${esc(v.userId)}" data-d="REJECT">Reject</button>` : ''}
+          ${v.suspendedReason ? `<button class="btn btn-sm btn-ghost" data-act="adm-review" data-id="${esc(v.userId)}" data-d="REINSTATE">Reinstate</button>` : v.verificationStatus === 'VERIFIED' ? `<button class="btn btn-sm btn-ghost danger-text" data-act="adm-review" data-id="${esc(v.userId)}" data-d="SUSPEND">Suspend</button>` : ''}</td></tr>`).join('')}
         </tbody></table></section>`;
+    } else if (tab === 'users') {
+      body = `<section class="card"><h2>Find a user</h2><p class="muted">Search by email, phone or name to reset a forgotten password.</p>
+        <form class="inline-form" data-form="find-users"><label>Search<input name="q" minlength="3" required value="${esc(st.userQuery || '')}"></label><button class="btn btn-secondary">Search</button></form>
+        <table class="tbl"><tbody>${(st.userResults || []).map((u) => `<tr><td>${esc(u.displayName)}<br><small>${esc(u.email)}</small></td><td>${esc(u.phone || '')}</td><td>${esc(u.role)}</td><td>${esc(u.status)}</td><td><button class="btn btn-sm btn-ghost" data-act="adm-reset" data-id="${esc(u.id)}" data-name="${esc(u.displayName)}">Reset password</button></td></tr>`).join('') || '<tr><td class="muted">No results yet.</td></tr>'}</tbody></table></section>`;
     } else if (tab === 'staff') {
       const { items } = await st.api.staffList();
       body = `<section class="card"><h2>Operators & admins</h2><p class="muted">Operators watch live SOS incidents and record handoffs to police/ambulance. Every staff account must set up an authenticator app at first login.</p>
@@ -714,7 +806,7 @@ async function viewAdmin() {
           <button class="btn btn-primary">Create account</button></form>`;
     } else if (tab === 'abuse') {
       const { items } = await st.api.abuseList();
-      body = `<section class="card"><h2>Abuse & safety reports</h2><ul class="history">${items.map((r) => `<li><strong>${esc(pretty(r.category))}</strong> by ${esc(r.reporter)} · ${esc(fmtTime(r.createdAt))} · ${esc(r.status)}<br>${esc(r.details)}${r.status === 'OPEN' ? ` <button class="btn btn-sm btn-ghost" data-act="adm-resolve" data-id="${esc(r.id)}">Resolve</button>` : ` <small>— ${esc(r.resolution || '')}</small>`}</li>`).join('') || '<li class="muted">No reports.</li>'}</ul></section>`;
+      body = `<section class="card"><h2>Abuse & safety reports</h2><ul class="history">${items.map((r) => `<li><strong>${esc(pretty(r.category))}</strong> by ${esc(r.reporter)} · ${esc(fmtTime(r.createdAt))} · ${esc(r.status)}${r.aiRisk ? ` <span class="badge ${r.aiRisk.risk === 'HIGH' ? 'badge-danger' : r.aiRisk.risk === 'MEDIUM' ? 'badge-warn' : 'badge-info'}" title="${esc(r.aiRisk.reason)}">AI: ${esc(r.aiRisk.risk)} · ${esc(r.aiRisk.category)}</span>` : ''}<br><span class="tr-src">${esc(r.details)}</span>${st.cfg?.features?.ai && r.details ? ` <button class="btn btn-sm btn-ghost" data-act="ai-translate" data-text="${esc(r.details)}">Translate</button>` : ''}${r.status === 'OPEN' ? ` <button class="btn btn-sm btn-ghost" data-act="adm-resolve" data-id="${esc(r.id)}">Resolve</button>` : ` <small>— ${esc(r.resolution || '')}</small>`}</li>`).join('') || '<li class="muted">No reports.</li>'}</ul></section>`;
     } else if (tab === 'audit') {
       const a = await st.api.audit(150);
       body = `<section class="card"><h2>Audit log</h2><p>Hash chain: ${a.chain.ok ? `<span class="badge badge-ok">intact (${a.chain.length} events)</span>` : '<span class="badge badge-danger">BROKEN — investigate</span>'}</p>
@@ -736,7 +828,11 @@ async function render() {
   let html;
   clearInterval(st.pollTimer);
   st.incident = null;
+  if (isNative && !serverUrl() && parts[0] !== 'connect') { location.hash = '#/connect'; return; }
+  if (st.me?.mustChangePassword && parts[0] !== 'change-password') { location.hash = '#/change-password'; return; }
   switch (parts[0]) {
+    case 'connect': html = viewConnect(); break;
+    case 'change-password': if (!st.me) return go('#/login'); html = viewChangePassword(); break;
     case undefined: html = st.me ? null : viewLanding(); if (!html) return go(roleHome(st.me.role)); break;
     case 'login': if (st.me) return go(roleHome(st.me.role)); html = await viewLogin(params); break;
     case 'register': html = viewRegister(params); break;
@@ -827,7 +923,15 @@ function updateLive() {
 
 // ------------------------------------------------------------------ actions
 const actions = {
-  async logout() { try { await st.api.logout(); } catch {} st.me = null; geo.stop(); go('#/'); },
+  async logout() { try { await st.api.logout(); } catch {} if (native.available()) { native.stopSafety(); native.configure({ token: null }); } st.me = null; geo.stop(); go('#/'); },
+  async forgot() {
+    const a = await modal({ title: 'Reset your password', body: `<label>Email<input name="email" type="email" required></label><p class="small muted">${st.cfg?.features?.smsReset ? 'We will send a 6-digit code to your registered mobile number.' : 'Ask the Beti Bachao admin to reset it for you.'}</p>`, actions: st.cfg?.features?.smsReset ? [{ id: 'go', label: 'Send code', kind: 'primary' }, { id: 'no', label: t('cancel') }] : [{ id: 'no', label: 'OK', kind: 'primary' }] });
+    if (a.id !== 'go') return;
+    try { await st.api.resetRequest(a.data.email); } catch (e) { return showErr(e); }
+    const b = await modal({ title: 'Enter the code', body: '<label>6-digit code<input name="code" inputmode="numeric" maxlength="6" required></label><label>New password (10+ characters)<input name="pw" type="password" minlength="10" required autocomplete="new-password"></label>', actions: [{ id: 'go', label: 'Set new password', kind: 'primary' }, { id: 'no', label: t('cancel') }] });
+    if (b.id !== 'go') return;
+    try { await st.api.resetConfirm({ email: a.data.email, code: b.data.code, newPassword: b.data.pw }); toast('Password changed. Please log in.', 'ok'); } catch (e) { showErr(e); }
+  },
   async 'share-location'() {
     try { await geo.once(); geo.start(); toast(t('location_on'), 'ok'); } catch (e) { toast(e.code === 1 ? 'Location permission denied. You can still send SOS and call.' : 'Could not get a location fix.', 'error', 6000); }
     render();
@@ -866,12 +970,13 @@ const actions = {
     try {
       await st.api.cancel(st.incident.id, hasPin ? { pin: r.data.pin } : { confirm: true });
       siren.stop(); keepAwake(false); geo.stop();
+      if (native.available()) prefs.get().armed ? native.startSafety('armed') : native.stopSafety();
       toast(t('status_grey'), 'info'); go('#/home');
     } catch (e) { showErr(e); }
   },
   async 'safewalk-checkin'() { safeWalk.extend(); toast(t('check_in'), 'ok'); render(); },
   'safewalk-stop'() { safeWalk.stop(); render(); },
-  async 'contact-del'(el) { contacts.remove(Number(el.dataset.i)); render(); },
+  async 'contact-del'(el) { contacts.remove(Number(el.dataset.i)); syncContactsToServer(); render(); },
   async export() { try { const d = await st.api.exportData(); const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(d, null, 2)], { type: 'application/json' })); a.download = 'beti-bachao-my-data.json'; a.click(); } catch (e) { showErr(e); } },
   async 'delete-account'() {
     const r = await modal({ title: 'Delete account?', body: '<p>This removes your profile and precise location history. Incident records needed for audit are kept without your identity.</p>', actions: [{ id: 'del', label: 'Delete permanently', kind: 'danger' }, { id: 'no', label: t('cancel') }] });
@@ -883,6 +988,13 @@ const actions = {
     if (r.id !== 'send') return;
     try { await st.api.reportAbuse({ incidentId: el.dataset.id || null, category: r.data.category, details: r.data.details }); toast('Report sent to the trust team', 'ok'); } catch (e) { showErr(e); }
   },
+  async 'native-alert-setup'() {
+    const fs = await native.canUseFullScreenAlerts();
+    const r = await modal({ title: 'Loud SOS alerts', body: `<p>For alerts to ring and show over the lock screen:</p><ol><li>Allow notifications for Beti Bachao.</li><li>Allow <b>full-screen alerts</b>${fs?.allowed ? ' ✅' : ''}.</li><li>Turn off battery optimisation for Beti Bachao so alerts are not delayed.</li></ol>`, actions: [{ id: 'fs', label: 'Full-screen alerts setting', kind: 'primary' }, { id: 'bat', label: 'Battery setting', kind: 'secondary' }, { id: 'no', label: 'Done' }] });
+    if (r.id === 'fs') native.openSystemSettings('fullScreenIntent');
+    if (r.id === 'bat') native.openSystemSettings('batteryOptimization');
+  },
+  async 'native-perms'() { const r = await native.requestPermissions('all'); const s2 = await native.permissionStatus(); await modal({ title: 'Phone permissions', body: `<ul>${Object.entries(s2 || r || {}).map(([k, v]) => `<li>${esc(k)}: <b>${esc(v)}</b></li>`).join('')}</ul><p class="small muted">For background protection allow location <b>"All the time"</b>, SMS and notifications.</p>`, actions: [{ id: 'set', label: 'Open app settings', kind: 'secondary' }, { id: 'ok', label: 'OK', kind: 'primary' }] }).then((x) => { if (x.id === 'set') native.openSystemSettings('app'); }); },
   async 'enable-push'() { if (await enablePush()) { toast('Alerts enabled on this phone', 'ok'); render(); } },
   // volunteer
   async 'vol-avail'(el) {
@@ -919,6 +1031,10 @@ const actions = {
   // ops
   'map-zoom'(el) { const m = (st.mapZoom ||= {}); const k = el.dataset.key; m[k] = Math.max(3, Math.min(20, (m[k] ?? (k === 'route' ? 13 : 16)) + Number(el.dataset.d))); st.softRefresh = true; render(); },
   'ppi-zoom'(el) { const z = (st.ppiZoom ||= {}); const k = el.dataset.key; z[k] = Math.max(-4, Math.min(6, (z[k] || 0) + Number(el.dataset.d))); st.softRefresh = true; render(); },
+  async 'ai-summary'(el) { el.disabled = true; el.textContent = '🤖 Thinking…'; try { await st.api.aiSummary(el.dataset.id); } catch (e) { showErr(e); } st.softRefresh = false; render(); },
+  async 'ai-translate'(el) {
+    try { const r = await st.api.translate(el.dataset.text, (LANGS.find((l) => l.code === lang())?.name) || 'English'); await modal({ title: 'Machine translation', body: `<p>${esc(r.text)}</p><p class="muted small">Translated by local AI — may contain mistakes.</p>`, actions: [{ id: 'ok', label: 'OK', kind: 'primary' }] }); } catch (e) { showErr(e); }
+  },
   'op-select'(el) { st.opSel = el.dataset.id; render(); },
   async 'op-reassign'(el) {
     const r = await modal({ title: 'Remove responder', body: '<label>Reason (5+ chars)<input name="reason" required minlength="5"></label>', actions: [{ id: 'go', label: 'Remove & search again', kind: 'warn' }, { id: 'no', label: t('cancel') }] });
@@ -929,6 +1045,29 @@ const actions = {
   // admin
   async 'adm-staff-toggle'(el) { try { await st.api.setStaffStatus(el.dataset.id, el.dataset.s); render(); } catch (e) { showErr(e); } },
   'adm-tab'(el) { st.adminTab = el.dataset.tab; render(); },
+  async 'adm-call'(el) {
+    const d = new Date(Date.now() + 3600e3); d.setMinutes(0, 0, 0);
+    const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    const r = await modal({ title: 'Book verification video call', body: `<label>Date & time<input type="datetime-local" name="at" value="${local}" required></label><p class="muted small">The volunteer gets a notification and SMS with the time and a private video-call link.</p>`, actions: [{ id: 'go', label: 'Book call', kind: 'primary' }, { id: 'no', label: t('cancel') }] });
+    if (r.id !== 'go' || !r.data.at) return;
+    try { await st.api.scheduleCall(el.dataset.id, new Date(r.data.at).toISOString()); toast('Call booked', 'ok'); render(); } catch (e) { showErr(e); }
+  },
+  async 'adm-approve'(el) {
+    const r = await modal({ title: `Approve ${el.dataset.name}`, body: `<p class="small">Confirm what you saw on the video call:</p>
+      <label class="switch"><input type="checkbox" name="front"> Aadhaar <b>front</b> shown clearly</label>
+      <label class="switch"><input type="checkbox" name="back"> Aadhaar <b>back</b> shown clearly</label>
+      <label class="switch"><input type="checkbox" name="face"> Photo and name match the person on the call</label>
+      <label>Last 4 digits of Aadhaar (optional — never the full number)<input name="last4" inputmode="numeric" pattern="\\d{4}" maxlength="4"></label>
+      <p class="muted small">Do not take screenshots or keep any copy of the Aadhaar card.</p>`, actions: [{ id: 'go', label: 'Approve volunteer', kind: 'primary' }, { id: 'no', label: t('cancel') }] });
+    if (r.id !== 'go') return;
+    if (!(r.data.front && r.data.back && r.data.face)) return toast('All three checks are required to approve', 'error');
+    try { await st.api.reviewVolunteer(el.dataset.id, { decision: 'APPROVE', checklist: { aadhaarFrontSeen: true, aadhaarBackSeen: true, faceMatches: true, last4: r.data.last4 || null } }); toast('Volunteer approved', 'ok'); render(); } catch (e) { showErr(e); }
+  },
+  async 'adm-reset'(el) {
+    const c = await modal({ title: `Reset password for ${el.dataset.name}?`, body: '<p>They will be logged out everywhere and must choose a new password at next login.</p>', actions: [{ id: 'go', label: 'Reset', kind: 'danger' }, { id: 'no', label: t('cancel') }] });
+    if (c.id !== 'go') return;
+    try { const r = await st.api.resetUserPassword(el.dataset.id); await modal({ title: 'Temporary password', body: `<p class="phrase">${esc(r.temporaryPassword)}</p><p class="small">${esc(r.note)}</p>`, actions: [{ id: 'ok', label: 'Done', kind: 'primary' }] }); } catch (e) { showErr(e); }
+  },
   async 'adm-review'(el) {
     let reason = null;
     if (el.dataset.d !== 'APPROVE') { const r = await modal({ title: `${pretty(el.dataset.d)} volunteer`, body: '<label>Reason (5+ chars)<input name="reason" required minlength="5"></label>', actions: [{ id: 'go', label: 'Confirm', kind: 'primary' }, { id: 'no', label: t('cancel') }] }); if (r.id !== 'go') return; reason = r.data.reason; }
@@ -973,10 +1112,10 @@ const forms = {
   },
   async register(f) {
     if (!f.consent.checked) return toast('Please read and accept the location-sharing notice', 'warn');
-    try { const r = await st.api.register({ displayName: f.displayName.value, email: f.email.value, password: f.password.value, role: f.role.value, countryCode: f.countryCode.value, consent: true }); st.me = r.user; st.api.connect(); afterLogin(); } catch (e) { showErr(e); }
+    try { const r = await st.api.register({ displayName: f.displayName.value, email: f.email.value, password: f.password.value, role: f.role.value, countryCode: f.countryCode.value, phone: f.phone.value, consent: true }); st.me = r.user; st.api.connect(); afterLogin(); } catch (e) { showErr(e); }
   },
   async pins(f) { try { await st.api.setPins({ cancelPin: f.cancelPin.value, duressPin: f.duressPin.value || null }); st.me = (await st.api.me()).user; toast('PINs saved', 'ok'); render(); } catch (e) { showErr(e); } },
-  contact(f) { if (contacts.add(f.name.value, f.phone.value)) render(); else toast('Enter a name and a valid phone (max 10 contacts)', 'error'); },
+  contact(f) { if (contacts.add(f.name.value, f.phone.value)) { syncContactsToServer(); render(); } else toast('Enter a name and a valid phone (max 10 contacts)', 'error'); },
   safewalk(f) { safeWalk.start(Math.max(1, Math.min(240, Number(f.minutes.value) || 15))); toast(t('safe_walk') + ' ✓', 'ok'); render(); },
   fakecall(f) { prefs.set({ fakeCaller: f.caller.value || 'Maa' }); fakeCall(f.caller.value || 'Maa', Number(f.delay.value) || 0); toast('Fake call scheduled', 'ok'); },
   async floor(f) {
@@ -994,7 +1133,15 @@ const forms = {
     patch.countryCode = f.countryCode.value;
     try { await st.api.patchConfig(patch); toast('Policy saved & audited', 'ok'); } catch (e) { showErr(e); }
   },
+  async 'change-pw'(f) { try { await st.api.changePassword({ currentPassword: f.cur.value, newPassword: f.pw.value }); st.me = (await st.api.me()).user; toast('Password changed', 'ok'); go(roleHome(st.me.role)); } catch (e) { showErr(e); } },
+  async connect(f) {
+    const url = f.url.value.trim().replace(/\/$/, '');
+    try { const r = await fetch(url + '/api/v1/health'); if (!r.ok) throw new Error(); } catch { return toast('Could not reach that server', 'error'); }
+    setServerUrl(url); location.hash = '#/'; location.reload();
+  },
   async setup(f) { try { await st.api.setup({ code: f.code.value.trim(), displayName: f.displayName.value, email: f.email.value, password: f.password.value }); st.cfg.setupNeeded = false; toast('Admin created. Log in to set up two-step login.', 'ok'); go('#/login'); } catch (e) { showErr(e); } },
+  async rate(f) { try { await st.api.rate(f.dataset.id, { ref: f.dataset.ref, stars: Number(f.stars.value), feltUnsafe: f.feltUnsafe.checked, comment: f.comment.value }); toast('Thank you for your feedback', 'ok'); render(); } catch (e) { showErr(e); } },
+  async 'find-users'(f) { st.userQuery = f.q.value; try { st.userResults = (await st.api.findUsers(f.q.value)).items; render(); } catch (e) { showErr(e); } },
   async 'add-staff'(f) { try { await st.api.createStaff({ displayName: f.displayName.value, email: f.email.value, password: f.password.value, role: f.role.value }); toast('Account created. They will set up 2-step login on first sign-in.', 'ok'); render(); } catch (e) { showErr(e); } },
   async handoff(f) { try { await st.api.handoff(f.dataset.id, { status: f.status.value, reason: f.reason.value }); toast('Handoff recorded', 'ok'); render(); } catch (e) { showErr(e); } },
   async closure(f) { try { await st.api.closureException(f.dataset.id, { reason: f.reason.value, note: f.note.value }); toast('Closed with documented exception', 'ok'); render(); } catch (e) { showErr(e); } },
@@ -1014,12 +1161,19 @@ const changes = {
     prefs.set({ voice: el.checked });
   },
   autoRecord(el) { prefs.set({ autoRecord: el.checked }); },
-  autoSms(el) { prefs.set({ autoSms: el.checked }); },
+  sms112(el) { prefs.set({ sms112: el.checked }); syncNative(); },
+  serverSms(el) { prefs.set({ serverSms: el.checked }); st.api.saveContacts({ prefs: { serverSms: el.checked } }).catch(() => {}); },
+  async armed(el) { prefs.set({ armed: el.checked }); await native.requestPermissions('safety'); await syncNative(); if (!el.checked) native.stopSafety(); toast(el.checked ? 'Background protection on — look for the Beti Bachao notification' : 'Background protection off', 'ok'); },
+  autoSms(el) { prefs.set({ autoSms: el.checked }); syncNative(); },
   'ops-all'(el) { store.set('ops.all', el.checked); render(); },
 };
 
+async function pullContacts() {
+  try { const c = await st.api.getContacts(); if (!contacts.list().length && c.contacts?.length) store.set('contacts', c.contacts); else if (contacts.list().length && !c.contacts?.length) await st.api.saveContacts({ contacts: contacts.list() }); } catch {}
+}
 function afterLogin() {
   const p = prefs.get();
+  if (['user', 'volunteer'].includes(st.me.role)) { pullContacts().then(syncNative); registerAppPush(); }
   if (st.me.role === 'user') {
     if (p.shake) shake.enable(() => startCountdown('shake'));
     if (p.voice) voice.start(() => startCountdown('voice'));
@@ -1068,10 +1222,17 @@ async function boot() {
     if (sw && Date.now() >= sw.endsAt && st.me?.role === 'user') { safeWalk.stop(); startCountdown('safewalk', 30); }
   }, 1000);
 
-  if (st.me?.role === 'user') afterLoginSilent();
+  if (st.me?.role === 'user' || st.me?.role === 'volunteer') afterLoginSilent();
   render();
+  // Opened from the lock-screen button, quick tile, widget, power button or Siri.
+  if (native.available()) {
+    const act = await native.takeLaunchAction();
+    if (act?.action === 'sos' && st.me?.role === 'user') triggerSOS({ trigger: act.trigger || 'native' });
+    if (act?.url) location.hash = act.url;
+    document.addEventListener('resume', async () => { const a = await native.takeLaunchAction(); if (a?.action === 'sos' && st.me?.role === 'user') triggerSOS({ trigger: a.trigger || 'native' }); if (a?.url) location.hash = a.url; });
+  }
   if (st.me && pushState() === 'granted') enablePush(true);
-  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  if ('serviceWorker' in navigator && location.protocol !== 'file:' && !isNative) {
     const hadController = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((r) => r.update()).catch(() => {});
     // A new version took over: reload once so every file is the same version (never during an SOS).
@@ -1080,6 +1241,7 @@ async function boot() {
 }
 function afterLoginSilent() {
   const p = prefs.get();
+  if (['user', 'volunteer'].includes(st.me.role)) { pullContacts().then(syncNative); registerAppPush(); }
   if (p.shake) shake.enable(() => startCountdown('shake'));
   if (p.voice) voice.start(() => startCountdown('voice'));
   geo.permission().then((s) => { if (s === 'granted') geo.start(); });

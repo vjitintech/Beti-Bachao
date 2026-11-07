@@ -334,3 +334,14 @@ button.alert { width: 100%; text-align: start; font: inherit; cursor: pointer; }
 @keyframes ppi-blink-halo { from { transform: scale(.7); stroke-opacity: .8; } to { transform: scale(1.8); stroke-opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .ppi-moving .ppi-dot, .ppi-moving .ppi-halo { animation: none; } }
 .ppi-box .zoom-bar { top: 34px; inset-inline-end: 10px; }
+
+.onb { list-style: none; padding: 0; margin: 12px 0; display: grid; gap: 10px; }
+.onb-step { display: grid; grid-template-columns: 34px 1fr; gap: 10px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; }
+.onb-step.done { opacity: .75; }
+.onb-n { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--chip); font-weight: 800; }
+.onb-step.done .onb-n { background: var(--safe); color: #fff; }
+.stars { display: flex; flex-wrap: wrap; gap: 6px; }
+.star { flex-direction: row; align-items: center; gap: 4px; color: #e6a100; font-weight: 700; }
+.row-flag td { background: color-mix(in srgb, var(--sos) 7%, transparent); }
+.ai-box { background: var(--chip); border-radius: 12px; padding: 10px 12px; margin: 10px 0; }
+.ai-text { white-space: pre-wrap; font: inherit; background: var(--surface); padding: 10px; border-radius: 10px; margin: 8px 0 4px; }
