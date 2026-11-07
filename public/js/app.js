@@ -1,9 +1,9 @@
-import { createApi, uuid } from './api.js?v=mw5worwg';
-import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mw5worwg';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mw5worwg';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mw5worwg';
-import { TRAINING_MODULES } from '../core/engine.js?v=mw5worwg';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mw5worwg';
+import { createApi, uuid } from './api.js?v=mw5wvw4f';
+import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mw5wvw4f';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mw5wvw4f';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mw5wvw4f';
+import { TRAINING_MODULES } from '../core/engine.js?v=mw5wvw4f';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mw5wvw4f';
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'policy', volSel: null };
 const app = () => $('#app');
@@ -300,7 +300,7 @@ function smsButtons() {
 async function syncNative() {
   if (!native.available() || !st.me) return;
   const p = prefs.get();
-  await native.configure({ serverUrl: serverUrl(), token: st.api.token, role: st.me.role, displayName: st.me.displayName,
+  await native.configure({ serverUrl: serverUrl(), token: st.api.token, role: st.me.role, armed: !!p.armed, displayName: st.me.displayName,
     contacts: contacts.list(), sms112: !!p.sms112, autoSms: p.autoSms !== false, shake: !!p.shake, powerButton: p.powerButton !== false,
     message: sosMessage(null), emergencyNumber: country().emergency });
   if (st.me.role === 'user') { if (p.armed) native.startSafety('armed'); }
