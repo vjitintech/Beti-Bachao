@@ -1,13 +1,13 @@
 # One-click deploy on Render: https://render.com/deploy?repo=https://github.com/vjitintech/Beti-Bachao
-# Always-on plan + persistent disk are required: a sleeping free server would
-# delay an SOS, and without a disk all accounts would be lost on restart.
+# Always-on Starter web service (a sleeping free server would delay an SOS) + PostgreSQL
+# (accounts survive redeploys) + a small disk for encrypted evidence recordings and backups.
 services:
   - type: web
     name: beti-bachao
     runtime: node
     plan: starter
     region: singapore
-    numInstances: 1          # single instance: data lives on the attached disk
+    numInstances: 1          # single instance: timers and evidence files live here
     buildCommand: node --version
     startCommand: node server/server.js
     healthCheckPath: /api/v1/health
@@ -20,6 +20,10 @@ services:
         value: "22"
       - key: DATA_FILE
         value: /var/data/db.json
+      - key: DATABASE_URL
+        fromDatabase:
+          name: beti-bachao-db
+          property: connectionString
       - key: COOKIE_SECURE
         value: "true"
       - key: TRUST_PROXY
@@ -30,3 +34,14 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
+      - key: PUBLIC_URL        # e.g. https://beti-bachao.onrender.com (set after the first deploy)
+        sync: false
+      - key: BACKUP_KEY        # 64 hex characters — keep a copy offline
+        sync: false
+      - key: MEDIA_KEY         # 64 hex characters — keep a copy offline
+        sync: false
+databases:
+  - name: beti-bachao-db
+    plan: basic-256mb
+    region: singapore
+    postgresMajorVersion: "16"

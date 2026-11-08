@@ -8,7 +8,8 @@ import crypto from 'node:crypto';
 
 export function parseUrl(u) {
   const x = new URL(u);
-  const ssl = x.searchParams.get('sslmode') || (/(localhost|127\.0\.0\.1|^\/)/.test(x.hostname) ? 'disable' : 'require');
+  // Local → no TLS; private-network host without a dot (e.g. Render internal "dpg-xxx-a") → TLS if offered; public host → TLS required.
+  const ssl = x.searchParams.get('sslmode') || (/(localhost|127\.0\.0\.1|^\/)/.test(x.hostname) ? 'disable' : x.hostname.includes('.') ? 'require' : 'prefer');
   return {
     host: decodeURIComponent(x.hostname) || 'localhost', port: Number(x.port) || 5432,
     user: decodeURIComponent(x.username), password: decodeURIComponent(x.password),
