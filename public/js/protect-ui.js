@@ -2,9 +2,10 @@
 // places & location-based contacts, Track my travel, nearby help, dashboards,
 // police auto-connect status, operator acknowledgement, evidence, admin impact &
 // police-station import, blink trigger page, spoken guidance for blind users.
-import { pickContacts } from '../core/protect.js?v=mw85m40y';
-import { announce, speakStatus, listenOnce, a11y } from './a11y.js?v=mw85m40y';
-import { blinkGuard } from './blink.js?v=mw85m40y';
+import { sosWords, heardSosWord, lang as curLang } from './i18n.js?v=mw85u9y9';
+import { pickContacts } from '../core/protect.js?v=mw85u9y9';
+import { announce, speakStatus, listenOnce, a11y } from './a11y.js?v=mw85u9y9';
+import { blinkGuard } from './blink.js?v=mw85u9y9';
 
 export function initProtect(c) {
   const { st, esc, toast, modal, showErr, go, render, geo, contacts, prefs, store, native, platform, telHref, fmtTime, pretty, nativeShare, serverUrl, isNative } = c;
@@ -293,16 +294,16 @@ export function initProtect(c) {
   // ---------------- voice commands (blind & low-vision users) ----------------
   async function voiceCommand() {
     announce('Listening. Say help, status, call police, or I am safe.');
-    const heard = (await listenOnce({ lang: st.langTag || 'en-IN' })) || '';
+    const heard = (await listenOnce({ lang: c.speechLang() })) || '';
     const s = heard.toLowerCase();
     if (!s) return announce("Sorry, I didn't hear anything. Tap again to try.");
-    if (/\b(help|sos|bachao|bachav|kapadandi|kaapaadu|madad|emergency|danger)\b/.test(s)) { announce('Starting SOS.'); return c.triggerSOS({ trigger: 'voice_command' }); }
+    if (heardSosWord(s, sosWords(curLang(), prefs.get().customSosWords || [])) || /\bdanger\b/.test(s)) { announce('Starting SOS.'); return c.triggerSOS({ trigger: 'voice_command' }); }
     if (/status|update|where|kitna|ఎంత/.test(s)) return speakStatus(st.incident, { force: true });
     if (/police|112|call/.test(s)) { announce('Calling 112.'); return c.openExternal(telHref(c.country().emergency)); }
     if (/safe|surakshit|సురక్షిత/.test(s)) {
       if (!st.incident || st.incident.closed) return announce('You have no active SOS.');
       announce('To confirm you are safe, say: yes I am safe.');
-      const again = ((await listenOnce({ lang: st.langTag || 'en-IN' })) || '').toLowerCase();
+      const again = ((await listenOnce({ lang: c.speechLang() })) || '').toLowerCase();
       if (/yes/.test(again) && /safe/.test(again)) { await api().safety(st.incident.id, { response: 'YES', confirm: true }); announce('Thank you. Your SOS is closed and volunteers are released.'); return render(); }
       return announce('Not closed. Your SOS is still active.');
     }
@@ -377,13 +378,12 @@ export function initProtect(c) {
 
   // iPhone: Voice SOS while the app is on screen (Android listens in its background service;
   // a locked iPhone uses "Hey Siri, Beti Bachao SOS").
-  const SOS_WORDS = /\b(bachao|bachav|help|kapadandi|kaapaadu|kapadu|madad|save me|sos)\b/i;
   let voiceLoop = false;
   async function runVoiceLoop() {
     voiceLoop = true;
     while (prefs.get().voiceNative && platform === 'ios' && st.me?.role === 'user' && document.visibilityState === 'visible' && !st.countdown && !st.sendingSos) {
-      const heard = await listenOnce({ timeoutMs: 6000 });
-      if (heard && SOS_WORDS.test(heard)) { c.startCountdown('voice'); break; }
+      const heard = await listenOnce({ lang: c.speechLang(), timeoutMs: 6000 });
+      if (heard && heardSosWord(heard, sosWords(curLang(), prefs.get().customSosWords || []))) { c.startCountdown('voice'); break; }
       await new Promise((r) => setTimeout(r, 300));
     }
     voiceLoop = false;

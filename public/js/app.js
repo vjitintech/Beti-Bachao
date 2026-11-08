@@ -1,11 +1,11 @@
-import { createApi, uuid } from './api.js?v=mw85m40y';
-import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mw85m40y';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mw85m40y';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mw85m40y';
-import { TRAINING_MODULES } from '../core/engine.js?v=mw85m40y';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mw85m40y';
-import { initProtect } from './protect-ui.js?v=mw85m40y';
-import { a11y, announce, speakStatus } from './a11y.js?v=mw85m40y';
+import { createApi, uuid } from './api.js?v=mw85u9y9';
+import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang } from './i18n.js?v=mw85u9y9';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mw85u9y9';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mw85u9y9';
+import { TRAINING_MODULES } from '../core/engine.js?v=mw85u9y9';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mw85u9y9';
+import { initProtect } from './protect-ui.js?v=mw85u9y9';
+import { a11y, announce, speakStatus } from './a11y.js?v=mw85u9y9';
 let P = null; // autonomous-protection screens (protect-ui.js), set up in boot()
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'impact', volSel: null };
@@ -316,11 +316,10 @@ async function syncNative() {
   const p = prefs.get();
   await native.configure({ serverUrl: serverUrl(), token: st.api.token, role: st.me.role, armed: !!p.armed, displayName: st.me.displayName,
     contacts: contacts.list(), places: store.get('places', []), sms112: !!p.sms112, autoSms: p.autoSms !== false, shake: !!p.shake, powerButton: p.powerButton !== false,
-    voice: !!p.voiceNative, keywords: VOICE_WORDS, autoEvidence: p.autoEvidence !== false, lang: lang(),
+    voice: !!p.voiceNative, keywords: sosWords(lang(), p.customSosWords || []), autoEvidence: p.autoEvidence !== false, lang: lang(),
     message: sosMessage(null), emergencyNumber: country().emergency });
   if (st.me.role === 'user') { if (p.armed) native.startSafety('armed'); }
 }
-const VOICE_WORDS = ['bachao', 'bachav', 'help me', 'help', 'kapadandi', 'kaapaadunga', 'kaapaadu', 'kapadu', 'madad', 'sos', 'save me', 'rakshisi', 'kaapathunga'];
 async function syncContactsToServer() { try { await st.api.saveContacts({ contacts: contacts.list() }); } catch {} syncNative(); }
 async function registerAppPush() {
   if (!native.available()) return;
@@ -597,7 +596,12 @@ async function viewSettings() {
       <label class="switch"><input type="checkbox" data-change="voice" ${p.voice ? 'checked' : ''} ${voice.supported ? '' : 'disabled'}> ${esc(t('voice_trigger'))} ${voice.supported ? '' : '<small>(not supported in this browser)</small>'}</label>
       <label class="switch"><input type="checkbox" data-change="autoRecord" ${p.autoRecord ? 'checked' : ''}> ${esc(t('auto_record'))}</label>
       <label class="switch"><input type="checkbox" data-change="autoEvidence" ${p.autoEvidence !== false ? 'checked' : ''}> Record 15 s of audio when SOS starts and send it securely to the operators (evidence)</label>
-      ${native.available() ? `<label class="switch"><input type="checkbox" data-change="voiceNative" ${p.voiceNative ? 'checked' : ''}> <b>Voice SOS</b>: say "bachao", "help" or "kapadandi" ${platform === 'android' ? '— works with the screen locked while background protection is on' : '— works while the app is open (locked phone: "Hey Siri, Beti Bachao SOS")'}</label>` : ''}
+      ${native.available() ? `<label class="switch"><input type="checkbox" data-change="voiceNative" ${p.voiceNative ? 'checked' : ''}> <b>Voice SOS</b> ${platform === 'android' ? '— works with the screen locked while background protection is on' : '— works while the app is open (locked phone: "Hey Siri, Beti Bachao SOS")'}</label>` : ''}
+      <details class="sos-words"><summary>🗣️ Your SOS words (${esc(LANGS.find((l) => l.code === lang())?.name || 'English')} + English + Hindi)</summary>
+        <p class="small">${sosWords(lang(), []).map((w) => `<span class="chip">${esc(w)}</span>`).join(' ')}</p>
+        <label>My own secret code word(s) — something an attacker won't recognise, e.g. "pineapple" (comma-separated)<input data-change="customSosWords" value="${esc((p.customSosWords || []).join(', '))}" maxlength="120" placeholder="pineapple, blue umbrella"></label>
+        <p class="muted small">Change the app language at the top to use another language's words. After hearing a word you get 5 seconds to cancel.</p>
+      </details>
       <a class="btn btn-ghost btn-sm" href="#/blink">👁️ Blink SOS (3 slow blinks at the front camera)</a>
     </section>
     <section class="card form"><h2>♿ Accessibility</h2>
@@ -1155,7 +1159,7 @@ const actions = {
 
 function mergeProtect() {
   P = initProtect({ st, esc, toast, modal, showErr, go, render, geo, contacts, prefs, store, native, platform, telHref, fmtTime, pretty, nativeShare, serverUrl, isNative,
-    shell, emergencyBar, triggerSOS, startCountdown, syncNative, syncContactsToServer, vibrate, country, openExternal });
+    shell, emergencyBar, triggerSOS, startCountdown, syncNative, syncContactsToServer, vibrate, country, openExternal, speechLang });
   Object.assign(actions, P.actions); Object.assign(forms, P.forms); Object.assign(changes, P.changes);
 }
 
@@ -1232,7 +1236,8 @@ const forms = {
 };
 
 const changes = {
-  lang(el) { setLang(el.value); render(); },
+  customSosWords(el) { const words = el.value.split(',').map((w) => w.trim()).filter((w) => w.length >= 3).slice(0, 5); prefs.set({ customSosWords: words }); syncNative(); toast(words.length ? `Secret words saved: ${words.join(', ')}` : 'Secret words cleared', 'ok'); },
+  lang(el) { setLang(el.value); render(); syncNative(); if (voice.active) { voice.stop(); voice.start(() => startCountdown('voice')); } },
   country(el) { prefs.set({ country: el.value }); render(); },
   async shake(el) {
     if (el.checked) { const r = await shake.enable(() => startCountdown('shake')); if (r !== 'on') { el.checked = false; return toast(r === 'denied' ? 'Motion permission denied' : 'Motion sensors not available', 'error'); } }

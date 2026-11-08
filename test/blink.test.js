@@ -41,3 +41,16 @@ test('face lost (no landmarks) resets a half-finished blink', () => {
   run(d, [open(2000)]);
   d.feed(0.08, 10000); d.feed(NaN, 10300); assert.equal(d.feed(0.3, 10500), null);
 });
+
+// Voice SOS words (shared by Android, iPhone, browser and voice commands)
+import { sosWords, heardSosWord, VOICE_KEYWORDS } from '../public/js/i18n.js';
+test('voice SOS words: every language has words; whole-word match for Latin, script match for Indic/Arabic; secret words', () => {
+  for (const l of ['en', 'hi', 'te', 'ta', 'kn', 'ml', 'bn', 'mr', 'gu', 'ur', 'ar', 'es', 'fr', 'pt']) assert.ok(VOICE_KEYWORDS[l].length >= 3, l);
+  const te = sosWords('te', ['Pineapple']);
+  for (const said of ['kapadandi', 'దయచేసి కాపాడండి', 'help!', 'Help me please', 'బచావో'.replace('బచావో', 'bachao'), 'pineapple', 'madad karo']) assert.ok(heardSosWord(said, te), said);
+  for (const said of ['this is helpful', 'the pineapples are fresh'.replace('pineapples', 'apples'), 'hello there']) assert.ok(!heardSosWord(said, te), said);
+  assert.ok(heardSosWord('அய்யோ உதவி', sosWords('ta')));
+  assert.ok(heardSosWord('au secours !', sosWords('fr')));
+  assert.ok(heardSosWord('النجدة', sosWords('ar')));
+  assert.ok(heardSosWord('বাঁচাও', sosWords('bn')));
+});

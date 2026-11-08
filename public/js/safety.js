@@ -1,7 +1,7 @@
 // On-device safety capabilities. Everything degrades gracefully: if a browser
 // lacks a sensor or permission is denied, the UI says so and offers the next
 // best option (call / SMS). Nothing here pretends to work when it doesn't.
-import { VOICE_KEYWORDS, lang, speechLang } from './i18n.js?v=mw85m40y';
+import { lang, speechLang, sosWords, heardSosWord } from './i18n.js?v=mw85u9y9';
 
 const store = {
   get(k, d) { try { const v = localStorage.getItem('bb.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
@@ -136,7 +136,7 @@ export const shake = {
 export const voice = {
   rec: null, active: false, onTrigger: null,
   supported: !!(window.SpeechRecognition || window.webkitSpeechRecognition),
-  keywords() { return [...new Set([...(VOICE_KEYWORDS[lang()] || []), ...VOICE_KEYWORDS.en, 'beti bachao'])].map((k) => k.toLowerCase()); },
+  keywords() { return sosWords(lang(), prefs.get().customSosWords || []); },
   start(onTrigger) {
     if (!this.supported) return 'unsupported';
     this.onTrigger = onTrigger;
@@ -147,7 +147,7 @@ export const voice = {
       const words = this.keywords();
       for (let i = ev.resultIndex; i < ev.results.length; i++) {
         const said = ev.results[i][0].transcript.toLowerCase();
-        if (words.some((w) => said.includes(w))) { this.onTrigger?.(said); break; }
+        if (heardSosWord(said, words)) { this.onTrigger?.(said); break; }
       }
     };
     rec.onend = () => { if (this.active) { try { rec.start(); } catch {} } };

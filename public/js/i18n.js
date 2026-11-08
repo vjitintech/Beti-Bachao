@@ -21,22 +21,39 @@ export const LANGS = [
 
 // Voice SOS keywords (native script + common romanisation). "help" and
 // "beti bachao" always work in every language.
+// SOS words for Voice SOS, per language — native script + the romanised forms that
+// speech recognisers often return. Used by every voice path (Android background
+// listener, iPhone in-app listener, browser trigger, 🎤 voice commands).
 export const VOICE_KEYWORDS = {
-  en: ['help', 'help me', 'save me'],
-  hi: ['बचाओ', 'मदद', 'bachao', 'madad'],
-  te: ['కాపాడండి', 'సహాయం', 'kapadandi', 'sahayam'],
-  ta: ['காப்பாத்துங்க', 'உதவி', 'kaapathunga', 'udhavi'],
-  kn: ['ಕಾಪಾಡಿ', 'ಸಹಾಯ', 'kaapadi', 'sahaya'],
-  ml: ['രക്ഷിക്കണേ', 'സഹായം', 'rakshikkane', 'sahayam'],
-  bn: ['বাঁচাও', 'সাহায্য', 'bachao', 'sahajjo'],
-  mr: ['वाचवा', 'मदत', 'vachva', 'madat'],
-  gu: ['બચાવો', 'મદદ', 'bachavo', 'madad'],
-  ur: ['بچاؤ', 'مدد', 'bachao', 'madad'],
-  ar: ['النجدة', 'ساعدوني', 'najda'],
-  es: ['ayuda', 'socorro', 'auxilio'],
-  fr: ['au secours', 'aidez-moi', 'à l\'aide'],
-  pt: ['socorro', 'ajuda'],
+  en: ['help', 'help me', 'save me', 'somebody help', 'emergency', 'sos'],
+  hi: ['बचाओ', 'बचाइए', 'बचा लो', 'मदद', 'मदद करो', 'मदद कीजिए', 'bachao', 'bachaao', 'bacha lo', 'madad', 'madad karo'],
+  te: ['కాపాడండి', 'కాపాడు', 'కాపాడండీ', 'సహాయం', 'సహాయం చేయండి', 'రక్షించండి', 'kapadandi', 'kaapaadandi', 'kapadu', 'sahayam', 'rakshinchandi'],
+  ta: ['காப்பாத்துங்க', 'காப்பாற்றுங்கள்', 'காப்பாத்து', 'உதவி', 'உதவுங்கள்', 'kaapathunga', 'kaappaathunga', 'kaapathu', 'udhavi', 'udhavunga'],
+  kn: ['ಕಾಪಾಡಿ', 'ಕಾಪಾಡು', 'ಸಹಾಯ', 'ಸಹಾಯ ಮಾಡಿ', 'ರಕ್ಷಿಸಿ', 'ಬಚಾವ್', 'kaapadi', 'kapadi', 'sahaya', 'sahaya maadi', 'rakshisi'],
+  ml: ['രക്ഷിക്കണേ', 'രക്ഷിക്കൂ', 'രക്ഷിക്കണം', 'സഹായം', 'സഹായിക്കൂ', 'rakshikkane', 'rakshikku', 'sahayam', 'sahayikku'],
+  bn: ['বাঁচাও', 'বাঁচান', 'সাহায্য', 'সাহায্য করুন', 'bachao', 'banchao', 'sahajjo', 'shahajjo'],
+  mr: ['वाचवा', 'वाचव', 'मदत', 'मदत करा', 'बचाओ', 'vachva', 'vachav', 'madat', 'madat kara'],
+  gu: ['બચાવો', 'બચાવ', 'મદદ', 'મદદ કરો', 'bachavo', 'bachao', 'madad', 'madad karo'],
+  ur: ['بچاؤ', 'بچائیں', 'مدد', 'مدد کرو', 'bachao', 'madad', 'madad karo'],
+  ar: ['النجدة', 'ساعدوني', 'ساعدني', 'أنقذوني', 'انقذوني', 'najda', 'saiduni', 'anqithuni'],
+  es: ['ayuda', 'ayúdame', 'ayudenme', 'socorro', 'auxilio'],
+  fr: ['au secours', 'aidez-moi', 'aide-moi', 'à l\'aide', 'a l\'aide'],
+  pt: ['socorro', 'ajuda', 'me ajuda', 'me ajudem', 'acudam'],
 };
+
+// The words that start a Voice SOS for this user: her language + English + Hindi
+// (widely mixed in India) + her own secret code words.
+export function sosWords(code, custom = []) {
+  const l = String(code || 'en');
+  return [...new Set([...(VOICE_KEYWORDS[l] || []), ...VOICE_KEYWORDS.en, ...VOICE_KEYWORDS.hi, 'beti bachao',
+    ...custom.map((w) => String(w).trim()).filter((w) => w.length >= 3)])].map((w) => w.toLocaleLowerCase());
+}
+// True when a recognised phrase contains one of the SOS words.
+export function heardSosWord(text, words) {
+  const s = ` ${String(text || '').toLocaleLowerCase().replace(/[.,!?।॥،؟"]/g, ' ').replace(/\s+/g, ' ')} `;
+  // Latin-script words must be whole words ("help" ≠ "helpful"); Indic/Arabic scripts match inside the phrase.
+  return words.some((w) => (/^[\x00-\x7f]+$/.test(w) ? s.includes(` ${w} `) : s.includes(w)));
+}
 
 const D = {
   en: {

@@ -78,7 +78,13 @@ public final class VoiceGuard implements RecognitionListener {
         if (heard == null) return false;
         List<String> words = new ArrayList<>();
         try { JSONArray a = new JSONArray(Store.get(app, "keywords") == null ? "[\"bachao\",\"help\",\"kapadandi\"]" : Store.get(app, "keywords")); for (int k = 0; k < a.length(); k++) words.add(a.getString(k).toLowerCase(Locale.ROOT)); } catch (Exception ignored) {}
-        for (String h : heard) { String s = " " + h.toLowerCase(Locale.ROOT) + " "; for (String w : words) if (s.contains(" " + w + " ") || s.contains(w)) return true; }
+        for (String h : heard) {
+            String s = " " + h.toLowerCase(Locale.ROOT).replaceAll("[.,!?।॥،؟\"]", " ").replaceAll("\\s+", " ") + " ";
+            for (String w : words) {
+                boolean latin = w.matches("[\\x00-\\x7F]+");
+                if (latin ? s.contains(" " + w + " ") : s.contains(w)) return true; // "help" ≠ "helpful"; Indic/Arabic match inside the phrase
+            }
+        }
         return false;
     }
 
