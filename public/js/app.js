@@ -1,9 +1,9 @@
-import { createApi, uuid } from './api.js?v=mw5xbapv';
-import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mw5xbapv';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mw5xbapv';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mw5xbapv';
-import { TRAINING_MODULES } from '../core/engine.js?v=mw5xbapv';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mw5xbapv';
+import { createApi, uuid } from './api.js?v=mw7oe4ed';
+import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mw7oe4ed';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mw7oe4ed';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mw7oe4ed';
+import { TRAINING_MODULES } from '../core/engine.js?v=mw7oe4ed';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mw7oe4ed';
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'policy', volSel: null };
 const app = () => $('#app');
@@ -118,7 +118,7 @@ function shell(content, { nav = true } = {}) {
   return `
     ${st.offline ? `<div class="offline-banner" role="alert">⚠️ Can't reach the Beti Bachao server. Your SOS will be queued; call ${esc(country().emergency)} now if you are in danger.</div>` : ''}
     <header class="topbar">
-      <a href="${role ? roleHome(role) : '#/'}" class="brand" aria-label="Beti Bachao home"><img src="icons/icon.svg" alt="" width="28" height="28"><span>Beti Bachao</span></a>
+      <a href="${role ? roleHome(role) : '#/'}" class="brand" aria-label="Beti Bachao home"><img src="icons/icon-192.png" alt="" width="30" height="30" class="brand-icon"><span>Beti Bachao</span></a>
       <div class="topbar-right">
         <label class="sr-only" for="lang-select">${esc(t('language'))}</label>
         <select id="lang-select" class="lang-select" data-change="lang">${LANGS.map((l) => `<option value="${l.code}" ${l.code === lang() ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select>
@@ -135,7 +135,7 @@ function viewLanding() {
   return shell(`
     ${st.cfg?.setupNeeded ? '<a class="alert alert-warn alert-link" href="#/setup">⚙️ No administrator yet — finish first-time setup</a>' : ''}
     <section class="hero">
-      <img src="icons/icon.svg" alt="" class="hero-logo" width="84" height="84">
+      <img src="icons/logo.webp" alt="Beti Bachao — 24×7 Women's Freedom. A woman's freedom has no time limit. Safety has no closing hours." class="hero-logo" width="900" height="600" decoding="async">
       <h1>Beti Bachao</h1>
       <p class="lead">${esc(t('tagline'))}</p>
       <div class="hero-actions">

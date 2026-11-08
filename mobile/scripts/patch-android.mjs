@@ -19,9 +19,13 @@ fs.cpSync(path.join(mobile, 'native', 'android', 'res'), path.join(main, 'res'),
 
 // 2) Launcher icon: use the Beti Bachao icon at every density
 const icon = path.resolve(mobile, '..', 'public', 'icons', 'icon-512.png');
+const iconRound = path.resolve(mobile, '..', 'public', 'icons', 'icon-maskable-512.png');
 for (const d of fs.readdirSync(path.join(main, 'res'))) {
   if (d.startsWith('mipmap-anydpi')) fs.rmSync(path.join(main, 'res', d), { recursive: true, force: true });
-  else if (d.startsWith('mipmap-')) for (const f of ['ic_launcher.png', 'ic_launcher_round.png', 'ic_launcher_foreground.png']) fs.copyFileSync(icon, path.join(main, 'res', d, f));
+  else if (d.startsWith('mipmap-')) {
+    fs.copyFileSync(icon, path.join(main, 'res', d, 'ic_launcher.png'));
+    for (const f of ['ic_launcher_round.png', 'ic_launcher_foreground.png']) fs.copyFileSync(iconRound, path.join(main, 'res', d, f)); // extra margin so round masks don't cut the logo
+  }
 }
 
 // 3) AndroidManifest.xml: permissions + components

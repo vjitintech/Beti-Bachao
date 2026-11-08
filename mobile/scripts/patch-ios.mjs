@@ -75,13 +75,12 @@ if (!ad.includes('didRegisterForRemoteNotificationsWithDeviceToken')) {
 fs.writeFileSync(adPath, ad);
 
 // 6) App icon (1024×1024, resized with macOS `sips` when available)
-const icon = path.resolve(mobile, '..', 'public', 'icons', 'icon-512.png');
+const icon = path.join(mobile, 'native', 'ios', 'icon-1024.png'); // App Store needs 1024×1024, no transparency
 const iconSet = path.join(appDir, 'Assets.xcassets', 'AppIcon.appiconset');
 if (fs.existsSync(iconSet)) {
   for (const f of fs.readdirSync(iconSet).filter((x) => x.endsWith('.png'))) {
     const out = path.join(iconSet, f);
     fs.copyFileSync(icon, out);
-    try { execFileSync('sips', ['-z', '1024', '1024', out], { stdio: 'ignore' }); } catch {}
   }
 }
 

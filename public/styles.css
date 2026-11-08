@@ -26,6 +26,7 @@ main { max-width: 1100px; margin: 0 auto; padding: 0 16px 24px; outline: none; }
 .skip-link { position: absolute; left: -999px; top: 8px; background: var(--surface); padding: 8px 12px; z-index: 100; border-radius: 8px; }
 .skip-link:focus { left: 8px; }
 :focus-visible { outline: 3px solid var(--saffron); outline-offset: 2px; }
+.boot img { border-radius: 16px; }
 .boot { display: grid; place-items: center; min-height: 70vh; color: var(--ink-2); }
 
 /* top + bottom bars */
@@ -67,7 +68,8 @@ main { max-width: 1100px; margin: 0 auto; padding: 0 16px 24px; outline: none; }
 .narrow { max-width: 520px; margin: 0 auto; }
 .hero { text-align: center; padding: 28px 8px 8px; }
 .hero h1 { font-size: 2.2rem; margin: .4rem 0; }
-.hero-logo { border-radius: 22px; box-shadow: var(--shadow); }
+.hero-logo { display: block; width: min(100%, 460px); height: auto; margin: 0 auto; background: #fff; border-radius: 22px; box-shadow: var(--shadow); padding: 6px 10px; }
+.brand-icon { border-radius: 8px; }
 .lead { font-size: 1.1rem; color: var(--ink-2); max-width: 620px; margin: 0 auto 18px; }
 .hero-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
 .limits ul { padding-inline-start: 1.2rem; margin: 0; }
