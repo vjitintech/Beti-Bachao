@@ -50,7 +50,10 @@ jobs:
           sed -i -e 's/-all\.zip/-bin.zip/' -e 's/^networkTimeout=.*/networkTimeout=120000/' gradle/wrapper/gradle-wrapper.properties
           grep -q '^networkTimeout=' gradle/wrapper/gradle-wrapper.properties || echo 'networkTimeout=120000' >> gradle/wrapper/gradle-wrapper.properties
           chmod +x gradlew
-          for i in 1 2 3; do ./gradlew assembleDebug --no-daemon --stacktrace && exit 0; echo "Build attempt $i failed; retrying in 20 s"; sleep 20; done; exit 1
+          for i in 1 2; do ./gradlew assembleDebug --no-daemon --stacktrace && exit 0; echo "Build attempt $i failed; retrying in 30 s"; sleep 30; done
+          # Gradle's download server is down: use the Gradle already installed on the runner.
+          echo "Falling back to the runner's Gradle: $(gradle --version | grep '^Gradle')"
+          gradle assembleDebug --no-daemon --stacktrace
       - name: Build signed release (if keystore secrets are set)
         working-directory: mobile/android
         env:
@@ -61,7 +64,8 @@ jobs:
         run: |
           if [ -z "$KS" ]; then echo "No keystore secret — skipping signed release"; exit 0; fi
           echo "$KS" | base64 -d > "$RUNNER_TEMP/release.jks"
-          BB_KEYSTORE_FILE="$RUNNER_TEMP/release.jks" ./gradlew assembleRelease bundleRelease --no-daemon
+          G=./gradlew; [ -d ~/.gradle/wrapper/dists ] && ls ~/.gradle/wrapper/dists/*/*/*/bin >/dev/null 2>&1 || G=gradle
+          BB_KEYSTORE_FILE="$RUNNER_TEMP/release.jks" $G assembleRelease bundleRelease --no-daemon
       - name: Collect outputs
         run: |
           mkdir -p ../dist
