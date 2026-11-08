@@ -1,11 +1,11 @@
-import { createApi, uuid } from './api.js?v=mw80as7l';
-import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mw80as7l';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mw80as7l';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mw80as7l';
-import { TRAINING_MODULES } from '../core/engine.js?v=mw80as7l';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mw80as7l';
-import { initProtect } from './protect-ui.js?v=mw80as7l';
-import { a11y, announce, speakStatus } from './a11y.js?v=mw80as7l';
+import { createApi, uuid } from './api.js?v=mw85m40y';
+import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mw85m40y';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mw85m40y';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mw85m40y';
+import { TRAINING_MODULES } from '../core/engine.js?v=mw85m40y';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mw85m40y';
+import { initProtect } from './protect-ui.js?v=mw85m40y';
+import { a11y, announce, speakStatus } from './a11y.js?v=mw85m40y';
 let P = null; // autonomous-protection screens (protect-ui.js), set up in boot()
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'impact', volSel: null };
@@ -293,9 +293,13 @@ async function viewHome() {
   `);
 }
 
-function sosMessage(loc) {
-  return t('sms_message', { link: loc ? mapsLink(loc) : '(location unavailable)', m: loc?.accuracyM ?? '?' });
+function sosMessage(loc, shareToken = null) {
+  const base = t('sms_message', { link: loc ? mapsLink(loc) : '(location unavailable)', m: loc?.accuracyM ?? '?' });
+  return shareToken ? `${base} 🔴 Live: ${liveLink(`/s/${shareToken}`)}` : base;
 }
+// Address of the live page her contacts open (the server this app talks to).
+function liveLink(p) { return (isNative ? serverUrl() : location.origin + location.pathname.replace(/[^/]*$/, '').replace(/\/$/, '')) + p; }
+const newShareToken = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
 function smsButtons() {
   const loc = geo.last || currentLoc();
   const nums = contacts.list().map((c) => c.phone);
@@ -329,7 +333,7 @@ async function triggerSOS({ severity = 'HIGH', silent = false, trigger = 'button
   if (st.sendingSos) return;
   st.sendingSos = true;
   const isRetry = !!store.get('pendingSos', null);
-  const pending = store.get('pendingSos', null) || { key: uuid(), createdAt: new Date().toISOString(), severity, silent, trigger };
+  const pending = store.get('pendingSos', null) || { key: uuid(), createdAt: new Date().toISOString(), severity, silent, trigger, shareToken: newShareToken() };
   store.set('pendingSos', pending);
   // Open the pre-filled "I am in danger + location" SMS to trusted contacts right away,
   // while the tap/hold still counts as a user gesture. Browsers cannot send SMS silently;
@@ -342,9 +346,9 @@ async function triggerSOS({ severity = 'HIGH', silent = false, trigger = 'button
     deviceSmsNumbers = nums;
     store.set('autoSmsAt', Date.now());
     if (native.available()) {
-      const r = await native.sendSos({ numbers: nums, message: sosMessage(loc0), sms112: !!prefs.get().sms112 });
+      const r = await native.sendSos({ numbers: nums, message: sosMessage(loc0, pending.shareToken), sms112: !!prefs.get().sms112 });
       deviceSmsSent = !!(r && r.sent > 0);
-    } else if (nums.length) openExternal(smsHref(nums, sosMessage(loc0)));
+    } else if (nums.length) openExternal(smsHref(nums, sosMessage(loc0, pending.shareToken)));
   }
   if (!silent) vibrate([200, 100, 200]);
   keepAwake(true);
@@ -356,7 +360,7 @@ async function triggerSOS({ severity = 'HIGH', silent = false, trigger = 'button
     else { try { loc = await Promise.race([geo.once(6000), new Promise((r) => setTimeout(() => r(null), 4000))]); } catch { loc = null; } }
     geo.start();
   }
-  const body = { idempotencyKey: pending.key, location: loc, severity: pending.severity, trigger: pending.trigger, silent: pending.silent, battery: await battery(), deviceSmsSent, deviceSmsNumbers: deviceSmsSent ? deviceSmsNumbers : [] };
+  const body = { idempotencyKey: pending.key, location: loc, severity: pending.severity, trigger: pending.trigger, silent: pending.silent, battery: await battery(), deviceSmsSent, deviceSmsNumbers: deviceSmsSent ? deviceSmsNumbers : [], shareToken: pending.shareToken };
   try {
     const r = await st.api.createIncident(body);
     store.set('pendingSos', null);
@@ -438,7 +442,7 @@ async function viewIncident(id, params) {
   // Police auto-connected: her Android phone also texts 112 with her location (if not done at SOS time).
   if (v.police && !v.closed && native.available() && platform === 'android' && !prefs.get().sms112 && !store.get('police112:' + v.id, false)) {
     store.set('police112:' + v.id, true);
-    native.sendSos({ numbers: [], sms112: true, message: sosMessage(v.location || geo.last) });
+    native.sendSos({ numbers: [], sms112: true, message: sosMessage(v.location || geo.last, v.liveSharePath?.slice(3)) });
   }
   const open = !v.closed;
   const radii = st.cfg?.radiusStagesKm || [10, 20, 30];
@@ -468,8 +472,9 @@ async function viewIncident(id, params) {
       <button class="btn btn-secondary" data-act="voice-command">🎤 Voice command</button>
       <button class="btn btn-ghost" data-act="cancel-sos">${esc(t('cancel_sos'))}</button>
     </section>
+    ${open && v.liveSharePath ? `<section class="card"><h2>🔴 Live link for your family</h2><p class="small">Your contacts got this link by SMS — it shows where you are until you mark yourself safe.</p><p class="phrase small">${esc(liveLink(v.liveSharePath))}</p><div class="row"><button class="btn btn-secondary" data-act="trip-share" data-link="${esc(liveLink(v.liveSharePath))}">📤 Share with someone else</button><a class="btn btn-ghost" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(`I need help. Follow my live location: ${liveLink(v.liveSharePath)}`)}">🟢 WhatsApp</a></div></section>` : ''}
     ${v.evidenceCount ? `<p class="small muted">🎙️ ${v.evidenceCount} evidence recording(s) sent securely to the operators.</p>` : st.evidenceRecording ? '<p class="small">🎙️ Recording 15 seconds of audio as evidence…</p>' : ''}
-    ${contacts.list().length ? `<div class="card"><h2>📞 ${esc(t('contacts'))}</h2><p class="small muted">${esc(t('text_contacts'))}: <a href="${esc(smsHref(contacts.list().map((c) => c.phone), sosMessage(v.location || geo.last)))}">💬 SMS with latest location</a></p><div class="row">${contacts.list().map((c) => `<a class="btn btn-secondary" href="${telHref(c.phone)}">📞 ${esc(c.name)}</a>`).join('')}</div></div>` : ''}
+    ${contacts.list().length ? `<div class="card"><h2>📞 ${esc(t('contacts'))}</h2><p class="small muted">${esc(t('text_contacts'))}: <a href="${esc(smsHref(P.activeContacts(v.location || geo.last).contacts.map((c) => c.phone), sosMessage(v.location || geo.last, v.liveSharePath?.slice(3))))}">💬 SMS with live tracking link</a></p><div class="row">${contacts.list().map((c) => `<a class="btn btn-secondary" href="${telHref(c.phone)}">📞 ${esc(c.name)}</a>`).join('')}</div></div>` : ''}
     <div class="card"><div class="row">${smsButtons()}<button class="btn btn-ghost" data-act="native-share">📤 Share…</button></div></div>
     ${locationCard(v.location, { live: true })}
     ${v.location ? `<section class="card"><h2>📍 Your live location (as shared)</h2>${googleMap(v.location, 'Your live location', 'mine')}</section>` : ''}

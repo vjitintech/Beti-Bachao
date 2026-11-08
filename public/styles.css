@@ -401,3 +401,4 @@ body.blink-frame { margin: 0; padding: 0; background: #000; }
 body.blink-frame video { width: 100%; height: 100vh; object-fit: cover; transform: scaleX(-1); display: block; }
 .h3 { font-size: 1.1rem; }
 .offline-card p { margin: 6px 0; }
+.sos-live { border: 2px solid var(--danger, #d7193f); }

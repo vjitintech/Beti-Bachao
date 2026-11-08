@@ -169,7 +169,9 @@ export function createServer(opts = {}) {
       if (place && inc.contactsPlace !== place.label) inc.contactsPlace = place.label;
       inc.smsSentTo.push(...todo.map((c) => c.phone));
       store.markDirty();
-      for (const c of todo) sms.send(c.phone, 'SOS', { name: u.displayName, link: loc ? mapsLink(loc) : '(location pending — call her)' })
+      const tok = engine.shareTokenFor(inc.id);
+      const link = publicOrigin && tok ? `${publicOrigin}/s/${tok}` : loc ? mapsLink(loc) : '(location pending — call her)';
+      for (const c of todo) sms.send(c.phone, 'SOS', { name: u.displayName, link })
         .then((r) => engine.audit('system', r.ok ? 'CONTACT_SMS_SENT' : 'CONTACT_SMS_FAILED', 'incident', inc.id, r.ok ? null : String(r.error || r.status), { place: place?.label || null }));
     }
     // 1b) Automatic police connection: SMS with her live location + call bridging station ↔ her phone.
@@ -394,6 +396,7 @@ export function createServer(opts = {}) {
   route('POST', '/me/trip/end', ({ actor, body }) => engine.endTrip(actor, body));
   route('POST', '/me/trip/extend', ({ actor, body }) => engine.extendTrip(actor, body));
   route('GET', '/t/:token', ({ p }) => { const v = engine.publicTrip(p.token); if (!v) throw new EngineError(404, 'NOT_FOUND', 'This link is not valid'); return v; }, { auth: false, limit: [600, 3600e3] });
+  route('GET', '/s/:token', ({ p }) => { const v = engine.publicSos(p.token); if (!v) throw new EngineError(404, 'NOT_FOUND', 'This link is not valid'); return v; }, { auth: false, limit: [1200, 3600e3] });
   route('POST', '/incidents/:id/evidence', ({ actor, p, body }) => {
     const mime = String(body.mime || '');
     if (!/^(audio|video)\/[\w.+-]+(;.*)?$/.test(mime)) throw new EngineError(400, 'INVALID_MEDIA', 'Audio or video only');
@@ -571,7 +574,7 @@ export function createServer(opts = {}) {
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://local');
-    if (/^\/t\/[a-f0-9]{32}$/.test(url.pathname)) return serveStatic(req, res, '/track.html');
+    if (/^\/[ts]\/[a-f0-9]{32}$/.test(url.pathname)) return serveStatic(req, res, '/track.html');
     if (!url.pathname.startsWith('/api/')) return serveStatic(req, res, url.pathname);
 
     // CORS only for the native apps' WebView origins (bearer tokens, no cookies).

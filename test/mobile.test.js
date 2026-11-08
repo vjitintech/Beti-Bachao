@@ -103,7 +103,7 @@ test('SOS from the app: server SMS to trusted contacts, FCM alarm push to volunt
   const contactSms = calls.filter((c) => c.url.includes('msg91') && JSON.parse(c.opts.body).template_id === 't-sos');
   assert.equal(contactSms.length, 1);
   assert.equal(JSON.parse(contactSms[0].opts.body).recipients[0].mobiles, '919000011111');
-  assert.match(JSON.parse(contactSms[0].opts.body).recipients[0].link, /maps\.google\.com\/\?q=15\.82810,78\.03730/);
+  assert.match(JSON.parse(contactSms[0].opts.body).recipients[0].link, /\/s\/[a-f0-9]{32}$/); // live tracking link
   const fcmCalls = calls.filter((c) => c.url.includes('fcm.googleapis.com'));
   assert.ok(fcmCalls.length >= 1, 'FCM push sent');
   const msg = JSON.parse(fcmCalls[0].opts.body).message;

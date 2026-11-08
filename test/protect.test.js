@@ -151,3 +151,35 @@ test('dashboards: her stats, admin impact with daily series, public counter', ()
   assert.equal(t.e.publicImpact().womenProtected, 1);
   assert.throws(() => t.e.adminDashboard(t.her), /permission/);
 });
+
+test('live SOS link: phone-made token works, shows live position until safe, hides location after; duress never revealed', () => {
+  const t = setup();
+  const tok = 'ab'.repeat(16);
+  const { incident } = t.e.createIncident(t.her, { idempotencyKey: 'L1', location: t.loc(), shareToken: tok });
+  let v = t.e.publicSos(tok);
+  assert.equal(v.status, 'ACTIVE'); assert.equal(v.live, true);
+  assert.ok(Math.abs(v.last.lat - DEMO_CENTER.lat) < 1e-4);
+  assert.equal(v.name, t.e.user(t.her.id).displayName.split(' ')[0]);
+  assert.equal(t.e.viewIncident(t.her, incident.id).liveSharePath, `/s/${tok}`);
+  // second SOS press sends a new SMS with a new token — both links work
+  const tok2 = 'cd'.repeat(16);
+  t.e.createIncident(t.her, { idempotencyKey: 'L2', location: t.loc(), shareToken: tok2 });
+  assert.equal(t.e.publicSos(tok2).status, 'ACTIVE');
+  // bad / reused tokens are not accepted; unknown token → null
+  assert.equal(t.e.publicSos('zz'), null);
+  assert.equal(t.e.publicSos('00'.repeat(16)), null);
+  t.e.acceptIncident(t.asha, incident.id);
+  assert.equal(t.e.publicSos(tok).responders.coming + t.e.publicSos(tok).responders.arrived, 1);
+  t.e.safetyConfirmation(t.her, incident.id, { response: 'YES', confirm: true });
+  v = t.e.publicSos(tok);
+  assert.equal(v.status, 'SAFE'); assert.equal(v.last, null); assert.equal(v.live, false);
+  t.advance(25 * 3600);
+  assert.equal(t.e.publicSos(tok).expired, true);
+
+  const t2 = setup();
+  t2.e.setPins?.(t2.her, { cancelPin: '1111', duressPin: '9999' });
+  const r = t2.e.createIncident(t2.her, { idempotencyKey: 'D1', location: t2.loc(), shareToken: 'ef'.repeat(16) });
+  r.incident.duress = true; // duress PIN entered (her screen now says "cancelled")
+  const dv = t2.e.publicSos('ef'.repeat(16));
+  assert.equal(dv.status, 'ENDED'); assert.equal(dv.last, undefined); assert.equal(dv.live, false);
+});

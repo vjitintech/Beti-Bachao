@@ -45,6 +45,10 @@ test('place contacts get the SOS SMS; second SOS press auto-connects police: SMS
   assert.equal(sos.status, 201);
   assert.ok(await wait(() => sentSms('t-sos').length === 3));
   assert.deepEqual(sentSms('t-sos').map((r) => r.mobiles).sort(), ['919000000011', '919000000012', '919000000013']);
+  assert.match(sentSms('t-sos')[0].link, /^https:\/\/bb\.example\/s\/[a-f0-9]{32}$/); // live tracking link in the SMS
+  const live = await fetch(`${S.base}/s/${sentSms('t-sos')[0].link.split('/s/')[1]}`).then((r) => r.json());
+  assert.equal(live.status, 'ACTIVE'); assert.ok(live.last);
+  assert.equal((await fetch(`${S.origin}/s/${sentSms('t-sos')[0].link.split('/s/')[1]}`)).status, 200);
   // She moves to college during the SOS → the college contacts are added automatically.
   await W.user.call('POST', `/incidents/${sos.body.incident.id}/locations`, { ...off(12, 180), accuracyM: 10, source: 'gps' });
   assert.ok(await wait(() => sentSms('t-sos').length === 6));

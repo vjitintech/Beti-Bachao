@@ -15,9 +15,9 @@
 //   • escalation adapter is SIMULATED until a real integration is approved
 //   • append-only, hash-chained audit log
 
-import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mw80as7l';
-import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mw80as7l';
-import { protectMethods } from './protect.js?v=mw80as7l';
+import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mw85m40y';
+import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mw85m40y';
+import { protectMethods } from './protect.js?v=mw85m40y';
 
 export const S = Object.freeze({
   CREATED: 'CREATED',
@@ -371,7 +371,7 @@ export class Engine {
   }
 
   // ---------- incidents ----------
-  createIncident(actor, { idempotencyKey, location = null, severity = 'NORMAL', trigger = 'button', silent = false, battery = null, note = null, deviceSmsSent = false, deviceSmsNumbers = null } = {}) {
+  createIncident(actor, { idempotencyKey, location = null, severity = 'NORMAL', trigger = 'button', silent = false, battery = null, note = null, deviceSmsSent = false, deviceSmsNumbers = null, shareToken = null } = {}) {
     const u = this.requireRole(actor, 'user');
     if (!idempotencyKey || typeof idempotencyKey !== 'string' || idempotencyKey.length > 100) fail(400, 'IDEMPOTENCY_KEY_REQUIRED');
     const dup = this.db.incidents.find((i) => i.requesterId === u.id && i.idempotencyKey === idempotencyKey);
@@ -382,6 +382,7 @@ export class Engine {
       if (location) this.addLocation(actor, open.id, location);
       // She pressed SOS again and no operator has taken it yet → connect the police now.
       open.sosPresses = (open.sosPresses || 1) + 1;
+      this.addShareToken(open, shareToken); // the link in this second SMS must work too
       this.audit(u.id, 'SOS_PRESSED_AGAIN', 'incident', open.id, null, { presses: open.sosPresses });
       if (!open.opAckAt && !open.policeConnect) this.autoPolice(open, 'She pressed SOS again before any operator acknowledged');
       return { incident: open, duplicate: true };
@@ -396,6 +397,7 @@ export class Engine {
       id: this.deps.uuid(), requesterId: u.id, status: S.CREATED, searchStage: null, stageStartedAt: null, stageDeadline: null,
       severity: sev, trigger: String(trigger).slice(0, 20), silent: !!silent, escalationStatus: ESC.NONE, idempotencyKey,
       countryCode: u.countryCode || this.cfg.countryCode, battery: sanitizeBattery(battery), note: note ? String(note).slice(0, 280) : null,
+      shareTokens: [],
       duress: false, flags: [], deviceSmsSent: !!deviceSmsSent, sosPresses: 1, opAckAt: null, opAckBy: null, ackReminderAt: null, policeConnect: null, contactsSmsAt: null, createdAt: this.iso(), updatedAt: this.iso(), closedAt: null, safeConfirmedAt: null, closureReason: null,
     };
     this.db.incidents.push(inc);
@@ -410,6 +412,7 @@ export class Engine {
     if (location) {
       this.recordLocation(inc, u.id, location);
     }
+    this.addShareToken(inc, shareToken);
     const cf = this.contactsFor(u.id, this.latestLocation(inc.id));
     inc.contactsPlace = cf.place?.label || null;
     // Numbers her phone already texted are not texted again by the server.
@@ -910,6 +913,7 @@ export class Engine {
         escalations: this.db.escalations.filter((e) => e.incidentId === inc.id).map((e) => ({ type: e.type, status: e.status, label: e.label, attemptedAt: e.attemptedAt })),
         operatorAcknowledged: !!inc.opAckAt,
         police: inc.policeConnect ? { at: inc.policeConnect.at, status: inc.policeConnect.status, station: inc.policeConnect.station ? { name: inc.policeConnect.station.name, phone: inc.policeConnect.station.phone, distanceKm: inc.policeConnect.station.distanceKm } : null, emergency: inc.policeConnect.emergency, call: inc.policeConnect.call, sms: inc.policeConnect.sms } : null,
+        liveSharePath: inc.shareTokens?.[0] && !inc.duress ? `/s/${inc.shareTokens[0]}` : null,
         contactsPlace: inc.contactsPlace || null, evidenceCount: (this.db.evidence || []).filter((e) => e.incidentId === inc.id).length,
         rateable: this.isOpen(inc) ? [] : this.db.assignments.filter((a) => a.incidentId === inc.id && (a.arrivedAt || a.status === 'COMPLETED')).map((a, i) => ({ ref: a.id, label: `Verified volunteer ${String.fromCharCode(65 + i)}`, rated: !!a.rating, stars: a.rating?.stars || null })),
       };

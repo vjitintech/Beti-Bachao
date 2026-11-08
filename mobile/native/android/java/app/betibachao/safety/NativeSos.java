@@ -101,7 +101,9 @@ public final class NativeSos {
     }
 
     private static void finish(Context app, String trigger, Location loc) {
-        // 1) SMS from her own phone (works without internet).
+        // 1) SMS from her own phone (works without internet). The live-tracking link is made
+        //    here so it can go out before the server is reached.
+        final String shareToken = newShareToken();
         int sent = 0;
         final List<String> smsNumbers = new ArrayList<>();
         if (Store.getBool(app, "autoSms", true)) {
@@ -110,7 +112,9 @@ public final class NativeSos {
             if (Store.getBool(app, "sms112", false)) numbers.add("112");
             String link = loc == null ? "(location pending)" : String.format(Locale.US, "https://maps.google.com/?q=%.6f,%.6f", loc.getLatitude(), loc.getLongitude());
             String acc = loc == null ? "?" : String.valueOf(Math.round(loc.getAccuracy()));
-            String msg = "SOS! I am in danger and need help. My location: " + link + " (accuracy ±" + acc + " m). Please call me or 112. — Beti Bachao";
+            String server = Store.get(app, "serverUrl");
+            String live = server == null || server.isEmpty() ? "" : " 🔴 Live: " + server.replaceAll("/+$", "") + "/s/" + shareToken;
+            String msg = "SOS! I am in danger and need help. My location: " + link + " (accuracy ±" + acc + " m). Please call me or 112. — Beti Bachao" + live;
             sent = SmsSender.send(app, numbers, msg);
         }
         // 2) Incident on the server → staged volunteer search + operators.
@@ -120,6 +124,7 @@ public final class NativeSos {
             body.put("severity", "HIGH");
             body.put("trigger", trigger);
             body.put("deviceSmsSent", sent > 0);
+            body.put("shareToken", shareToken);
             if (sent > 0) body.put("deviceSmsNumbers", new JSONArray(smsNumbers));
             if (loc != null) body.put("location", Api.locationJson(loc));
             Api.post(app, "/incidents", body, (status, res) -> {
@@ -145,5 +150,13 @@ public final class NativeSos {
 
     private static void vibrate(Context ctx, long ms) {
         try { Vibrator v = (Vibrator) ctx.getSystemService(Context.VIBRATOR_SERVICE); if (v != null) v.vibrate(ms); } catch (Exception ignored) {}
+    }
+
+    private static String newShareToken() {
+        byte[] b = new byte[16];
+        new java.security.SecureRandom().nextBytes(b);
+        StringBuilder sb = new StringBuilder();
+        for (byte x : b) sb.append(String.format(Locale.US, "%02x", x));
+        return sb.toString();
     }
 }

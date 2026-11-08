@@ -5,8 +5,8 @@
 //  • "Track my travel" trips with auto-arrival and auto-SOS when overdue
 //  • SOS evidence (audio/video) metadata — bytes are stored encrypted by the server
 //  • dashboards: hers, admin impact, public impact counter
-import { haversineKm, isValidLatLng } from './geo.js?v=mw80as7l';
-import { COUNTRIES } from './config.js?v=mw80as7l';
+import { haversineKm, isValidLatLng } from './geo.js?v=mw85m40y';
+import { COUNTRIES } from './config.js?v=mw85m40y';
 
 const SAFE_CLOSURES = new Set(['USER_CONFIRMED_SAFE', 'HANDED_TO_EMERGENCY_SERVICES_CONFIRMED_SAFE']);
 const median = (xs) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
@@ -266,6 +266,42 @@ export const protectMethods = {
       }
     }
     return changed;
+  },
+
+  // ================= live SOS link for her contacts =================
+  // The phone makes the token (so the link can go out in an SMS even with no internet);
+  // the server accepts it if it is a fresh 128-bit hex value, otherwise makes its own.
+  addShareToken(inc, token) {
+    inc.shareTokens ||= [];
+    const ok = typeof token === 'string' && /^[a-f0-9]{32}$/.test(token) && !this.db.incidents.some((i) => i.shareTokens?.includes(token));
+    if (ok) inc.shareTokens.push(token);
+    else if (!inc.shareTokens.length) inc.shareTokens.push((this.deps.uuid() + this.deps.uuid()).replace(/-/g, '').slice(0, 32));
+    return inc.shareTokens.at(-1);
+  },
+  shareTokenFor(incId) { return this.db.incidents.find((i) => i.id === incId)?.shareTokens?.[0] || null; },
+
+  // What her contacts see at /s/<token>: live position while the SOS is open, then only the outcome.
+  publicSos(token) {
+    if (!/^[a-f0-9]{32}$/.test(String(token))) return null;
+    const inc = this.db.incidents.find((i) => i.shareTokens?.includes(token));
+    if (!inc) return null;
+    const name = String(this.user(inc.requesterId)?.displayName || 'She').split(' ')[0];
+    // Duress PIN: her screen says "cancelled", so this page must say the same (it may be seen by the attacker).
+    if (inc.duress) return { name, status: 'ENDED', live: false, startedAt: inc.createdAt, message: 'The SOS was cancelled from her phone. If you are worried, call her — or call 112.' };
+    const open = this.isOpen(inc);
+    if (!open && inc.closedAt && this.now() - Date.parse(inc.closedAt) > 24 * 3600e3) return { expired: true };
+    const loc = open ? this.latestLocation(inc.id) : null;
+    const asg = this.activeAssignments(inc.id);
+    const tracks = asg.map((a, i) => this.responderTrack(a, loc, i));
+    const coming = tracks.filter((x) => x.approxEtaMin != null && x.approxEtaMin > 0).sort((a, b) => a.approxEtaMin - b.approxEtaMin);
+    return {
+      name, live: open, startedAt: inc.createdAt, closedAt: inc.closedAt,
+      status: open ? 'ACTIVE' : this.isProtected(inc) ? 'SAFE' : 'ENDED',
+      last: loc ? { lat: +loc.lat.toFixed(5), lng: +loc.lng.toFixed(5), accuracyM: loc.accuracyM, at: loc.observedAt } : null,
+      responders: { coming: coming.length, arrived: tracks.filter((x) => x.approxEtaMin === 0).length, nearestEtaMin: coming[0]?.approxEtaMin ?? null },
+      police: inc.policeConnect?.station ? { name: inc.policeConnect.station.name, phone: inc.policeConnect.station.phone } : inc.policeConnect ? { name: null, phone: inc.policeConnect.emergency } : null,
+      emergency: COUNTRIES[inc.countryCode]?.emergency || '112',
+    };
   },
 
   // ================= evidence (metadata; bytes stored encrypted by the server) =================
