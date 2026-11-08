@@ -34,6 +34,7 @@ export class PgClient {
       sock.write(Buffer.concat([int32(8), int32(80877103)]));
       const ans = await new Promise((res, rej) => { sock.once('data', (d) => res(d.toString()[0])); sock.once('error', rej); });
       if (ans === 'S') {
+        sock.on('error', () => {}); // errors surface on the TLS socket; never crash on the raw one
         sock = tls.connect({ socket: sock, servername: c.host, rejectUnauthorized: c.ssl === 'verify-full' || c.ssl === 'verify-ca' });
         await new Promise((res, rej) => { sock.once('secureConnect', res); sock.once('error', rej); });
       } else if (c.ssl === 'require' || c.ssl.startsWith('verify')) throw new Error('PostgreSQL server does not support TLS');

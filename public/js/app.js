@@ -1,11 +1,11 @@
-import { createApi, uuid } from './api.js?v=mw7qzel4';
-import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mw7qzel4';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mw7qzel4';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mw7qzel4';
-import { TRAINING_MODULES } from '../core/engine.js?v=mw7qzel4';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mw7qzel4';
-import { initProtect } from './protect-ui.js?v=mw7qzel4';
-import { a11y, announce, speakStatus } from './a11y.js?v=mw7qzel4';
+import { createApi, uuid } from './api.js?v=mw80as7l';
+import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mw80as7l';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mw80as7l';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mw80as7l';
+import { TRAINING_MODULES } from '../core/engine.js?v=mw80as7l';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mw80as7l';
+import { initProtect } from './protect-ui.js?v=mw80as7l';
+import { a11y, announce, speakStatus } from './a11y.js?v=mw80as7l';
 let P = null; // autonomous-protection screens (protect-ui.js), set up in boot()
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'impact', volSel: null };
@@ -427,7 +427,7 @@ function bindHold() {
 // ------------------------------------------------------------------ user: incident
 async function viewIncident(id, params) {
   let v;
-  try { v = await st.api.getIncident(id); } catch (e) { return shell(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
+  try { v = await st.api.getIncident(id); } catch (e) { return failView(e); }
   st.incident = v;
   if (v.search?.deadline && v.search.secondsLeft != null) st.skew = (Date.parse(v.search.deadline) - v.search.secondsLeft * 1000) - Date.now();
   let tl = [];
@@ -644,9 +644,9 @@ function viewVolunteerOnboarding(prof) {
 
 async function viewVolunteer() {
   let prof, alerts = [];
-  try { prof = await st.api.volunteerProfile(); } catch (e) { return shell(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
+  try { prof = await st.api.volunteerProfile(); } catch (e) { return failView(e); }
   if (!prof.approved) { if (native.available()) native.stopSafety(); return viewVolunteerOnboarding(prof); }
-  try { alerts = (await st.api.volunteerAlerts()).items; } catch (e) { return shell(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
+  try { alerts = (await st.api.volunteerAlerts()).items; } catch (e) { return failView(e); }
   const el = prof.eligibility;
   const check = (ok, label) => `<li class="${ok ? 'ok' : 'no'}">${ok ? '✅' : '⬜'} ${esc(label)}</li>`;
   const sel = alerts.find((a) => a.id === st.volSel) || alerts.find((a) => a.open);
@@ -719,7 +719,7 @@ function volunteerDetail(a) {
 async function viewOps() {
   let list = [];
   const all = store.get('ops.all', false);
-  try { list = (await st.api.opIncidents(all)).items; } catch (e) { return shell(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
+  try { list = (await st.api.opIncidents(all)).items; } catch (e) { return failView(e); }
   const selId = st.opSel && list.some((i) => i.id === st.opSel) ? st.opSel : list[0]?.id;
   let d = null, tl = [], cfg = null;
   if (selId) { try { d = await st.api.getIncident(selId); if (d.search?.deadline && d.search.secondsLeft != null) st.skew = (Date.parse(d.search.deadline) - d.search.secondsLeft * 1000) - Date.now(); tl = (await st.api.timeline(selId)).items; cfg = (await st.api.adminConfig()).config; } catch {} }
@@ -860,6 +860,29 @@ async function viewAdmin() {
   return shell(`<h1>Admin & trust</h1><div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" aria-selected="${k === tab}" class="tab ${k === tab ? 'active' : ''}" data-act="adm-tab" data-tab="${k}">${esc(l)}</button>`).join('')}</div>${body}`);
 }
 
+// ------------------------------------------------------------------ offline
+// The server can be unreachable (no signal, server restarting). The woman must still
+// have SOS (texts her contacts from the phone and is sent when back online) and the
+// emergency numbers — never an empty page. Retries calmly with back-off; no flicker.
+let offlineRetry = null, offlineDelay = 5000;
+function failView(e) {
+  if (e?.code !== 'NETWORK' && e?.status !== 502 && e?.status !== 503 && e?.status !== 504) return shell(`<div class="alert alert-danger">${esc(e?.message || 'Something went wrong')}</div>`);
+  st.offline = true;
+  clearTimeout(offlineRetry);
+  offlineRetry = setTimeout(() => { offlineDelay = Math.min(30000, offlineDelay * 1.6); st.softRefresh = true; render(); }, offlineDelay);
+  const user = st.me?.role === 'user';
+  return shell(`
+    <div class="alert alert-warn offline-card" role="status">
+      <strong>📶 Can't reach the Beti Bachao server.</strong>
+      <p>Check your internet. Retrying automatically…</p>
+      ${user ? '<p>SOS still works: it texts your contacts from this phone and alerts volunteers as soon as the connection is back.</p>' : '<p>New SOS alerts will appear when the connection is back. In an emergency call the numbers below.</p>'}
+      <button class="btn btn-secondary btn-sm" data-act="retry-now">↻ Try again now</button>
+    </div>
+    ${user ? `<section class="sos-wrap"><button class="sos-btn" id="sos-btn" aria-describedby="sos-hint" data-hold="sos"><svg viewBox="0 0 120 120" class="sos-ring" aria-hidden="true"><circle cx="60" cy="60" r="54" class="sos-track"/><circle cx="60" cy="60" r="54" class="sos-progress" id="sos-progress"/></svg><span class="sos-label">${esc(t('sos'))}</span></button><p id="sos-hint" class="sos-hint">${esc(t('hold_to_send'))}</p></section>` : ''}
+    ${emergencyBar()}`);
+}
+function backOnline() { if (st.offline) { st.offline = false; offlineDelay = 5000; clearTimeout(offlineRetry); } }
+
 // ------------------------------------------------------------------ router
 async function render() {
   const [path, qs] = (location.hash.slice(1) || '/').split('?');
@@ -871,6 +894,7 @@ async function render() {
   st.incident = null;
   if (isNative && !serverUrl() && parts[0] !== 'connect') { location.hash = '#/connect'; return; }
   if (st.me?.mustChangePassword && parts[0] !== 'change-password') { location.hash = '#/change-password'; return; }
+  try {
   switch (parts[0]) {
     case 'connect': html = viewConnect(); break;
     case 'change-password': if (!st.me) return go('#/login'); html = viewChangePassword(); break;
@@ -888,6 +912,8 @@ async function render() {
     case 'admin': if (!guard(['admin'])) return; html = await viewAdmin(); break;
     default: html = shell('<p>Page not found.</p>');
   }
+  } catch (e) { html = failView(e); }
+  if (html && !html.includes('offline-card')) backOnline();
   // Background refresh: only touch the screen when something actually changed.
   if (st.softRefresh && html === st.lastHtml) { st.softRefresh = false; updateLive(); return; }
   st.lastHtml = html;
@@ -968,6 +994,7 @@ function updateLive() {
 
 // ------------------------------------------------------------------ actions
 const actions = {
+  'retry-now'() { offlineDelay = 5000; render(); },
   async logout() { try { await st.api.logout(); } catch {} if (native.available()) { native.stopSafety(); native.configure({ token: null }); } st.me = null; geo.stop(); go('#/'); },
   async forgot() {
     const a = await modal({ title: 'Reset your password', body: `<label>Email<input name="email" type="email" required></label><p class="small muted">${st.cfg?.features?.smsReset ? 'We will send a 6-digit code to your registered mobile number.' : 'Ask the Beti Bachao admin to reset it for you.'}</p>`, actions: st.cfg?.features?.smsReset ? [{ id: 'go', label: 'Send code', kind: 'primary' }, { id: 'no', label: t('cancel') }] : [{ id: 'no', label: 'OK', kind: 'primary' }] });

@@ -639,6 +639,9 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   const env = process.env;
   const dataFile = env.DATA_FILE || path.join(ROOT, 'data', 'db.json');
   const pg = env.DATABASE_URL ? await openPostgres(env.DATABASE_URL, dataFile).catch((e) => { console.error('[db] Cannot reach PostgreSQL:', e.message); process.exit(1); }) : null;
+  // An SOS server must not die from one unexpected background error: log it loudly and keep serving.
+  process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e));
+  process.on('uncaughtException', (e) => console.error('[uncaughtException]', e));
   const { server, store } = createServer({ pg, pgUrl: env.DATABASE_URL });
   server.listen(port, () => console.log(`Beti Bachao listening on port ${port}${pg ? ' (PostgreSQL storage)' : ''}`));
   const stop = () => server.close(async () => { if (store.pg) { await store.pg.flush().catch(() => {}); store.pg.close(); } process.exit(0); });
