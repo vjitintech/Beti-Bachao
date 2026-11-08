@@ -42,9 +42,15 @@ jobs:
         run: if [ -n "$GS" ]; then printf '%s' "$GS" > android/app/google-services.json; echo "Firebase configured"; else echo "No GOOGLE_SERVICES_JSON secret — push alerts disabled in this build"; fi
       - name: Sync
         run: npx cap sync android
+      - uses: gradle/actions/setup-gradle@v4
       - name: Build debug APK
         working-directory: mobile/android
-        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon --stacktrace
+        run: |
+          # Smaller Gradle download + longer timeout; retry if services.gradle.org is slow.
+          sed -i -e 's/-all\.zip/-bin.zip/' -e 's/^networkTimeout=.*/networkTimeout=120000/' gradle/wrapper/gradle-wrapper.properties
+          grep -q '^networkTimeout=' gradle/wrapper/gradle-wrapper.properties || echo 'networkTimeout=120000' >> gradle/wrapper/gradle-wrapper.properties
+          chmod +x gradlew
+          for i in 1 2 3; do ./gradlew assembleDebug --no-daemon --stacktrace && exit 0; echo "Build attempt $i failed; retrying in 20 s"; sleep 20; done; exit 1
       - name: Build signed release (if keystore secrets are set)
         working-directory: mobile/android
         env:
