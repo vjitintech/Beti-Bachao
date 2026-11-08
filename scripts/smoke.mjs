@@ -133,6 +133,59 @@ try {
   await adm.waitForFunction(() => document.body.innerText.includes('intact'));
   await shot(adm, '07-admin'); step('admin: staff list + intact audit chain');
 
+  // ---- autonomous protection screens ----
+  await adm.click('[data-tab="stations"]');
+  await adm.fill('[name="csv"]', 'name,district,lat,lng,phone\nKurnool I Town PS,Kurnool,15.8306,78.0451,+918518000001');
+  await adm.click('[data-form="stations"] button');
+  await adm.waitForFunction(() => document.body.innerText.includes('1 stations loaded'));
+  await adm.click('[data-tab="impact"]');
+  await adm.waitForSelector('svg.chart');
+  await shot(adm, '08-admin-impact'); step('admin: police station import + impact dashboard with chart');
+
+  await user.goto(base + '#/places');
+  await user.click('[data-act="place-new"]');
+  await user.click('[data-act="place-here"]');
+  await user.waitForFunction(() => document.body.innerText.includes('Set:'));
+  await user.fill('[name="label"]', 'Home');
+  for (const [i, n] of ['Amma', 'Akka', 'Neighbour'].entries()) { await user.fill(`[name="cn${i}"]`, n); await user.fill(`[name="cp${i}"]`, `+9190000001${i}0`); }
+  await user.click('[data-form="place"] button.btn-primary');
+  await user.waitForFunction(() => document.body.innerText.includes('You are at Home'));
+  await shot(user, '09-places'); step('places: 3–5 contacts per place, active place detected from location');
+  await user.goto(base + '#/home');
+  await user.waitForFunction(() => document.body.innerText.includes('SOS goes to your Home contacts'));
+  step('home shows who the SOS goes to here');
+  await user.goto(base + '#/trip');
+  await user.selectOption('[name="dest"]', 'link');
+  await user.fill('[name="where"]', 'https://maps.google.com/?q=15.8600,78.0600'); await user.fill('[name="label"]', 'College');
+  await user.fill('[name="minutes"]', '20'); await user.fill('[name="vehicle"]', 'AP39TX1234');
+  await user.click('[data-form="trip"] button');
+  await user.waitForFunction(() => document.body.innerText.includes('On the way to College'));
+  const link = await user.textContent('.phrase');
+  await shot(user, '10-trip'); step('Track my travel started with vehicle number');
+  const fam = await page('family');
+  await fam.goto(link.trim());
+  await fam.waitForFunction(() => document.body.innerText.includes("trip to College"));
+  await shot(fam, '11-trip-family'); step('family opens the live trip link without logging in');
+  await user.click('[data-act="trip-safe"]');
+  await user.waitForFunction(() => document.body.innerText.includes('reached safely'));
+  await user.goto(base + '#/help');
+  await user.waitForFunction(() => document.body.innerText.includes('Kurnool I Town PS'));
+  await shot(user, '12-help'); step('nearby help lists the nearest police station');
+  await user.goto(base + '#/dashboard');
+  await user.waitForSelector('svg.meter');
+  await shot(user, '13-dashboard'); step('her safety dashboard');
+
+  const cam = await chromium.launch({ args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
+  const bctx = await cam.newContext({ ...mobile, permissions: ['camera'] });
+  for (const c of await user.context().cookies()) await bctx.addCookies([c]);
+  const bp = await bctx.newPage();
+  bp.on('console', (m) => { if (m.type() === 'error') errors.push(`[blink] ${m.text()}`); });
+  bp.on('pageerror', (e) => errors.push(`[blink] ${e.message}`));
+  await bp.goto(base + '#/blink');
+  await bp.waitForFunction(() => /Looking for your face|Ready/.test(document.getElementById('blink-status')?.textContent || ''), null, { timeout: 60000 });
+  await shot(bp, '14-blink'); step('Blink SOS: on-device face model loads and runs on the camera (no face in fake feed)');
+  await cam.close();
+
   const reg = await page('register');
   await reg.goto(base + '#/register');
   await reg.fill('[name="displayName"]', 'New Person');

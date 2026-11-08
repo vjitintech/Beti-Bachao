@@ -1,6 +1,6 @@
 // SMS gateway adapters. Used when the phone itself cannot send SMS (iPhone users,
 // alert fallback to volunteers, password-reset codes).
-//   SMS_PROVIDER=msg91   MSG91_AUTH_KEY, MSG91_TEMPLATE_SOS, MSG91_TEMPLATE_ALERT, MSG91_TEMPLATE_OTP
+//   SMS_PROVIDER=msg91   MSG91_AUTH_KEY, MSG91_TEMPLATE_SOS, _ALERT, _OTP, _VERIFY, _POLICE, _TRIP_START, _TRIP_SAFE
 //                        (India: each template must be registered on DLT and approved in MSG91)
 //   SMS_PROVIDER=twilio  TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM
 //   SMS_PROVIDER=log     prints messages to the server log (testing only)
@@ -9,6 +9,9 @@ export const TEXT = {
   SOS: (v) => `SOS! ${v.name} is in danger and needs help. Live location: ${v.link} — Beti Bachao. Call her or 112.`,
   ALERT: (v) => `Beti Bachao: SOS ${v.distance} km from you. Open the app now to respond.`,
   OTP: (v) => `Your Beti Bachao code is ${v.otp}. It expires in 10 minutes. Do not share it.`,
+  POLICE: (v) => `SOS - Beti Bachao: ${v.name} (${v.phone}) needs police help near your station. Live location: ${v.link} Ref ${v.ref}`,
+  TRIP_START: (v) => `${v.name} is travelling to ${v.dest} (vehicle ${v.vehicle}). Follow her live: ${v.link} - Beti Bachao`,
+  TRIP_SAFE: (v) => `${v.name} reached ${v.dest} safely. - Beti Bachao`,
   VERIFY: (v) => `Beti Bachao: your volunteer verification video call is at ${v.time}. Join from the app. Keep your Aadhaar card ready.`,
 };
 

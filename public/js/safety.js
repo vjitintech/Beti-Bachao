@@ -1,7 +1,7 @@
 // On-device safety capabilities. Everything degrades gracefully: if a browser
 // lacks a sensor or permission is denied, the UI says so and offers the next
 // best option (call / SMS). Nothing here pretends to work when it doesn't.
-import { VOICE_KEYWORDS, lang, speechLang } from './i18n.js?v=mw7oe4ed';
+import { VOICE_KEYWORDS, lang, speechLang } from './i18n.js?v=mw7qzel4';
 
 const store = {
   get(k, d) { try { const v = localStorage.getItem('bb.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
@@ -208,6 +208,7 @@ export const contacts = {
     const l = this.list(); if (l.length >= 10) return false;
     l.push({ name: name.trim().slice(0, 40), phone: p }); store.set('contacts', l); return true;
   },
+  toggleAlways(i) { const l = this.list(); if (l[i]) { l[i].always = !l[i].always; store.set('contacts', l); } },
   remove(i) { const l = this.list(); l.splice(i, 1); store.set('contacts', l); },
 };
 export const mapsLink = (loc) => (loc ? `https://maps.google.com/?q=${loc.lat.toFixed(6)},${loc.lng.toFixed(6)}` : '');
@@ -231,6 +232,6 @@ export const safeWalk = {
 
 // ---------------- settings ----------------
 export const prefs = {
-  get() { return { autoSms: true, sms112: false, serverSms: true, armed: false, powerButton: true, shake: false, voice: false, autoRecord: false, synthetic: true, country: null, fakeCaller: 'Maa', ...store.get('prefs', {}) }; },
+  get() { return { autoSms: true, sms112: false, serverSms: true, armed: false, powerButton: true, shake: false, voice: false, autoRecord: false, autoEvidence: true, voiceGuide: false, blink: false, synthetic: true, country: null, fakeCaller: 'Maa', ...store.get('prefs', {}) }; },
   set(patch) { const p = { ...this.get(), ...patch }; store.set('prefs', p); return p; },
 };

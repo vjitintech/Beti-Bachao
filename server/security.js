@@ -62,9 +62,20 @@ export class RateLimiter {
   }
 }
 
+// The Blink SOS camera page runs Google's face model, whose WebAssembly loader generates
+// code at runtime. Only that isolated page gets 'unsafe-eval'; it can be framed by the app
+// itself and nothing else, and it has no access to the API (connect-src 'self' for files only).
+export function blinkFrameHeaders(secure) {
+  const h = securityHeaders(secure);
+  h['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'self'; base-uri 'none'; form-action 'none'";
+  h['X-Frame-Options'] = 'SAMEORIGIN';
+  h['Permissions-Policy'] = 'camera=(self)';
+  return h;
+}
+
 export function securityHeaders(secure) {
   const h = {
-    'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; frame-src https://maps.google.com https://www.google.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; frame-src 'self' https://maps.google.com https://www.google.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
     'X-Frame-Options': 'DENY',

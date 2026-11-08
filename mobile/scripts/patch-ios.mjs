@@ -21,9 +21,10 @@ const keys = {
   NSLocationWhenInUseUsageDescription: 'Beti Bachao shares your live location with verified volunteers and your trusted contacts only while an SOS is active.',
   NSLocationAlwaysAndWhenInUseUsageDescription: 'Allow "Always" so your location keeps updating during an SOS even when the phone is locked, and so on-duty volunteers can be matched to nearby SOS alerts.',
   NSLocationAlwaysUsageDescription: 'Allow "Always" so your location keeps updating during an SOS even when the phone is locked.',
-  NSMicrophoneUsageDescription: 'Used for the volunteer verification video call and optional voice SOS.',
-  NSCameraUsageDescription: 'Used for the volunteer verification video call.',
+  NSMicrophoneUsageDescription: 'Used for Voice SOS, voice commands, 15 seconds of SOS evidence audio and the volunteer verification video call.',
+  NSCameraUsageDescription: 'Used for Blink SOS (three slow blinks — processed only on this iPhone) and the volunteer verification video call.',
   NSMotionUsageDescription: 'Used to detect a shake gesture to start an SOS.',
+  NSSpeechRecognitionUsageDescription: 'Voice SOS and voice commands: say "bachao" or "help" to start an SOS, or ask for your SOS status. Speech is recognised on this iPhone.',
   NSContactsUsageDescription: 'Lets you pick trusted contacts who receive your SOS message.',
 };
 let add = '';

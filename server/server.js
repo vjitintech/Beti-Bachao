@@ -13,12 +13,14 @@ import { generateVapidKeys, sendPush, isValidSubscription } from './webpush.js';
 import { JsonStore } from './store.js';
 import { Fcm, parseServiceAccount } from './fcm.js';
 import { createApns } from './apns.js';
+import { createVoice } from './voice.js';
+import { createMediaStore } from './media.js';
 import { openPostgres, attachPostgres } from './pgstore.js';
 import { createSms } from './sms.js';
 import { createRouting } from './routing.js';
 import { createAi } from './ai.js';
 import { createBackups } from './backup.js';
-import { uuid, sha256, hashPassword, verifyPassword, hashSecret, newTotpSecret, verifyTotp, totp, RateLimiter, securityHeaders } from './security.js';
+import { uuid, sha256, hashPassword, verifyPassword, hashSecret, newTotpSecret, verifyTotp, totp, RateLimiter, securityHeaders, blinkFrameHeaders } from './security.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC = path.join(ROOT, 'public');
@@ -40,6 +42,9 @@ export function createServer(opts = {}) {
   const apns = (() => { try { return createApns(env, opts.apnsConnect ? { connect: opts.apnsConnect } : {}); } catch (e) { console.error('[apns]', e.message); return null; } })();
   const sms = (() => { try { return createSms(env, { fetchImpl }); } catch (e) { console.error('[sms]', e.message); return null; } })();
   const routing = createRouting(env, { fetchImpl });
+  const voice = (() => { try { return createVoice(env, { fetchImpl }); } catch (e) { console.error('[voice]', e.message); return null; } })();
+  const media = createMediaStore({ dir: env.MEDIA_DIR || path.join(path.dirname(store.file), 'evidence'), keyHex: env.MEDIA_KEY || null });
+  let publicOrigin = (env.PUBLIC_URL || '').replace(/\/$/, '');
   const ai = createAi(env, { fetchImpl });
   const backups = env.BACKUP_DIR === 'off' ? null : createBackups({ dir: env.BACKUP_DIR || path.join(path.dirname(store.file), 'backups'), keep: Number(env.BACKUP_KEEP) || 14, keyHex: env.BACKUP_KEY || null });
   store.db.devices ||= [];
@@ -79,6 +84,9 @@ export function createServer(opts = {}) {
     UNASSIGNED_BY_OPERATOR: () => ({ title: 'You were stood down by an operator', body: 'Another responder has been assigned.', url: '#/volunteer', tag: 'stand-down' }),
     VERIFICATION_CALL: (n) => ({ title: '📹 Verification video call booked', body: `Join from the app at ${new Date(n.meta?.scheduledAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}. Keep your Aadhaar card ready.`, url: '#/volunteer', tag: 'verify' }),
     VERIFICATION_RESULT: (n) => ({ title: n.meta?.decision === 'APPROVE' ? '✅ You are an approved Beti Bachao volunteer' : 'Volunteer verification update', body: n.meta?.decision === 'APPROVE' ? 'Go on duty in the app to start receiving SOS alerts nearby.' : 'Open the app for details.', url: '#/volunteer', tag: 'verify' }),
+    POLICE_CONNECTED: (n) => ({ title: '🚓 Police contacted for you', body: n.meta?.station ? `${n.meta.station} has your live location. Tap to call them: ${n.meta.phone}.` : `Call ${n.meta?.phone || '112'} now. Your phone is sending them your location.`, url: '#/home', tag: 'police', urgent: true }),
+    TRIP_OVERDUE: (n) => ({ title: '⏰ Have you reached safely?', body: `Tap "I'm safe" — otherwise SOS starts automatically in ${Math.round((n.meta?.seconds || 120) / 60)} minutes.`, url: '#/trip', tag: 'trip', urgent: true }),
+    TRIP_ENDED: (n) => ({ title: n.meta?.status === 'ARRIVED' ? '💚 Reached safely' : 'Trip ended', body: n.meta?.status === 'ARRIVED' ? 'Your contacts have been told you arrived.' : 'Live sharing has stopped.', url: '#/trip', tag: 'trip' }),
     ESCALATION: (n) => ({ title: '🚩 SOS needs an operator', body: `Escalation: ${String(n.meta?.type || '').replace(/_/g, ' ').toLowerCase()}. Open the operations console.`, url: '#/ops', tag: 'ops-' + n.incidentId, urgent: true }),
   };
   function queuePush(n) {
@@ -142,20 +150,62 @@ export function createServer(opts = {}) {
 
   // ---------- side jobs (SMS, routing, backups) ----------
   const mapsLink = (l) => `https://maps.google.com/?q=${l.lat.toFixed(5)},${l.lng.toFixed(5)}`;
-  let lastRouting = 0, routingBusy = false;
+  let lastRouting = 0, routingBusy = false, lastPurge = 0;
   function sideJobs() {
     const now = Date.now();
-    // 1) Server-side SMS to trusted contacts when her phone could not send it (iPhone, no SIM permission).
+    // 1) SMS to the trusted contacts for the place she is at. Contacts her phone already
+    //    texted are skipped; if she moves to another saved place, that place's contacts are added.
     if (sms) for (const inc of store.db.incidents) {
-      if (inc.contactsSmsAt || inc.deviceSmsSent || inc.duress || !engine.isOpen(inc)) continue;
+      if (inc.duress || !engine.isOpen(inc)) continue;
+      const u = engine.user(inc.requesterId);
+      if (!u || u.prefs?.serverSms === false) continue;
+      const loc = engine.latestLocation(inc.id);
+      if (!loc && now - Date.parse(inc.createdAt) < 20000) continue; // wait briefly for a GPS fix
+      const { place, contacts } = engine.contactsFor(u.id, loc);
+      inc.smsSentTo ||= [];
+      const todo = contacts.filter((c) => !inc.smsSentTo.includes(c.phone));
+      if (!todo.length) continue;
+      inc.contactsSmsAt ||= new Date().toISOString();
+      if (place && inc.contactsPlace !== place.label) inc.contactsPlace = place.label;
+      inc.smsSentTo.push(...todo.map((c) => c.phone));
+      store.markDirty();
+      for (const c of todo) sms.send(c.phone, 'SOS', { name: u.displayName, link: loc ? mapsLink(loc) : '(location pending — call her)' })
+        .then((r) => engine.audit('system', r.ok ? 'CONTACT_SMS_SENT' : 'CONTACT_SMS_FAILED', 'incident', inc.id, r.ok ? null : String(r.error || r.status), { place: place?.label || null }));
+    }
+    // 1b) Automatic police connection: SMS with her live location + call bridging station ↔ her phone.
+    for (const inc of store.db.incidents) {
+      const pc = inc.policeConnect;
+      if (!pc || pc.jobAt || pc.status !== 'PENDING') continue;
+      pc.jobAt = new Date().toISOString(); store.markDirty();
       const u = engine.user(inc.requesterId);
       const loc = engine.latestLocation(inc.id);
-      if (!u?.contacts?.length || u.prefs?.serverSms === false) { inc.contactsSmsAt = 'skipped'; continue; }
-      if (!loc && now - Date.parse(inc.createdAt) < 20000) continue; // wait briefly for a GPS fix
-      inc.contactsSmsAt = new Date().toISOString();
-      store.markDirty();
-      for (const c of u.contacts) sms.send(c.phone, 'SOS', { name: u.displayName, link: loc ? mapsLink(loc) : '(location pending — call her)' })
-        .then((r) => engine.audit('system', r.ok ? 'CONTACT_SMS_SENT' : 'CONTACT_SMS_FAILED', 'incident', inc.id, r.ok ? null : String(r.error || r.status)));
+      if (!pc.station) { engine.setPoliceResult(inc.id, { status: 'NO_STATION' }); continue; }
+      const vars = { name: u?.displayName || 'A woman', phone: u?.phone || 'unknown', link: loc ? mapsLink(loc) : 'location pending', ref: inc.id.slice(0, 8) };
+      const jobs = [];
+      if (sms) jobs.push(Promise.all([pc.station.phone, pc.station.phone2].filter(Boolean).map((ph) => sms.send(ph, 'POLICE', vars))).then((rs) => ({ sms: rs.some((r) => r.ok) ? 'SENT' : 'FAILED' })));
+      if (voice && u?.phone) jobs.push(voice.bridge({ first: pc.station.phone, second: u.phone, message: `Emergency from Beti Bachao. ${vars.name} raised an SOS near your station and needs police help. Her location has been sent to you by SMS. Reference ${vars.ref.split('').join(' ')}.` }).then((r) => ({ call: r.ok ? 'PLACED' : 'FAILED' })));
+      if (!jobs.length) { engine.setPoliceResult(inc.id, { status: 'NO_GATEWAY' }); continue; }
+      Promise.all(jobs).then((parts) => {
+        const patch = Object.assign({}, ...parts);
+        patch.status = patch.sms === 'SENT' || patch.call === 'PLACED' ? 'CONTACTED' : 'FAILED';
+        engine.setPoliceResult(inc.id, patch);
+        engine.audit('system', 'POLICE_CONTACT_' + patch.status, 'incident', inc.id, null, patch);
+        store.markDirty(); broadcast();
+      });
+    }
+    // 1c) Track my travel: SMS the live link to her contacts at start, "reached safely" at the end.
+    if (sms) for (const t of store.db.trips || []) {
+      const u = engine.user(t.userId);
+      if (!u || u.prefs?.serverSms === false) continue;
+      if (t.status === 'ACTIVE' && !t.smsStartAt && publicOrigin) {
+        t.smsStartAt = new Date().toISOString();
+        t.smsTo = engine.contactsFor(u.id, t.last || t.destination).contacts.map((c) => c.phone);
+        store.markDirty();
+        for (const ph of t.smsTo) sms.send(ph, 'TRIP_START', { name: u.displayName, dest: t.destination.label, link: `${publicOrigin}/t/${t.token}`, vehicle: t.vehicle || '-' });
+      } else if (t.status === 'ARRIVED' && t.smsStartAt && !t.smsEndAt) {
+        t.smsEndAt = new Date().toISOString(); store.markDirty();
+        for (const ph of t.smsTo || []) sms.send(ph, 'TRIP_SAFE', { name: u.displayName, dest: t.destination.label });
+      }
     }
     // 2) SMS fallback to alerted volunteers who have not responded within 30 s.
     if (sms) for (const n of store.db.notifications) {
@@ -178,6 +228,7 @@ export function createServer(opts = {}) {
       Promise.allSettled(jobs).finally(() => { routingBusy = false; });
     }
     // 4) Daily automatic backup.
+    if (now - lastPurge > 3600e3) { lastPurge = now; for (const k of engine.expiredEvidence()) media.del(k); store.markDirty(); }
     if (backups && backups.due()) { try { const f = backups.run(store.db); engine.audit('system', 'BACKUP_CREATED', 'system', f); } catch (e) { console.error('[backup]', e.message); } }
   }
 
@@ -188,10 +239,10 @@ export function createServer(opts = {}) {
   };
   const err = (res, status, code, message) => json(res, status, { error: { code, message: message || code } });
 
-  function readBody(req) {
+  function readBody(req, max = 32 * 1024) {
     return new Promise((resolve, reject) => {
       let size = 0; const chunks = [];
-      req.on('data', (c) => { size += c.length; if (size > 32 * 1024) { reject(new EngineError(413, 'PAYLOAD_TOO_LARGE')); req.destroy(); } else chunks.push(c); });
+      req.on('data', (c) => { size += c.length; if (size > max) { reject(new EngineError(413, 'PAYLOAD_TOO_LARGE')); req.destroy(); } else chunks.push(c); });
       req.on('end', () => {
         if (!chunks.length) return resolve({});
         try { const v = JSON.parse(Buffer.concat(chunks).toString('utf8')); resolve(v && typeof v === 'object' ? v : {}); } catch { reject(new EngineError(400, 'INVALID_JSON')); }
@@ -240,10 +291,10 @@ export function createServer(opts = {}) {
 
   // ---------- routes ----------
   const routes = [];
-  const route = (method, pattern, handler, { auth = true, limit = null } = {}) => {
+  const route = (method, pattern, handler, { auth = true, limit = null, maxBody = 32 * 1024 } = {}) => {
     const keys = [];
     const re = new RegExp('^/api/v1' + pattern.replace(/:(\w+)/g, (_, k) => { keys.push(k); return '([A-Za-z0-9-]+)'; }) + '$');
-    routes.push({ method, re, keys, handler, auth, limit });
+    routes.push({ method, re, keys, handler, auth, limit, maxBody });
   };
 
   route('GET', '/health', () => ({ ok: true, time: new Date(deps.now()).toISOString(), auditChain: engine.verifyAuditChain().ok }), { auth: false });
@@ -259,7 +310,7 @@ export function createServer(opts = {}) {
     engine.audit(u.id, 'ADMIN_SETUP', 'user', u.id);
     return { ok: true };
   }, { auth: false, limit: [10, 3600e3] });
-  route('GET', '/public-config', () => ({ setupNeeded: !store.db.users.some((u) => u.role === 'admin'), demo: false, mfaRequired: MFA_REQUIRED, countries: COUNTRIES, defaultCountry: engine.cfg.countryCode, simulatedLabel: SIMULATED_LABEL, radiusStagesKm: engine.cfg.radiusStagesKm, vapidPublicKey: store.db.vapid.publicKey, features: { appPush: !!(fcm || apns), iosPush: !!(apns || fcm), sms: !!sms, smsReset: !!sms, roadEta: !!routing, ai: !!ai } }), { auth: false });
+  route('GET', '/public-config', () => ({ setupNeeded: !store.db.users.some((u) => u.role === 'admin'), demo: false, mfaRequired: MFA_REQUIRED, countries: COUNTRIES, defaultCountry: engine.cfg.countryCode, simulatedLabel: SIMULATED_LABEL, radiusStagesKm: engine.cfg.radiusStagesKm, vapidPublicKey: store.db.vapid.publicKey, features: { appPush: !!(fcm || apns), iosPush: !!(apns || fcm), policeCall: !!voice, sms: !!sms, smsReset: !!sms, roadEta: !!routing, ai: !!ai } }), { auth: false });
 
   route('POST', '/auth/register', async ({ body, res }) => {
     if (!['user', 'volunteer'].includes(body.role)) throw new EngineError(400, 'INVALID_ROLE', 'Only user or volunteer accounts can self-register');
@@ -333,6 +384,32 @@ export function createServer(opts = {}) {
   }, { limit: [30, 3600e3] });
   route('POST', '/me/location', ({ actor, body }) => engine.ingestDeviceLocation(actor, body), { limit: [600, 3600e3] });
   route('GET', '/me/contacts', ({ actor }) => engine.getContacts(actor));
+  route('GET', '/me/places', ({ actor }) => engine.getPlaces(actor));
+  route('PUT', '/me/places', ({ actor, body }) => engine.setPlaces(actor, body), { limit: [30, 3600e3] });
+  route('GET', '/me/dashboard', ({ actor }) => engine.myDashboard(actor));
+  route('GET', '/help/nearby', ({ actor, q }) => engine.nearbyHelp(actor, { lat: q.get('lat'), lng: q.get('lng') }));
+  route('GET', '/impact', () => engine.publicImpact(), { auth: false, limit: [120, 3600e3] });
+  route('GET', '/me/trip', ({ actor }) => engine.myTrip(actor));
+  route('POST', '/me/trip', ({ actor, body }) => engine.startTrip(actor, body), { limit: [30, 3600e3] });
+  route('POST', '/me/trip/end', ({ actor, body }) => engine.endTrip(actor, body));
+  route('POST', '/me/trip/extend', ({ actor, body }) => engine.extendTrip(actor, body));
+  route('GET', '/t/:token', ({ p }) => { const v = engine.publicTrip(p.token); if (!v) throw new EngineError(404, 'NOT_FOUND', 'This link is not valid'); return v; }, { auth: false, limit: [600, 3600e3] });
+  route('POST', '/incidents/:id/evidence', ({ actor, p, body }) => {
+    const mime = String(body.mime || '');
+    if (!/^(audio|video)\/[\w.+-]+(;.*)?$/.test(mime)) throw new EngineError(400, 'INVALID_MEDIA', 'Audio or video only');
+    const buf = Buffer.from(String(body.data || ''), 'base64');
+    if (buf.length < 100 || buf.length > 4 * 1024 * 1024) throw new EngineError(400, 'INVALID_MEDIA', 'Recording must be under 4 MB');
+    const inc = engine.incident(p.id);
+    if (inc.requesterId !== actor.id) throw new EngineError(403, 'FORBIDDEN');
+    const storageKey = media.put(buf);
+    try { return engine.addEvidence(actor, p.id, { kind: body.kind || mime.split('/')[0], mime, durationSec: body.durationSec, bytes: buf.length, storageKey }); } catch (e) { media.del(storageKey); throw e; }
+  }, { maxBody: 6 * 1024 * 1024, limit: [30, 3600e3] });
+  route('GET', '/incidents/:id/evidence/:eid', ({ actor, p }) => { const e = engine.evidenceFor(actor, p.id, p.eid); return { __raw: true, type: e.mime.split(';')[0], body: media.get(e.storageKey) }; });
+  route('POST', '/operator/incidents/:id/ack', ({ actor, p }) => engine.operatorAck(actor, p.id));
+  route('GET', '/admin/dashboard', ({ actor, q }) => engine.adminDashboard(actor, { days: q.get('days') }));
+  route('GET', '/admin/police-stations', ({ actor }) => engine.listStations(actor));
+  route('POST', '/admin/police-stations', ({ actor, body }) => engine.importStations(actor, body), { maxBody: 2 * 1024 * 1024 });
+  route('DELETE', '/admin/police-stations/:id', ({ actor, p }) => engine.deleteStation(actor, p.id));
   route('PUT', '/me/contacts', ({ actor, body }) => engine.setContacts(actor, body), { limit: [30, 3600e3] });
   route('POST', '/incidents/:id/rate', ({ actor, p, body }) => engine.rateResponder(actor, p.id, body), { limit: [20, 3600e3] });
   route('POST', '/admin/volunteers/:id/schedule-call', ({ actor, p, body }) => {
@@ -467,6 +544,7 @@ export function createServer(opts = {}) {
     { name: 'App push (Firebase, Android + iPhone)', status: fcm ? 'ACTIVE' : 'NOT CONFIGURED', note: fcm ? `${store.db.devices.length} app device(s) registered.` : 'Set FCM_SERVICE_ACCOUNT to send alarm alerts to the phone apps.' },
     { name: 'iPhone push (Apple APNs)', status: apns ? 'ACTIVE' : 'NOT CONFIGURED', note: apns ? `${store.db.devices.filter((d) => d.platform === 'ios').length} iPhone/iPad device(s) registered.` : 'Set APNS_KEY, APNS_KEY_ID and APNS_TEAM_ID to send alerts to the iPhone app.' },
     { name: 'SMS gateway', status: sms ? sms.name.toUpperCase() : 'NOT CONFIGURED', note: sms ? 'Sends SOS SMS for iPhone users, alert fallback to volunteers, reset codes.' : 'Set SMS_PROVIDER (msg91/twilio). Android phones still send SOS SMS themselves.' },
+    { name: 'Police auto-connect', status: (store.db.policeStations || []).length ? `${store.db.policeStations.length} STATIONS` : 'NO STATION LIST', note: `If no operator acknowledges an SOS within ${engine.cfg.policeAutoConnectSec} s (or she presses SOS again), the nearest station gets an SMS${voice ? ' and an automatic call that connects them to her' : ''}. ${voice ? `Calls via ${voice.name}.` : 'Set VOICE_PROVIDER (exotel/twilio) for the automatic call.'} Import stations in Admin → Police stations.` },
     { name: 'Road-route ETA', status: routing ? 'ACTIVE' : 'ESTIMATE', note: routing ? 'OSRM routing.' : 'Set ROUTING_URL (OSRM). Until then straight-line estimate.' },
     { name: 'Local AI (Colibri)', status: ai ? 'ACTIVE' : 'OFF', note: ai ? `Model ${ai.model}. Advisory only.` : 'Set AI_BASE_URL to enable operator summaries, translation and risk flags.' },
     { name: 'Automatic backups', status: backups ? 'ACTIVE' : 'OFF', note: backups ? `Daily, kept ${Number(env.BACKUP_KEEP) || 14}${env.BACKUP_KEY ? ', encrypted' : ''}.` : 'Disabled.' },
@@ -477,7 +555,7 @@ export function createServer(opts = {}) {
   ] }; });
 
   // ---------- static ----------
-  const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8' };
+  const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8', '.webp': 'image/webp', '.wasm': 'application/wasm', '.data': 'application/octet-stream', '.binarypb': 'application/octet-stream' };
   function serveStatic(req, res, pathname) {
     let rel = decodeURIComponent(pathname);
     if (rel.endsWith('/')) rel += 'index.html';
@@ -486,13 +564,14 @@ export function createServer(opts = {}) {
     fs.stat(file, (e, st) => {
       if (e || !st.isFile()) { res.writeHead(404, { 'Content-Type': 'text/plain', ...securityHeaders(SECURE) }); return res.end('Not found'); }
       const ext = path.extname(file);
-      res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': ext === '.html' || file.endsWith('sw.js') ? 'no-cache' : 'public, max-age=300', ...securityHeaders(SECURE) });
+      res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': ext === '.html' || file.endsWith('sw.js') ? 'no-cache' : file.includes(`${path.sep}vendor${path.sep}`) ? 'public, max-age=2592000, immutable' : 'public, max-age=300', ...(file.endsWith(`${path.sep}blink-frame.html`) ? blinkFrameHeaders(SECURE) : securityHeaders(SECURE)) });
       fs.createReadStream(file).pipe(res);
     });
   }
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://local');
+    if (/^\/t\/[a-f0-9]{32}$/.test(url.pathname)) return serveStatic(req, res, '/track.html');
     if (!url.pathname.startsWith('/api/')) return serveStatic(req, res, url.pathname);
 
     // CORS only for the native apps' WebView origins (bearer tokens, no cookies).
@@ -532,8 +611,13 @@ export function createServer(opts = {}) {
       if (r.limit && !limiter.check(`${r.re}:${actor?.id || ip(req)}`, r.limit[0] * RATE_MULT, r.limit[1])) throw new EngineError(429, 'RATE_LIMITED', 'Too many requests. In an emergency call your local emergency number.');
       const m = url.pathname.match(r.re);
       const p = Object.fromEntries(r.keys.map((k, i) => [k, m[i + 1]]));
-      const body = req.method === 'GET' ? {} : await readBody(req);
+      const body = req.method === 'GET' ? {} : await readBody(req, r.maxBody);
+      if (!env.PUBLIC_URL && req.headers.host) publicOrigin = `${env.TRUST_PROXY === 'true' ? String(req.headers['x-forwarded-proto'] || 'https').split(',')[0] : (SECURE ? 'https' : 'http')}://${req.headers.host}`;
       const result = await r.handler({ req, res, actor, body, p, q: url.searchParams });
+      if (result && result.__raw) {
+        res.writeHead(200, { 'Content-Type': result.type, 'Content-Length': result.body.length, 'Cache-Control': 'no-store', ...securityHeaders(SECURE), ...(origin && APP_ORIGINS.includes(origin) ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : {}) });
+        return res.end(result.body);
+      }
       store.markDirty();
       store.flush();
       broadcast();

@@ -14,12 +14,21 @@ Beti Bachao is not "another panic button". It coordinates the whole response: SO
 
 ## Features
 
+**Fully automatic protection** — see [docs/AUTONOMY.md](docs/AUTONOMY.md):
+- SOS by **button, shake, voice ("bachao"/"help"/"kapadandi"), 3 slow blinks at the camera, power button, Siri**.
+- **Contacts switch automatically by place**: 3–5 contacts for home, college, office…
+- If no operator acknowledges within 2 minutes, or she presses SOS again, the **nearest police station is connected automatically** (SMS with her live location + a call bridging the station to her phone).
+- **15 s audio evidence**, **Track my travel** with an automatic SOS if she doesn't arrive.
+- **Blind-friendly**: TalkBack/VoiceOver, spoken status, voice commands.
+- **Dashboards** for her and an admin **Impact** dashboard.
+
 **For women & girls** (Android & iPhone/iPad apps, 14 languages)
 - **Hold-to-SOS** (3 s, prevents pocket triggers). Every SOS is treated as immediate danger, alerts operators instantly, and searches quickly.
 - **Auto-message**: the moment SOS starts, "I am in danger" + a Google Maps link goes to all trusted contacts. On **Android it's sent automatically** (optionally to 112 too), on iPhone the SMS opens ready to send, and the server SMS gateway sends it as a backup.
 - **SOS without opening the app**: Android Quick Settings tile, home-screen widget, power button ×5, lock-screen button; iPhone "Hey Siri, Beti Bachao SOS" / Action Button. Live location keeps updating with the screen locked.
 - **Rate responders** after she's safe; "felt unsafe" opens a misconduct review.
 - **Shake ×3**, **voice keyword** ("bachao", "kapadandi", "help"…), and **reach-home check-in timer** triggers.
+- Missing Disha/Shakti features added: track my travel, nearby police stations, Shakti WhatsApp helpline, automatic recording sent to the control room.
 - **Duress PIN**: "cancels" on screen but secretly keeps help coming and flags operators 🚩.
 - **Live tracking**: PPI radar with every responder's distance and ETA counting down, plus an embedded Google Map.
 - **"Are you safe now?"** YES (double-confirmed) / NO / NEED MORE HELP.
@@ -41,7 +50,7 @@ Node.js ≥ 20, **no npm install needed** (zero dependencies).
 
 ```bash
 ADMIN_EMAIL=you@example.org ADMIN_PASSWORD='a-long-password' npm start   # http://localhost:8080
-npm test          # 47 engine, API, app-integration, push, APNs and PostgreSQL tests
+npm test          # 65 tests: engine, API, automation (police/trips/evidence), push, APNs, blink, PostgreSQL
 npm run smoke     # headless-browser end-to-end walkthrough (needs Playwright/Chromium)
 node scripts/version.mjs   # run after editing public/ so phones load fresh files
 ```

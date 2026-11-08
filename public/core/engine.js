@@ -15,8 +15,9 @@
 //   • escalation adapter is SIMULATED until a real integration is approved
 //   • append-only, hash-chained audit log
 
-import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mw7oe4ed';
-import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mw7oe4ed';
+import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mw7qzel4';
+import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mw7qzel4';
+import { protectMethods } from './protect.js?v=mw7qzel4';
 
 export const S = Object.freeze({
   CREATED: 'CREATED',
@@ -72,9 +73,10 @@ const OPERATOR_CLOSURE_REASONS = [
 ];
 
 export const ESC = Object.freeze({ NONE: 'NONE', REQUIRED: 'REQUIRED', SIMULATED: 'SIMULATED', ATTEMPTED: 'ATTEMPTED', DELIVERED: 'DELIVERED', ACKNOWLEDGED: 'ACKNOWLEDGED', FAILED: 'FAILED' });
-// Escalations go to Beti Bachao operators (push + console). Police/ambulance are
-// never contacted automatically: an operator calls them and records it as a handoff.
-export const ESCALATION_LABEL = 'Operators alerted — police/ambulance NOT contacted automatically. Call 112.';
+// Escalations go to Beti Bachao operators (push + console). If no operator acknowledges
+// within policeAutoConnectSec (or she presses SOS again first), the nearest police station
+// is connected automatically (SMS + call bridge via the gateway; her phone texts 112).
+export const ESCALATION_LABEL = 'Operators alerted. If no operator acknowledges in time, the nearest police station is connected automatically. In danger, call 112.';
 export const SIMULATED_LABEL = ESCALATION_LABEL; // backwards-compatible name
 
 const ASG_ORDER = ['ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ASSISTING'];
@@ -119,6 +121,9 @@ export function emptyDb() {
     confirmations: [],
     transitions: [],
     abuseReports: [],
+    policeStations: [],
+    trips: [],
+    evidence: [],
     audit: [],
     events: [],
     eventSeq: 0,
@@ -137,6 +142,8 @@ export class Engine {
   }
 
   // ---------- basics ----------
+  fail(status, code, msg) { fail(status, code, msg); }
+  normPhone(p) { return normPhone(p); }
   now() { return this.deps.now() + (this.db.demo?.clockOffsetMs || 0); }
   iso(ms = this.now()) { return new Date(ms).toISOString(); }
   get cfg() { return this.db.config; }
@@ -240,11 +247,7 @@ export class Engine {
     const u = this.requireRole(actor, 'user', 'volunteer');
     if (contacts !== undefined) {
       if (!Array.isArray(contacts) || contacts.length > 10) fail(400, 'INVALID_CONTACTS', 'Up to 10 contacts');
-      u.contacts = contacts.map((c) => {
-        const ph = normPhone(c.phone);
-        if (!ph) fail(400, 'INVALID_PHONE', `Invalid phone for ${String(c.name || '').slice(0, 30)}`);
-        return { name: String(c.name || '').trim().slice(0, 40) || 'Contact', phone: ph };
-      });
+      u.contacts = contacts.map((c) => this.cleanContact(c));
     }
     if (prefs) u.prefs = { ...(u.prefs || {}), serverSms: prefs.serverSms !== false };
     if (phone !== undefined) { const ph = normPhone(phone); if (phone && !ph) fail(400, 'INVALID_PHONE'); u.phone = ph; }
@@ -353,8 +356,10 @@ export class Engine {
   ingestDeviceLocation(actor, loc) {
     const u = this.requireRole(actor, 'user', 'volunteer');
     if (u.role === 'user') {
+      const trip = (this.db.trips || []).find((t) => t.userId === u.id && t.status === 'ACTIVE');
+      if (trip && isValidLatLng(loc?.lat, loc?.lng)) this.tripPoint(trip, loc);
       const open = this.db.incidents.find((i) => i.requesterId === u.id && this.isOpen(i));
-      if (!open) return { routed: 'none' };
+      if (!open) return { routed: trip ? 'trip' : 'none' };
       this.addLocation(actor, open.id, loc);
       return { routed: 'incident', incidentId: open.id };
     }
@@ -366,7 +371,7 @@ export class Engine {
   }
 
   // ---------- incidents ----------
-  createIncident(actor, { idempotencyKey, location = null, severity = 'NORMAL', trigger = 'button', silent = false, battery = null, note = null, deviceSmsSent = false } = {}) {
+  createIncident(actor, { idempotencyKey, location = null, severity = 'NORMAL', trigger = 'button', silent = false, battery = null, note = null, deviceSmsSent = false, deviceSmsNumbers = null } = {}) {
     const u = this.requireRole(actor, 'user');
     if (!idempotencyKey || typeof idempotencyKey !== 'string' || idempotencyKey.length > 100) fail(400, 'IDEMPOTENCY_KEY_REQUIRED');
     const dup = this.db.incidents.find((i) => i.requesterId === u.id && i.idempotencyKey === idempotencyKey);
@@ -375,6 +380,10 @@ export class Engine {
     if (open) {
       if (open.duress) { open.duress = false; this.audit(u.id, 'DURESS_INCIDENT_RESUMED', 'incident', open.id); }
       if (location) this.addLocation(actor, open.id, location);
+      // She pressed SOS again and no operator has taken it yet → connect the police now.
+      open.sosPresses = (open.sosPresses || 1) + 1;
+      this.audit(u.id, 'SOS_PRESSED_AGAIN', 'incident', open.id, null, { presses: open.sosPresses });
+      if (!open.opAckAt && !open.policeConnect) this.autoPolice(open, 'She pressed SOS again before any operator acknowledged');
       return { incident: open, duplicate: true };
     }
     const hourAgo = this.now() - 3600000;
@@ -387,7 +396,7 @@ export class Engine {
       id: this.deps.uuid(), requesterId: u.id, status: S.CREATED, searchStage: null, stageStartedAt: null, stageDeadline: null,
       severity: sev, trigger: String(trigger).slice(0, 20), silent: !!silent, escalationStatus: ESC.NONE, idempotencyKey,
       countryCode: u.countryCode || this.cfg.countryCode, battery: sanitizeBattery(battery), note: note ? String(note).slice(0, 280) : null,
-      duress: false, flags: [], deviceSmsSent: !!deviceSmsSent, contactsSmsAt: null, createdAt: this.iso(), updatedAt: this.iso(), closedAt: null, safeConfirmedAt: null, closureReason: null,
+      duress: false, flags: [], deviceSmsSent: !!deviceSmsSent, sosPresses: 1, opAckAt: null, opAckBy: null, ackReminderAt: null, policeConnect: null, contactsSmsAt: null, createdAt: this.iso(), updatedAt: this.iso(), closedAt: null, safeConfirmedAt: null, closureReason: null,
     };
     this.db.incidents.push(inc);
     this.db.transitions.push({ id: this.deps.uuid(), incidentId: inc.id, from: null, to: S.CREATED, actorId: u.id, at: inc.createdAt, reason: `SOS via ${inc.trigger}`, source: 'api' });
@@ -401,6 +410,10 @@ export class Engine {
     if (location) {
       this.recordLocation(inc, u.id, location);
     }
+    const cf = this.contactsFor(u.id, this.latestLocation(inc.id));
+    inc.contactsPlace = cf.place?.label || null;
+    // Numbers her phone already texted are not texted again by the server.
+    inc.smsSentTo = inc.deviceSmsSent ? (Array.isArray(deviceSmsNumbers) ? deviceSmsNumbers.map((x) => normPhone(x)).filter(Boolean).slice(0, 20) : cf.contacts.map((c) => c.phone)) : [];
     if (this.latestLocation(inc.id)) this.startStage(inc, 0, u.id, 'Location received');
     else {
       this.transition(inc, S.LOCATION_UNAVAILABLE, u.id, 'No usable location yet', 'system');
@@ -756,6 +769,7 @@ export class Engine {
           if (!active.length) {
             if (inc.status === S.ALERTING_30KM) this.transition(inc, S.NO_RESPONDER_AVAILABLE, 'system', 'No responder within largest radius', 'scheduler');
             this.escalate(inc, 'system', 'NO_RESPONDER', 'No volunteer accepted within all search stages');
+            if (this.cfg.autoPoliceOnNoResponder && !inc.opAckAt) this.autoPolice(inc, 'No volunteer accepted and no operator acknowledged');
           }
         }
         changed.push(inc.id);
@@ -780,6 +794,7 @@ export class Engine {
           changed.push(inc.id);
         }
       }
+      changed.push(...this.protectTick(inc, now));
       // Location freshness flag (display only — never fabricates a position).
       const loc = this.latestLocation(inc.id);
       const stale = !loc || now - Date.parse(loc.observedAt) > this.cfg.locationStaleSec * 1000;
@@ -789,6 +804,7 @@ export class Engine {
         changed.push(inc.id);
       }
     }
+    changed.push(...this.tripTick(now));
     return changed;
   }
 
@@ -892,6 +908,9 @@ export class Engine {
         responders: active.map((a, i) => this.responderTrack(a, loc, i, { withPosition: true })),
         radiusStagesKm: this.cfg.radiusStagesKm,
         escalations: this.db.escalations.filter((e) => e.incidentId === inc.id).map((e) => ({ type: e.type, status: e.status, label: e.label, attemptedAt: e.attemptedAt })),
+        operatorAcknowledged: !!inc.opAckAt,
+        police: inc.policeConnect ? { at: inc.policeConnect.at, status: inc.policeConnect.status, station: inc.policeConnect.station ? { name: inc.policeConnect.station.name, phone: inc.policeConnect.station.phone, distanceKm: inc.policeConnect.station.distanceKm } : null, emergency: inc.policeConnect.emergency, call: inc.policeConnect.call, sms: inc.policeConnect.sms } : null,
+        contactsPlace: inc.contactsPlace || null, evidenceCount: (this.db.evidence || []).filter((e) => e.incidentId === inc.id).length,
         rateable: this.isOpen(inc) ? [] : this.db.assignments.filter((a) => a.incidentId === inc.id && (a.arrivedAt || a.status === 'COMPLETED')).map((a, i) => ({ ref: a.id, label: `Verified volunteer ${String.fromCharCode(65 + i)}`, rated: !!a.rating, stars: a.rating?.stars || null })),
       };
     }
@@ -921,6 +940,9 @@ export class Engine {
       ...base, role: u.role, status: inc.status, color: this.colorOf(inc), duress: inc.duress, escalationStatus: inc.escalationStatus, flags: inc.flags, trigger: inc.trigger, silent: inc.silent, battery: inc.battery, note: inc.note,
       requester: { id: inc.requesterId, displayName: this.user(inc.requesterId)?.displayName, phone: this.user(inc.requesterId)?.phone || null },
       prankRisk: this.prankRisk(inc), ai: inc.ai || null,
+      opAckAt: inc.opAckAt || null, opAckBy: inc.opAckBy ? this.user(inc.opAckBy)?.displayName : null, policeConnect: inc.policeConnect || null, sosPresses: inc.sosPresses || 1,
+      contactsPlace: inc.contactsPlace || null, evidence: this.evidenceList(inc.id), nearestStations: this.nearestStations(loc, 3).map(({ name, phone, phone2, distanceKm }) => ({ name, phone, phone2, distanceKm })),
+      ackDeadline: inc.opAckAt || inc.policeConnect ? null : this.iso(Date.parse(inc.createdAt) + this.cfg.policeAutoConnectSec * 1000),
       search: searchView, alertedCount, closed: !this.isOpen(inc), closureReason: inc.closureReason,
       location: this.locationView(loc, now),
       locationHistory: this.db.locations.filter((l) => l.incidentId === inc.id).slice(-20).map((l) => ({ lat: l.lat, lng: l.lng, accuracyM: l.accuracyM, observedAt: l.observedAt, suspect: l.suspect, suspectReason: l.suspectReason })),
@@ -968,7 +990,7 @@ export class Engine {
     const list = this.db.incidents.filter((i) => includeClosed || this.isOpen(i)).slice(-100).reverse();
     return list.map((inc) => {
       const loc = this.latestLocation(inc.id);
-      return { id: inc.id, status: inc.status, color: this.colorOf(inc), severity: inc.severity, duress: inc.duress, escalationStatus: inc.escalationStatus, createdAt: inc.createdAt, searchStage: inc.searchStage, radiusKm: inc.searchStage != null ? this.cfg.radiusStagesKm[inc.searchStage] : null, responders: this.activeAssignments(inc.id).length, flags: inc.flags, location: loc ? { lat: loc.lat, lng: loc.lng, accuracyM: loc.accuracyM, ageSec: Math.round((this.now() - Date.parse(loc.observedAt)) / 1000) } : null };
+      return { id: inc.id, status: inc.status, color: this.colorOf(inc), severity: inc.severity, duress: inc.duress, escalationStatus: inc.escalationStatus, createdAt: inc.createdAt, opAckAt: inc.opAckAt || null, police: inc.policeConnect?.status || null, searchStage: inc.searchStage, radiusKm: inc.searchStage != null ? this.cfg.radiusStagesKm[inc.searchStage] : null, responders: this.activeAssignments(inc.id).length, flags: inc.flags, location: loc ? { lat: loc.lat, lng: loc.lng, accuracyM: loc.accuracyM, ageSec: Math.round((this.now() - Date.parse(loc.observedAt)) / 1000) } : null };
     });
   }
 
@@ -978,6 +1000,7 @@ export class Engine {
     const inc = this.incident(incidentId);
     const a = this.db.assignments.find((x) => x.id === assignmentId && x.incidentId === inc.id);
     if (!a || !ACTIVE_ASG.has(a.status)) fail(404, 'NOT_FOUND', 'Active assignment not found');
+    this.markAck(inc, op.id);
     a.status = 'CANCELLED'; a.cancelledAt = this.iso(); a.cancellationReason = `Operator: ${reason}`;
     const v = this.vol(a.volunteerId); v.noShowCount += 1;
     this.notify(inc.id, a.volunteerId, 'UNASSIGNED_BY_OPERATOR');
@@ -993,6 +1016,7 @@ export class Engine {
     if (!reason || String(reason).trim().length < 5) fail(400, 'REASON_REQUIRED');
     const inc = this.incident(incidentId);
     if (!this.isOpen(inc)) fail(409, 'INCIDENT_CLOSED');
+    this.markAck(inc, op.id);
     const ev = { id: this.deps.uuid(), incidentId: inc.id, type: 'OPERATOR_HANDOFF', status, label: `Recorded manually by operator (${status}) — no automated integration`, reason: String(reason).slice(0, 300), attemptedAt: this.iso(), acknowledgedAt: status === 'ACKNOWLEDGED' ? this.iso() : null, recordedBy: op.id, metadata: { adapter: 'manual' } };
     this.db.escalations.push(ev);
     inc.escalationStatus = status;
@@ -1006,6 +1030,7 @@ export class Engine {
     const op = this.requireRole(actor, 'operator', 'admin');
     const inc = this.incident(incidentId);
     if (!OPERATOR_CLOSURE_REASONS.includes(reason)) fail(400, 'INVALID_REASON', 'Choose a documented closure reason');
+    this.markAck(inc, op.id);
     if (!note || String(note).trim().length < 10) fail(400, 'NOTE_REQUIRED', 'A note of at least 10 characters is required');
     if (inc.status === S.USER_CANCELLED) {
       this.transition(inc, S.FALSE_ALARM_REVIEW, op.id, note, 'operator');
@@ -1157,3 +1182,5 @@ function sanitizeBattery(b) {
   const level = Number(b.level);
   return Number.isFinite(level) ? { level: Math.max(0, Math.min(1, level)), charging: !!b.charging } : null;
 }
+
+Object.assign(Engine.prototype, protectMethods);

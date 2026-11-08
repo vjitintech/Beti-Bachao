@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Blink SOS camera</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="blink-frame">
+  <!-- Isolated page: the on-device face model needs runtime code generation, which the
+       main app's security policy forbids. It only talks to the app via postMessage. -->
+  <video id="v" playsinline muted aria-label="Front camera preview"></video>
+  <script type="module" src="js/blink-frame.js"></script>
+</body>
+</html>

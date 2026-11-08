@@ -29,6 +29,11 @@ export const native = {
   takeLaunchAction() { return call('takeLaunchAction'); },
   openSystemSettings(which) { return call('openSystemSettings', { which }); },
   canUseFullScreenAlerts() { return call('canUseFullScreenAlerts'); },
+  // Accessibility: text-to-speech, screen-reader announcement/detection, one-shot speech recognition.
+  speak({ text, lang = 'en-IN' }) { return call('speak', { text, lang }); },
+  announce({ text }) { return call('announce', { text }); },
+  screenReader() { return call('screenReader'); },
+  listenOnce({ lang = 'en-IN', timeoutMs = 7000 } = {}) { return call('listenOnce', { lang, timeoutMs }); },
 };
 
 // iPhone/iPad: the APNs device token comes from @capacitor/push-notifications.

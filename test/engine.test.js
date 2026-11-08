@@ -58,10 +58,22 @@ test('AT-02 no acceptance expands to 20 km then 30 km then NO_RESPONDER_AVAILABL
   assert.equal(incident.status, S.ALERTING_30KM);
   assert.ok(alerted(t.db, incident.id).includes(t.imran.id));
   t.advance(61);
-  assert.equal(incident.status, S.NO_RESPONDER_AVAILABLE);
+  // No operator acknowledged within 2 minutes → the nearest police station was connected automatically.
+  assert.equal(incident.status, S.ESCALATION_REQUIRED);
+  assert.ok(t.db.escalations.some((x) => x.type === 'OPERATOR_NO_ACK'));
+  assert.ok(t.db.escalations.some((x) => x.type === 'POLICE_AUTO_CONNECT'));
   const esc = t.db.escalations.find((x) => x.type === 'NO_RESPONDER');
   assert.equal(esc.status, 'REQUIRED');
   assert.equal(esc.label, SIMULATED_LABEL);
+});
+
+test('AT-02b with an operator acknowledging, exhausted search ends in NO_RESPONDER_AVAILABLE (no police auto-connect)', () => {
+  const t = setup();
+  const { incident } = t.e.createIncident(t.aamani, { idempotencyKey: 'k', location: t.loc() });
+  t.e.operatorAck(t.op, incident.id);
+  t.advance(46); t.advance(46); t.advance(61);
+  assert.equal(incident.status, S.NO_RESPONDER_AVAILABLE);
+  assert.equal(incident.policeConnect, null);
 });
 
 test('AT-03 durable timer: deadline survives a restart (engine rebuilt from serialized db)', () => {

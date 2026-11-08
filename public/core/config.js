@@ -22,13 +22,19 @@ export const DEFAULT_CONFIG = Object.freeze({
   maxPlausibleSpeedKmh: 250, // faster implied movement → location flagged as suspect
   sosPerHourLimit: 6,
   preciseAccessAuditWindowSec: 60,
+  operatorAckSec: 60, // no operator acknowledgement → second alert to every operator
+  policeAutoConnectSec: 120, // still none → nearest police station connected automatically
+  autoPoliceOnNoResponder: true, // all search stages exhausted and no operator → police
+  tripGraceMin: 10, // Track my travel: minutes after the expected arrival before we check on her
+  tripCheckSec: 120, // she has this long to answer "Are you OK?" before SOS starts automatically
+  evidenceRetentionDays: 30, // SOS audio/video recordings are deleted after this (unless held)
 });
 
 // Emergency numbers. `verified: true` only where an official source was
 // checked for this build; everything else must be confirmed with local
 // authorities before any pilot. The UI always shows the verification state.
 export const COUNTRIES = {
-  IN: { name: 'India', emergency: '112', emergencyLabel: 'Police · Ambulance · Fire', verified: true, extra: [{ label: 'Women helpline · 24x7', number: '181' }, { label: 'Women police helpline', number: '1091' }, { label: 'Ambulance · medical help', number: '108', medical: true }], locale: 'hi' },
+  IN: { name: 'India', emergency: '112', emergencyLabel: 'Police · Ambulance · Fire', verified: true, extra: [{ label: 'Women helpline · 24x7', number: '181' }, { label: 'Women police helpline', number: '1091' }, { label: 'Ambulance · medical help', number: '108', medical: true }], chat: [{ label: 'Shakti WhatsApp helpline (AP Police) · 24x7', whatsapp: '917993485111', region: 'Andhra Pradesh' }], locale: 'hi' },
   US: { name: 'United States', emergency: '911', verified: false, extra: [{ label: 'Domestic violence hotline', number: '18007997233' }], locale: 'en' },
   GB: { name: 'United Kingdom', emergency: '999', verified: false, extra: [{ label: 'Emergency (EU/intl)', number: '112' }], locale: 'en' },
   EU: { name: 'European Union', emergency: '112', verified: false, extra: [], locale: 'en' },
@@ -64,9 +70,12 @@ export function validateConfig(patch, current = DEFAULT_CONFIG) {
   for (const k of ['stageTimeoutsSec', 'highSeverityStageTimeoutsSec']) {
     if (!isIntArr(next[k], 3) || next[k].some((n) => n < 5 || n > 900)) errors.push(`${k} must be 3 integers between 5 and 900`);
   }
-  for (const k of ['targetResponders', 'maxResponders', 'acceptToEnRouteStallSec', 'enRouteStallMinSec', 'locationStaleSec', 'lowAccuracyM', 'volunteerLocationMaxAgeMin', 'sosPerHourLimit']) {
+  for (const k of ['targetResponders', 'maxResponders', 'acceptToEnRouteStallSec', 'enRouteStallMinSec', 'locationStaleSec', 'lowAccuracyM', 'volunteerLocationMaxAgeMin', 'sosPerHourLimit', 'operatorAckSec', 'policeAutoConnectSec', 'tripGraceMin', 'tripCheckSec', 'evidenceRetentionDays']) {
     if (!Number.isInteger(next[k]) || next[k] < 1) errors.push(`${k} must be a positive integer`);
   }
+  if (typeof next.autoPoliceOnNoResponder !== 'boolean') errors.push('autoPoliceOnNoResponder must be true or false');
+  if (next.policeAutoConnectSec <= next.operatorAckSec) errors.push('policeAutoConnectSec must be longer than operatorAckSec');
+  if (next.policeAutoConnectSec > 900) errors.push('policeAutoConnectSec may not exceed 900 (15 minutes)');
   if (next.targetResponders > next.maxResponders) errors.push('targetResponders cannot exceed maxResponders');
   if (!COUNTRIES[next.countryCode]) errors.push('unknown countryCode');
   const allowed = new Set(Object.keys(DEFAULT_CONFIG));

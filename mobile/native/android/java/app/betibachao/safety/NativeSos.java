@@ -103,12 +103,10 @@ public final class NativeSos {
     private static void finish(Context app, String trigger, Location loc) {
         // 1) SMS from her own phone (works without internet).
         int sent = 0;
+        final List<String> smsNumbers = new ArrayList<>();
         if (Store.getBool(app, "autoSms", true)) {
-            List<String> numbers = new ArrayList<>();
-            try {
-                JSONArray cs = new JSONArray(Store.get(app, "contacts") == null ? "[]" : Store.get(app, "contacts"));
-                for (int i = 0; i < cs.length(); i++) numbers.add(cs.getJSONObject(i).optString("phone"));
-            } catch (Exception ignored) {}
+            List<String> numbers = Places.numbersFor(app, loc); // the contacts for the place she is at
+            smsNumbers.addAll(numbers);
             if (Store.getBool(app, "sms112", false)) numbers.add("112");
             String link = loc == null ? "(location pending)" : String.format(Locale.US, "https://maps.google.com/?q=%.6f,%.6f", loc.getLatitude(), loc.getLongitude());
             String acc = loc == null ? "?" : String.valueOf(Math.round(loc.getAccuracy()));
@@ -122,11 +120,13 @@ public final class NativeSos {
             body.put("severity", "HIGH");
             body.put("trigger", trigger);
             body.put("deviceSmsSent", sent > 0);
+            if (sent > 0) body.put("deviceSmsNumbers", new JSONArray(smsNumbers));
             if (loc != null) body.put("location", Api.locationJson(loc));
             Api.post(app, "/incidents", body, (status, res) -> {
                 String incidentId = null;
                 try { if (res != null) incidentId = res.getJSONObject("incident").getString("id"); } catch (Exception ignored) {}
                 String url = incidentId != null ? "#/incident/" + incidentId : "#/home";
+                if (incidentId != null && status >= 200 && status < 300) { final String iid = incidentId; MAIN.post(() -> EvidenceRecorder.record(app, iid, 15)); }
                 Store.put(app, "launch_url", url);
                 NotificationCompat.Builder b = new NotificationCompat.Builder(app, Notify.CH_SOS)
                         .setSmallIcon(R.drawable.ic_sos)

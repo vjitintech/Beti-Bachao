@@ -5,7 +5,7 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xx
 export class ApiError extends Error { constructor(status, code, message) { super(message || code); this.status = status; this.code = code; } }
 
 // ------------------------------------------------------------------ server
-import { isNative, native, serverUrl } from './native.js?v=mw7oe4ed';
+import { isNative, native, serverUrl } from './native.js?v=mw7qzel4';
 
 class ServerApi {
   constructor() { this.mode = isNative ? 'app' : 'server'; this.listeners = new Set(); this.es = null; this.token = null; }
@@ -58,6 +58,27 @@ class ServerApi {
   deleteAccount() { return this.req('DELETE', '/me'); }
 
   createIncident(b) { return this.req('POST', '/incidents', b); }
+  getPlaces() { return this.req('GET', '/me/places'); }
+  savePlaces(places) { return this.req('PUT', '/me/places', { places }); }
+  myDashboard() { return this.req('GET', '/me/dashboard'); }
+  nearby(loc) { return this.req('GET', `/help/nearby${loc ? `?lat=${loc.lat}&lng=${loc.lng}` : ''}`); }
+  impact() { return this.req('GET', '/impact'); }
+  myTrip() { return this.req('GET', '/me/trip'); }
+  startTrip(b) { return this.req('POST', '/me/trip', b); }
+  endTrip(b) { return this.req('POST', '/me/trip/end', b); }
+  extendTrip(b) { return this.req('POST', '/me/trip/extend', b); }
+  postLocation(loc) { return this.req('POST', '/me/location', loc); }
+  uploadEvidence(id, b) { return this.req('POST', `/incidents/${id}/evidence`, b); }
+  async evidenceBlob(id, eid) {
+    const res = await fetch(`${this.base()}/incidents/${id}/evidence/${eid}`, { credentials: isNative ? 'omit' : 'same-origin', headers: this.token ? { Authorization: `Bearer ${this.token}` } : {} });
+    if (!res.ok) throw new ApiError(res.status, 'EVIDENCE', 'Could not load recording');
+    return res.blob();
+  }
+  opAck(id) { return this.req('POST', `/operator/incidents/${id}/ack`); }
+  adminDashboard(days) { return this.req('GET', `/admin/dashboard?days=${days || 30}`); }
+  stations() { return this.req('GET', '/admin/police-stations'); }
+  importStations(b) { return this.req('POST', '/admin/police-stations', b); }
+  deleteStation(id) { return this.req('DELETE', `/admin/police-stations/${id}`); }
   getIncident(id) { return this.req('GET', `/incidents/${id}`); }
   addLocation(id, loc) { return this.req('POST', `/incidents/${id}/locations`, loc); }
   cancel(id, b) { return this.req('POST', `/incidents/${id}/cancel`, b); }

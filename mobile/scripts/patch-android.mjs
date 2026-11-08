@@ -32,7 +32,7 @@ for (const d of fs.readdirSync(path.join(main, 'res'))) {
 const manPath = path.join(main, 'AndroidManifest.xml');
 let man = fs.readFileSync(manPath, 'utf8');
 const perms = [
-  'ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION', 'ACCESS_BACKGROUND_LOCATION', 'FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_LOCATION',
+  'ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION', 'ACCESS_BACKGROUND_LOCATION', 'FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_LOCATION', 'FOREGROUND_SERVICE_MICROPHONE',
   'POST_NOTIFICATIONS', 'SEND_SMS', 'VIBRATE', 'RECEIVE_BOOT_COMPLETED', 'USE_FULL_SCREEN_INTENT', 'WAKE_LOCK',
   'RECORD_AUDIO', 'CAMERA', 'MODIFY_AUDIO_SETTINGS',
 ].filter((p) => !man.includes(`android.permission.${p}"`)).map((p) => `    <uses-permission android:name="android.permission.${p}" />`).join('\n');
@@ -41,7 +41,7 @@ const features = ['android.hardware.telephony', 'android.hardware.location.gps',
 must(man, '<application', 'AndroidManifest.xml');
 man = man.replace('<application', `${perms}\n${features}\n\n    <application`);
 const components = `
-        <service android:name=".SafetyService" android:exported="false" android:foregroundServiceType="location" />
+        <service android:name=".SafetyService" android:exported="false" android:foregroundServiceType="location|microphone" />
         <receiver android:name=".SosReceiver" android:exported="false" />
         <receiver android:name=".BootReceiver" android:exported="true">
             <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>

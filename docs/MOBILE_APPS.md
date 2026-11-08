@@ -16,6 +16,11 @@
 | Location while the screen is locked | Foreground service, every 5 s during SOS, 10 s while responding, 2 min on duty | Background location updates: continuous during SOS/responding, significant-change while on duty |
 | Start SOS without opening the app | Quick Settings tile, home-screen widget, power button ×5, shake ×3, lock-screen notification button | "Hey Siri, Beti Bachao SOS", Shortcuts app, Action Button (iPhone 15 Pro+), Lock Screen / Control Center shortcut |
 | Volunteer SOS alerts | Loud alarm channel, full-screen over the lock screen (when allowed), via Firebase (FCM) | Time-sensitive notification (breaks through Focus), via Apple Push (APNs) |
+| Voice SOS ("bachao", "help", "kapadandi") | ✅ on-device recognizer in the background service (screen locked) | While the app is open; locked → "Hey Siri, Beti Bachao SOS" |
+| Blink SOS (3 slow blinks) | Blink SOS screen open | Blink SOS screen open |
+| 15 s evidence audio | Recorded and uploaded automatically, also for lock-screen/power-button SOS | Recorded when the SOS starts in the app |
+| Contacts by place | Picked on the phone from her saved places | Server SMS gateway |
+| Screen reader / spoken status | TalkBack + text-to-speech | VoiceOver + speech |
 | 5-second cancel window | Notification with CANCEL / SEND NOW | In-app countdown |
 | Login token | Android Keystore (AES-GCM) | Keychain (this device only) |
 | Survives reboot | Yes (boot receiver restores protection/duty) | iOS relaunches the app for location events |

@@ -39,7 +39,8 @@ import java.util.ArrayDeque;
  *   - streams GPS to the server even with the screen locked
  *   - shows a persistent lock-screen notification with an SOS button
  *   - detects 3 firm shakes and 5 power-button presses → SOS (5 s cancel window)
- * Modes: armed | duty | assigned | sos
+ *   - listens for her SOS word (Voice SOS) when enabled
+ * Modes: armed | trip | duty | assigned | sos
  */
 public class SafetyService extends Service implements SensorEventListener {
     static final int NOTIF_ID = 7000;
@@ -77,16 +78,22 @@ public class SafetyService extends Service implements SensorEventListener {
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && intent.getStringExtra("mode") != null) mode = intent.getStringExtra("mode");
         boolean hasLoc = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        boolean hasMic = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
+        boolean wantMic = hasMic && "user".equals(Store.get(this, "role")) && (Store.getBool(this, "voice", false) || Store.getBool(this, "autoEvidence", true));
         int type = 0;
         if (Build.VERSION.SDK_INT >= 29 && hasLoc) type = ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
+        if (Build.VERSION.SDK_INT >= 30 && wantMic) type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
         try {
             ServiceCompat.startForeground(this, NOTIF_ID, buildNotification(), type);
         } catch (Exception e) {
-            stopSelf();
-            return START_NOT_STICKY;
+            // Android 14 refuses the microphone type when started from the background: keep location only.
+            try { ServiceCompat.startForeground(this, NOTIF_ID, buildNotification(), Build.VERSION.SDK_INT >= 29 && hasLoc ? ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION : 0); }
+            catch (Exception e2) { stopSelf(); return START_NOT_STICKY; }
         }
         startLocation(hasLoc);
         startTriggers();
+        boolean woman = "armed".equals(mode) || "trip".equals(mode);
+        if (woman && wantMic && Store.getBool(this, "voice", false)) VoiceGuard.start(this); else VoiceGuard.stop();
         return START_STICKY;
     }
 
@@ -95,8 +102,9 @@ public class SafetyService extends Service implements SensorEventListener {
         switch (mode) {
             case "sos": title = "SOS active — sharing your live location"; text = "Volunteers and operators can see where you are. Open the app when you are safe."; break;
             case "assigned": title = "Responding to an SOS"; text = "Sharing your location with her and the team."; break;
+            case "trip": title = "Track my travel — sharing your trip"; text = "Your contacts can follow you. SOS starts automatically if you don't arrive."; break;
             case "duty": title = "On duty — ready for SOS alerts"; text = "Your location updates every 2 minutes."; break;
-            default: title = "Beti Bachao is protecting you"; text = "Press SOS, shake 3 times, or press power 5 times.";
+            default: title = "Beti Bachao is protecting you"; text = Store.getBool(this, "voice", false) ? "Press SOS, shake 3 times, press power 5 times or say your SOS word." : "Press SOS, shake 3 times, or press power 5 times.";
         }
         NotificationCompat.Builder b = new NotificationCompat.Builder(this, Notify.CH_STATUS)
                 .setSmallIcon(R.drawable.ic_sos)
@@ -105,7 +113,7 @@ public class SafetyService extends Service implements SensorEventListener {
                 .setOngoing(true)
                 .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
                 .setContentIntent(Notify.openApp(this, null, 31));
-        if (!"sos".equals(mode) && "armed".equals(mode)) {
+        if ("armed".equals(mode) || "trip".equals(mode)) {
             b.addAction(0, "🆘 SOS", Notify.broadcast(this, SosReceiver.ACTION_TRIGGER, "lockscreen", 32));
         }
         return b.build();
@@ -116,7 +124,7 @@ public class SafetyService extends Service implements SensorEventListener {
         if (callback != null) fused.removeLocationUpdates(callback);
         callback = null;
         if (!hasLoc || "armed".equals(mode)) return; // armed mode reads location only at SOS time
-        long interval = "sos".equals(mode) ? 5000 : "assigned".equals(mode) ? 10000 : 120000;
+        long interval = "sos".equals(mode) ? 5000 : "assigned".equals(mode) ? 10000 : "trip".equals(mode) ? 30000 : 120000;
         LocationRequest req = new LocationRequest.Builder("duty".equals(mode) ? Priority.PRIORITY_BALANCED_POWER_ACCURACY : Priority.PRIORITY_HIGH_ACCURACY, interval)
                 .setMinUpdateIntervalMillis(Math.max(3000, interval / 2))
                 .build();
@@ -130,15 +138,15 @@ public class SafetyService extends Service implements SensorEventListener {
     }
 
     private void startTriggers() {
-        boolean womanArmed = "armed".equals(mode) || "sos".equals(mode);
+        boolean womanArmed = "armed".equals(mode) || "trip".equals(mode);
         if (sensors != null) {
             sensors.unregisterListener(this);
-            if (womanArmed && "armed".equals(mode) && Store.getBool(this, "shake", false)) {
+            if (womanArmed && Store.getBool(this, "shake", false)) {
                 Sensor acc = sensors.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
                 if (acc != null) sensors.registerListener(this, acc, SensorManager.SENSOR_DELAY_GAME);
             }
         }
-        if (screenReceiver == null && "armed".equals(mode) && Store.getBool(this, "powerButton", true)) {
+        if (screenReceiver == null && womanArmed && Store.getBool(this, "powerButton", true)) {
             screenReceiver = new BroadcastReceiver() {
                 @Override public void onReceive(Context c, Intent i) { onPowerPress(); }
             };
@@ -146,7 +154,7 @@ public class SafetyService extends Service implements SensorEventListener {
             f.addAction(Intent.ACTION_SCREEN_ON);
             f.addAction(Intent.ACTION_SCREEN_OFF);
             ContextCompat.registerReceiver(this, screenReceiver, f, ContextCompat.RECEIVER_NOT_EXPORTED);
-        } else if (screenReceiver != null && !"armed".equals(mode)) {
+        } else if (screenReceiver != null && !womanArmed) {
             unregisterReceiver(screenReceiver);
             screenReceiver = null;
         }
@@ -178,6 +186,7 @@ public class SafetyService extends Service implements SensorEventListener {
     public void onDestroy() {
         if (callback != null) fused.removeLocationUpdates(callback);
         if (sensors != null) sensors.unregisterListener(this);
+        VoiceGuard.stop();
         if (screenReceiver != null) { try { unregisterReceiver(screenReceiver); } catch (Exception ignored) {} }
         super.onDestroy();
     }

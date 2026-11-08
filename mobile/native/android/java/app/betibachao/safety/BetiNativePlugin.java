@@ -34,7 +34,8 @@ import java.util.List;
         permissions = {
                 @Permission(alias = "location", strings = { Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION }),
                 @Permission(alias = "sms", strings = { Manifest.permission.SEND_SMS }),
-                @Permission(alias = "notifications", strings = { "android.permission.POST_NOTIFICATIONS" })
+                @Permission(alias = "notifications", strings = { "android.permission.POST_NOTIFICATIONS" }),
+                @Permission(alias = "microphone", strings = { Manifest.permission.RECORD_AUDIO })
         }
 )
 public class BetiNativePlugin extends Plugin {
@@ -59,7 +60,10 @@ public class BetiNativePlugin extends Plugin {
         if (call.hasOption("serverUrl")) Store.put(c, "serverUrl", call.getString("serverUrl"));
         if (call.hasOption("token")) Store.putSecret(c, "token", call.getString("token"));
         if (call.hasOption("contacts")) { JSArray a = call.getArray("contacts"); Store.put(c, "contacts", a == null ? "[]" : a.toString()); }
-        for (String k : new String[]{ "sms112", "autoSms", "shake", "powerButton", "armed" }) {
+        if (call.hasOption("places")) { JSArray a = call.getArray("places"); Store.put(c, "places", a == null ? "[]" : a.toString()); }
+        if (call.hasOption("keywords")) { JSArray a = call.getArray("keywords"); Store.put(c, "keywords", a == null ? "[]" : a.toString()); }
+        if (call.hasOption("lang")) Store.put(c, "lang", call.getString("lang"));
+        for (String k : new String[]{ "sms112", "autoSms", "shake", "powerButton", "armed", "voice", "autoEvidence" }) {
             if (call.hasOption(k)) Store.putBool(c, k, Boolean.TRUE.equals(call.getBoolean(k)));
         }
         if (call.hasOption("role")) Store.put(c, "role", call.getString("role"));
@@ -116,6 +120,7 @@ public class BetiNativePlugin extends Plugin {
 
     @PluginMethod
     public void requestPermissions(PluginCall call) {
+        if ("microphone".equals(call.getString("which"))) { requestPermissionForAlias("microphone", call, "allPermissionsDone"); return; }
         requestAllPermissions(call, "allPermissionsDone");
     }
 
@@ -137,6 +142,7 @@ public class BetiNativePlugin extends Plugin {
         r.put("location", getPermissionState("location").toString());
         r.put("locationAllTheTime", Build.VERSION.SDK_INT < 29 || ContextCompat.checkSelfPermission(c, Manifest.permission.ACCESS_BACKGROUND_LOCATION) == PackageManager.PERMISSION_GRANTED ? "granted" : "not granted");
         r.put("sms", getPermissionState("sms").toString());
+        r.put("microphone (voice SOS, evidence)", getPermissionState("microphone").toString());
         r.put("notifications", Build.VERSION.SDK_INT < 33 ? "granted" : getPermissionState("notifications").toString());
         NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
         r.put("fullScreenAlerts", Build.VERSION.SDK_INT < 34 || nm.canUseFullScreenIntent() ? "allowed" : "not allowed");
@@ -196,5 +202,77 @@ public class BetiNativePlugin extends Plugin {
             c.startActivity(f);
         }
         call.resolve();
+    }
+
+    // ---------------- accessibility & voice ----------------
+    private android.speech.tts.TextToSpeech tts;
+    private boolean ttsReady = false;
+
+    @PluginMethod
+    public void speak(PluginCall call) {
+        final String text = call.getString("text", "");
+        final String lang = call.getString("lang", "en-IN");
+        if (tts == null) {
+            tts = new android.speech.tts.TextToSpeech(getContext(), status -> { ttsReady = status == android.speech.tts.TextToSpeech.SUCCESS; if (ttsReady) say(text, lang); });
+        } else if (ttsReady) say(text, lang);
+        call.resolve();
+    }
+
+    private void say(String text, String lang) {
+        try { tts.setLanguage(java.util.Locale.forLanguageTag(lang)); } catch (Exception ignored) {}
+        tts.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "bb");
+    }
+
+    @PluginMethod
+    public void announce(PluginCall call) {
+        final String text = call.getString("text", "");
+        getActivity().runOnUiThread(() -> { try { getBridge().getWebView().announceForAccessibility(text); } catch (Exception ignored) {} });
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void screenReader(PluginCall call) {
+        android.view.accessibility.AccessibilityManager am = (android.view.accessibility.AccessibilityManager) getContext().getSystemService(Context.ACCESSIBILITY_SERVICE);
+        JSObject r = new JSObject();
+        r.put("on", am != null && am.isEnabled() && am.isTouchExplorationEnabled());
+        call.resolve(r);
+    }
+
+    /** One spoken phrase (voice commands in the app). */
+    @PluginMethod
+    public void listenOnce(PluginCall call) {
+        if (getPermissionState("microphone") != PermissionState.GRANTED) { requestPermissionForAlias("microphone", call, "micForListenDone"); return; }
+        doListen(call);
+    }
+
+    @PermissionCallback
+    private void micForListenDone(PluginCall call) {
+        if (getPermissionState("microphone") == PermissionState.GRANTED) doListen(call);
+        else { JSObject r = new JSObject(); r.put("text", ""); call.resolve(r); }
+    }
+
+    private void doListen(PluginCall call) {
+        VoiceGuard.pause(getContext());
+        getActivity().runOnUiThread(() -> {
+            final android.speech.SpeechRecognizer sr = android.speech.SpeechRecognizer.createSpeechRecognizer(getContext());
+            final boolean[] done = { false };
+            final java.util.function.Consumer<String> finish = (t) -> { if (done[0]) return; done[0] = true; try { sr.destroy(); } catch (Exception ignored) {} JSObject r = new JSObject(); r.put("text", t == null ? "" : t); call.resolve(r); };
+            sr.setRecognitionListener(new android.speech.RecognitionListener() {
+                @Override public void onResults(android.os.Bundle b) { java.util.ArrayList<String> l = b.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION); finish.accept(l == null || l.isEmpty() ? "" : l.get(0)); }
+                @Override public void onError(int e) { finish.accept(""); }
+                @Override public void onReadyForSpeech(android.os.Bundle p) {}
+                @Override public void onBeginningOfSpeech() {}
+                @Override public void onRmsChanged(float v) {}
+                @Override public void onBufferReceived(byte[] b) {}
+                @Override public void onEndOfSpeech() {}
+                @Override public void onPartialResults(android.os.Bundle b) {}
+                @Override public void onEvent(int t, android.os.Bundle b) {}
+            });
+            Intent i = new Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+            i.putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+            i.putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, call.getString("lang", "en-IN"));
+            sr.startListening(i);
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> finish.accept(""), call.getInt("timeoutMs", 7000) + 3000);
+        });
     }
 }

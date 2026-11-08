@@ -6,6 +6,22 @@ Each one is **off until its environment variables are set**, and the app works w
 `DATABASE_URL=postgres://user:password@host:5432/dbname` (add `?sslmode=require` for managed databases; this is the default for remote hosts).
 Every change is also written to PostgreSQL. On start, the latest data is loaded from it, so accounts and incidents survive redeploys on hosts that wipe the disk. Works with Neon, Supabase, Render Postgres, AWS RDS and similar. The server creates its own table (`bb_state`). Without it, data lives in `DATA_FILE` on a persistent disk.
 
+## Police auto-connect: station list + call gateway
+- **Station list**: Admin → Police stations → paste CSV `name,district,lat,lng,phone,phone2`.
+- **Automatic call** that rings the nearest station and connects it to her phone:
+  - `VOICE_PROVIDER=exotel` with `EXOTEL_SID`, `EXOTEL_API_KEY`, `EXOTEL_API_TOKEN`, `EXOTEL_CALLER_ID` (your ExoPhone) and `EXOTEL_SUBDOMAIN` (`api.in.exotel.com` for the Mumbai cluster);
+  - or `VOICE_PROVIDER=twilio` with `TWILIO_VOICE_FROM`.
+- The SMS to the station uses the `POLICE` template below.
+- See [AUTONOMY.md](AUTONOMY.md) for when this fires.
+
+## Public address
+`PUBLIC_URL=https://your-server`: used in the "Track my travel" links texted to her contacts. If it isn't set, the address of the last request is used.
+
+## SOS evidence recordings
+- Stored in `MEDIA_DIR` (default: an `evidence` folder next to the data file).
+- AES-256-GCM encrypted with `MEDIA_KEY` (64 hex). Without `MEDIA_KEY`, a key is generated into `.media-key` in that folder; **back it up**.
+- Deleted after `evidenceRetentionDays` (Admin → Policy).
+
 ## SMS gateway (India: MSG91 with DLT)
 Used for:
 - SOS SMS to trusted contacts when the phone couldn't send them (iPhone, no SIM, offline);
@@ -19,6 +35,9 @@ MSG91_TEMPLATE_SOS=...      # "{#var#} needs help. Live location: {#var#} - Beti
 MSG91_TEMPLATE_ALERT=...    # "SOS {#var#} km from you. Open Beti Bachao to respond."
 MSG91_TEMPLATE_OTP=...      # "Your Beti Bachao code is {#var#}. Valid 10 minutes."
 MSG91_TEMPLATE_VERIFY=...   # "Your volunteer verification call is at {#var#}. Keep your Aadhaar ready."
+MSG91_TEMPLATE_POLICE=...   # "SOS - Beti Bachao: {#var#} ({#var#}) needs police help near your station. Live location: {#var#} Ref {#var#}"
+MSG91_TEMPLATE_TRIP_START=... # "{#var#} is travelling to {#var#} (vehicle {#var#}). Follow her live: {#var#} - Beti Bachao"
+MSG91_TEMPLATE_TRIP_SAFE=...  # "{#var#} reached {#var#} safely. - Beti Bachao"
 ```
 India requires a DLT registration (sender ID + templates) with an operator portal (Jio, Airtel, Vi, BSNL) before any SMS is delivered. Outside India: `SMS_PROVIDER=twilio`, `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`.
 

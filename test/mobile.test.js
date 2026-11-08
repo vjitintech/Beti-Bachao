@@ -50,7 +50,7 @@ test('setup: server with FCM, MSG91, OSRM, Colibri and backups configured', asyn
   S = { app, file: S.file, origin: `http://127.0.0.1:${app.server.address().port}`, base: `http://127.0.0.1:${app.server.address().port}/api/v1` };
   servers.push(S);
   const st = await (client(S.base)).call('GET', '/public-config');
-  assert.deepEqual(st.body.features, { appPush: true, iosPush: true, sms: true, smsReset: true, roadEta: true, ai: true });
+  assert.deepEqual(st.body.features, { appPush: true, iosPush: true, policeCall: false, sms: true, smsReset: true, roadEta: true, ai: true });
   W = await world(S.base);
 });
 

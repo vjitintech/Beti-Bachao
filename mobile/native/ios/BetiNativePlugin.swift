@@ -5,6 +5,8 @@ import MessageUI
 import Security
 import UIKit
 import UserNotifications
+import AVFoundation
+import Speech
 
 /// JavaScript bridge "BetiNative" for iPhone/iPad (see public/js/native.js).
 /// iOS never lets apps send SMS or place calls by themselves, so sendSos opens
@@ -26,7 +28,14 @@ public class BetiNativePlugin: CAPPlugin, CAPBridgedPlugin, MFMessageComposeView
         CAPPluginMethod(name: "openSystemSettings", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "canUseFullScreenAlerts", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "getPushToken", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "speak", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "announce", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "screenReader", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "listenOnce", returnType: CAPPluginReturnPromise),
     ]
+    private let synth = AVSpeechSynthesizer()
+    private var audioEngine: AVAudioEngine?
+    private var speechTask: SFSpeechRecognitionTask?
     private var smsCall: CAPPluginCall?
 
     @objc func secureGet(_ call: CAPPluginCall) {
@@ -43,6 +52,7 @@ public class BetiNativePlugin: CAPPlugin, CAPBridgedPlugin, MFMessageComposeView
         if let s = call.getString("serverUrl") { d.set(s, forKey: "bb.serverUrl") }
         if call.options.keys.contains("token") { Keychain.set("token", call.getString("token")) }
         if let c = call.getArray("contacts") { d.set(c, forKey: "bb.contacts") }
+        if let p = call.getArray("places") { d.set(p, forKey: "bb.places") }
         for k in ["sms112", "autoSms", "armed"] { if let b = call.getBool(k) { d.set(b, forKey: "bb.\(k)") } }
         if call.options.keys.contains("token") && call.getString("token") == nil { SafetyLocation.shared.stop() }
         call.resolve()
@@ -130,6 +140,66 @@ public class BetiNativePlugin: CAPPlugin, CAPBridgedPlugin, MFMessageComposeView
     @objc func canUseFullScreenAlerts(_ call: CAPPluginCall) { call.resolve(["allowed": true]) }
 
     /// iOS push tokens come from @capacitor/push-notifications (APNs); see native.js.
+    // ---------------- accessibility & voice ----------------
+    @objc func speak(_ call: CAPPluginCall) {
+        let u = AVSpeechUtterance(string: call.getString("text") ?? "")
+        u.voice = AVSpeechSynthesisVoice(language: call.getString("lang") ?? "en-IN")
+        DispatchQueue.main.async { self.synth.stopSpeaking(at: .immediate); self.synth.speak(u) }
+        call.resolve()
+    }
+
+    @objc func announce(_ call: CAPPluginCall) {
+        let text = call.getString("text") ?? ""
+        DispatchQueue.main.async { UIAccessibility.post(notification: .announcement, argument: text) }
+        call.resolve()
+    }
+
+    @objc func screenReader(_ call: CAPPluginCall) {
+        DispatchQueue.main.async { call.resolve(["on": UIAccessibility.isVoiceOverRunning]) }
+    }
+
+    /// One spoken phrase, recognised on the iPhone where supported (voice commands, Voice SOS while open).
+    @objc func listenOnce(_ call: CAPPluginCall) {
+        let lang = call.getString("lang") ?? "en-IN"
+        let timeout = Double(call.getInt("timeoutMs") ?? 7000) / 1000
+        SFSpeechRecognizer.requestAuthorization { status in
+            guard status == .authorized, let rec = SFSpeechRecognizer(locale: Locale(identifier: lang)) ?? SFSpeechRecognizer(), rec.isAvailable else { call.resolve(["text": ""]); return }
+            AVAudioSession.sharedInstance().requestRecordPermission { ok in
+                guard ok else { call.resolve(["text": ""]); return }
+                DispatchQueue.main.async { self.recognize(rec, timeout: timeout, call: call) }
+            }
+        }
+    }
+
+    private func recognize(_ rec: SFSpeechRecognizer, timeout: Double, call: CAPPluginCall) {
+        speechTask?.cancel(); audioEngine?.stop()
+        let engine = AVAudioEngine(); audioEngine = engine
+        let req = SFSpeechAudioBufferRecognitionRequest()
+        req.shouldReportPartialResults = false
+        if #available(iOS 13.0, *), rec.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
+        var finished = false
+        let finish: (String) -> Void = { text in
+            if finished { return }; finished = true
+            engine.stop(); engine.inputNode.removeTap(onBus: 0); req.endAudio()
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            call.resolve(["text": text])
+        }
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playAndRecord, mode: .measurement, options: [.duckOthers, .defaultToSpeaker])
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
+            let node = engine.inputNode
+            node.installTap(onBus: 0, bufferSize: 1024, format: node.outputFormat(forBus: 0)) { buf, _ in req.append(buf) }
+            engine.prepare(); try engine.start()
+        } catch { finish(""); return }
+        speechTask = rec.recognitionTask(with: req) { result, error in
+            if let r = result, r.isFinal { DispatchQueue.main.async { finish(r.bestTranscription.formattedString) } }
+            else if error != nil { DispatchQueue.main.async { finish(result?.bestTranscription.formattedString ?? "") } }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { if !finished { req.endAudio() } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + timeout + 3) { finish("") }
+    }
+
     @objc func getPushToken(_ call: CAPPluginCall) { call.resolve(["token": NSNull(), "reason": "use-push-notifications-plugin"]) }
 }
 
@@ -177,7 +247,7 @@ final class SafetyLocation: NSObject, CLLocationManagerDelegate {
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let l = locations.last else { return }
-        let minGap: TimeInterval = mode == "sos" ? 5 : mode == "assigned" ? 10 : 110
+        let minGap: TimeInterval = mode == "sos" ? 5 : mode == "assigned" ? 10 : mode == "trip" ? 30 : 110
         if Date().timeIntervalSince(lastPost) < minGap { return }
         lastPost = Date()
         var body: [String: Any] = ["lat": l.coordinate.latitude, "lng": l.coordinate.longitude, "accuracyM": Int(l.horizontalAccuracy.rounded()),

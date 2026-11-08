@@ -1,11 +1,14 @@
-import { createApi, uuid } from './api.js?v=mw7oe4ed';
-import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mw7oe4ed';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mw7oe4ed';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mw7oe4ed';
-import { TRAINING_MODULES } from '../core/engine.js?v=mw7oe4ed';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mw7oe4ed';
+import { createApi, uuid } from './api.js?v=mw7qzel4';
+import { t, setLang, detectLang, LANGS, lang } from './i18n.js?v=mw7qzel4';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mw7qzel4';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mw7qzel4';
+import { TRAINING_MODULES } from '../core/engine.js?v=mw7qzel4';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mw7qzel4';
+import { initProtect } from './protect-ui.js?v=mw7qzel4';
+import { a11y, announce, speakStatus } from './a11y.js?v=mw7qzel4';
+let P = null; // autonomous-protection screens (protect-ui.js), set up in boot()
 
-const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'policy', volSel: null };
+const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'impact', volSel: null };
 const app = () => $('#app');
 
 // ------------------------------------------------------------------ helpers
@@ -109,7 +112,7 @@ function emergencyBar() {
 function shell(content, { nav = true } = {}) {
   const role = st.me?.role;
   const links = {
-    user: [['#/home', '🛡️', t('home')], ['#/tools', '🧰', t('tools')], ['#/settings', '⚙️', t('settings')]],
+    user: [['#/home', '🛡️', t('home')], ['#/trip', '🚕', 'Travel'], ['#/dashboard', '📊', 'My safety'], ['#/settings', '⚙️', t('settings')]],
     volunteer: [['#/volunteer', '🤝', 'Volunteer'], ['#/settings', '⚙️', t('settings')]],
     operator: [['#/ops', '🛰️', 'Operations'], ['#/settings', '⚙️', t('settings')]],
     admin: [['#/admin', '🗂️', 'Admin'], ['#/ops', '🛰️', 'Operations'], ['#/settings', '⚙️', t('settings')]],
@@ -143,11 +146,12 @@ function viewLanding() {
         <a href="#/login?as=volunteer" class="btn btn-secondary btn-lg">${esc(t('want_volunteer'))}</a>
       </div>
     </section>
+    ${P?.landingImpact() || ''}
     ${emergencyBar()}
     <section class="cards-3">
-      <div class="card"><h3>🚨 SOS that doesn't stop at "sent"</h3><p>Hold, shake, voice keyword, silent or safe-walk timer. Staged 10 → 20 → 30 km search for verified volunteers, backup responders, and escalation if anything stalls.</p></div>
-      <div class="card"><h3>🔐 Privacy by design</h3><p>Volunteers see only an approximate area until they are assigned. Every precise-location access is logged. A duress PIN looks like "cancel" but quietly escalates.</p></div>
-      <div class="card"><h3>✅ Never "safe" without you</h3><p>Arrival never closes an SOS. Only your explicit "Yes, I am safe" — or an audited operator exception — ends it.</p></div>
+      <div class="card"><h2 class="h3">🚨 SOS that doesn't stop at "sent"</h2><p>Hold, shake, voice keyword, silent or safe-walk timer. Staged 10 → 20 → 30 km search for verified volunteers, backup responders, and escalation if anything stalls.</p></div>
+      <div class="card"><h2 class="h3">🔐 Privacy by design</h2><p>Volunteers see only an approximate area until they are assigned. Every precise-location access is logged. A duress PIN looks like "cancel" but quietly escalates.</p></div>
+      <div class="card"><h2 class="h3">✅ Never "safe" without you</h2><p>Arrival never closes an SOS. Only your explicit "Yes, I am safe" — or an audited operator exception — ends it.</p></div>
     </section>
     <section class="card limits">
       <h3>Please know</h3>
@@ -261,24 +265,30 @@ async function viewHome() {
     ${pending ? `<div class="alert alert-danger" role="alert"><strong>${esc(t('offline_queued'))}</strong><div class="row">${smsButtons()}</div></div>` : ''}
     ${open ? `<a class="alert alert-danger alert-link" href="#/incident/${esc(open.id)}">🔴 Active SOS — ${esc(pretty(open.status))}. Tap to view.</a>` : ''}
     ${sw ? `<div class="alert alert-info"><strong>⏱️ ${esc(t('safe_walk'))}:</strong> <span data-live="safewalk"></span> <button class="btn btn-primary btn-sm" data-act="safewalk-checkin">${esc(t('check_in'))}</button></div>` : ''}
+    <h1 class="sr-only">Beti Bachao — SOS</h1>
     <section class="sos-wrap">
       <button class="sos-btn" id="sos-btn" aria-describedby="sos-hint" data-hold="sos">
         <svg viewBox="0 0 120 120" class="sos-ring" aria-hidden="true"><circle cx="60" cy="60" r="54" class="sos-track"/><circle cx="60" cy="60" r="54" class="sos-progress" id="sos-progress"/></svg>
         <span class="sos-label">${esc(t('sos'))}</span>
       </button>
       <p id="sos-hint" class="sos-hint">${esc(t('hold_to_send'))}</p>
-      ${contacts.list().length ? '' : `<a class="alert alert-info alert-link" href="#/settings">👥 ${esc(t('add_contacts_hint'))}</a>`}
+      ${(() => { const ac = P.activeContacts(); return ac.contacts.length ? `<a class="contacts-now" href="#/places">👥 SOS goes to ${ac.place ? `your <b>${esc(ac.place.label)}</b> contacts` : 'your contacts'}: ${ac.contacts.map((x) => esc(x.name)).join(', ')}</a>` : `<a class="alert alert-info alert-link" href="#/places">👥 ${esc(t('add_contacts_hint'))}</a>`; })()}
       <p class="hint-strong">${esc(t('call_now_hint'))}</p>
     </section>
     ${emergencyBar()}
     ${locationCard(loc)}
     <section class="tool-grid" aria-label="${esc(t('tools'))}">
+      <a class="tool" href="#/trip">🚕<span>Track my travel</span></a>
+      <a class="tool" href="#/places">📍<span>Places & contacts</span></a>
+      <a class="tool" href="#/help">🚓<span>Nearby help</span></a>
+      <a class="tool" href="#/blink">👁️<span>Blink SOS</span></a>
+      <button class="tool" data-act="voice-command">🎤<span>Voice command</span></button>
+      <a class="tool" href="#/dashboard">📊<span>My safety</span></a>
       <button class="tool" data-act="siren">📢<span>${esc(t('siren'))}</span></button>
       <button class="tool" data-act="fake-call">📱<span>${esc(t('fake_call'))}</span></button>
       <button class="tool" data-act="record-toggle">🎙️<span>${esc(recorder.recording ? t('stop') : t('record'))}</span></button>
-      <a class="tool" href="#/tools">⏱️<span>${esc(t('safe_walk'))}</span></a>
+      <a class="tool" href="#/tools">🧰<span>${esc(t('tools'))}</span></a>
       <button class="tool" data-act="share-now">📤<span>${esc(t('text_contacts'))}</span></button>
-      <a class="tool" href="#/settings">👥<span>${esc(t('contacts'))} (${contacts.list().length})</span></a>
     </section>
   `);
 }
@@ -301,10 +311,12 @@ async function syncNative() {
   if (!native.available() || !st.me) return;
   const p = prefs.get();
   await native.configure({ serverUrl: serverUrl(), token: st.api.token, role: st.me.role, armed: !!p.armed, displayName: st.me.displayName,
-    contacts: contacts.list(), sms112: !!p.sms112, autoSms: p.autoSms !== false, shake: !!p.shake, powerButton: p.powerButton !== false,
+    contacts: contacts.list(), places: store.get('places', []), sms112: !!p.sms112, autoSms: p.autoSms !== false, shake: !!p.shake, powerButton: p.powerButton !== false,
+    voice: !!p.voiceNative, keywords: VOICE_WORDS, autoEvidence: p.autoEvidence !== false, lang: lang(),
     message: sosMessage(null), emergencyNumber: country().emergency });
   if (st.me.role === 'user') { if (p.armed) native.startSafety('armed'); }
 }
+const VOICE_WORDS = ['bachao', 'bachav', 'help me', 'help', 'kapadandi', 'kaapaadunga', 'kaapaadu', 'kapadu', 'madad', 'sos', 'save me', 'rakshisi', 'kaapathunga'];
 async function syncContactsToServer() { try { await st.api.saveContacts({ contacts: contacts.list() }); } catch {} syncNative(); }
 async function registerAppPush() {
   if (!native.available()) return;
@@ -323,9 +335,11 @@ async function triggerSOS({ severity = 'HIGH', silent = false, trigger = 'button
   // while the tap/hold still counts as a user gesture. Browsers cannot send SMS silently;
   // the phone's SMS app opens ready to send. The SOS continues in the background.
   let deviceSmsSent = false;
-  if (!isRetry && prefs.get().autoSms !== false && (contacts.list().length || prefs.get().sms112)) {
-    const nums = contacts.list().map((c) => c.phone);
+  let deviceSmsNumbers = [];
+  if (!isRetry && prefs.get().autoSms !== false && (P.activeContacts().contacts.length || prefs.get().sms112)) {
     const loc0 = geo.last;
+    const nums = P.activeContacts(loc0).contacts.map((c) => c.phone); // contacts for the place she is at
+    deviceSmsNumbers = nums;
     store.set('autoSmsAt', Date.now());
     if (native.available()) {
       const r = await native.sendSos({ numbers: nums, message: sosMessage(loc0), sms112: !!prefs.get().sms112 });
@@ -342,13 +356,15 @@ async function triggerSOS({ severity = 'HIGH', silent = false, trigger = 'button
     else { try { loc = await Promise.race([geo.once(6000), new Promise((r) => setTimeout(() => r(null), 4000))]); } catch { loc = null; } }
     geo.start();
   }
-  const body = { idempotencyKey: pending.key, location: loc, severity: pending.severity, trigger: pending.trigger, silent: pending.silent, battery: await battery(), deviceSmsSent };
+  const body = { idempotencyKey: pending.key, location: loc, severity: pending.severity, trigger: pending.trigger, silent: pending.silent, battery: await battery(), deviceSmsSent, deviceSmsNumbers: deviceSmsSent ? deviceSmsNumbers : [] };
   try {
     const r = await st.api.createIncident(body);
     store.set('pendingSos', null);
     store.set('lastIncident', r.incident.id);
     if (native.available()) native.startSafety('sos'); // background GPS even with the screen locked
     st.sendingSos = false;
+    announce('SOS sent. Help is being searched for. Stay on this screen if you can.', { assertive: true });
+    if (!r.duplicate && prefs.get().autoEvidence !== false && !(silent && !recorder.supported)) P.captureEvidence(r.incident.id).catch(() => {});
     if (!silent && p.autoRecord && recorder.supported && !recorder.recording) { recorder.start('audio').catch(() => {}); }
     go(`#/incident/${r.incident.id}${silent ? '?silent=1' : ''}`);
   } catch (e) {
@@ -365,14 +381,14 @@ function scheduleSosRetry() {
 
 function startCountdown(kind, seconds = 5) {
   if (st.countdown) return;
-  const label = { shake: 'shake_detected', voice: 'voice_detected', safewalk: 'safe_walk_expired' }[kind];
+  const label = { shake: 'shake_detected', voice: 'voice_detected', safewalk: 'safe_walk_expired', blink: 'blink_detected' }[kind] || 'voice_detected';
   const el = document.createElement('div');
   el.className = 'countdown';
   el.setAttribute('role', 'alertdialog');
   el.innerHTML = `<p class="countdown-text"></p><button class="btn btn-light btn-lg" data-cd="cancel">${esc(t('cancel'))}</button><button class="btn btn-primary btn-lg" data-cd="now">SOS now</button>`;
   document.body.appendChild(el);
   let left = seconds;
-  const upd = () => { el.querySelector('.countdown-text').textContent = t(label, { s: left }); vibrate(150); };
+  const upd = () => { el.querySelector('.countdown-text').textContent = t(label, { s: left }); vibrate(150); announce(t(label, { s: left }), { assertive: true }); };
   upd();
   const iv = setInterval(() => { left -= 1; if (left <= 0) { finish(true); } else upd(); }, 1000);
   const finish = (send) => { clearInterval(iv); el.remove(); st.countdown = null; if (send) triggerSOS({ trigger: kind }); };
@@ -418,6 +434,12 @@ async function viewIncident(id, params) {
   try { tl = (await st.api.timeline(id)).items; } catch {}
   const silent = params.get('silent') === '1';
   if (v.role !== 'requester') return shell('<p>Not your incident.</p>');
+  speakStatus(v);
+  // Police auto-connected: her Android phone also texts 112 with her location (if not done at SOS time).
+  if (v.police && !v.closed && native.available() && platform === 'android' && !prefs.get().sms112 && !store.get('police112:' + v.id, false)) {
+    store.set('police112:' + v.id, true);
+    native.sendSos({ numbers: [], sms112: true, message: sosMessage(v.location || geo.last) });
+  }
   const open = !v.closed;
   const radii = st.cfg?.radiusStagesKm || [10, 20, 30];
   const stages = [0, 1, 2].map((i) => `<li class="${v.search?.stage === i ? 'on' : v.search?.stage > i ? 'done' : ''}">${esc(radii[i])} km</li>`).join('');
@@ -429,10 +451,11 @@ async function viewIncident(id, params) {
       ${open && v.search?.secondsLeft != null && (v.responders?.length || 0) < 2 ? `<p class="small"><span data-live="stage-countdown" data-deadline="${esc(v.search.deadline)}"></span></p>` : ''}
       <ol class="stage-bar" aria-label="Search stages">${stages}</ol>
     </section>
+    ${P.incidentPolice(v)}
     ${open && v.status === 'LOCATION_UNAVAILABLE' ? `<div class="alert alert-danger" role="alert"><strong>📍 We don't have your location yet, so volunteers can't be matched.</strong> Call a number below now, and allow location for this site.<div class="row"><button class="btn btn-secondary" data-act="share-location">${esc(t('allow_location'))}</button></div></div>` : ''}
     ${open ? emergencyBar() : ''}
     ${open ? pushCard('Get updates on your phone when a volunteer accepts or arrives') : ''}
-    ${v.escalations?.length ? `<div class="alert alert-warn"><strong>Escalation:</strong> ${v.escalations.map((e) => `${esc(pretty(e.type))} — <em>${esc(e.label)}</em>`).join('<br>')}<p class="small">Call one of the numbers above yourself — this app has not contacted them.</p></div>` : ''}
+    ${v.escalations?.length ? `<div class="alert alert-warn"><strong>Escalation:</strong> ${v.escalations.map((e) => `${esc(pretty(e.type))} — <em>${esc(e.label)}</em>`).join('<br>')}<p class="small">${v.police ? 'The police have been contacted (see above).' : 'Operators are alerted. In danger, call 112 yourself too.'}</p></div>` : ''}
     ${open ? `
     ${trackingCard(v.responders, v.location, v.radiusStagesKm, { title: t('responders') })}
     <section class="action-grid">
@@ -441,8 +464,11 @@ async function viewIncident(id, params) {
       <button class="btn btn-warn" data-act="report-danger">⚠️ ${esc(t('report_danger'))}</button>
       <button class="btn btn-secondary" data-act="siren">📢 ${esc(t('siren'))}</button>
       <button class="btn btn-secondary" data-act="record-toggle">🎙️ ${esc(recorder.recording ? t('stop') : t('record'))}</button>
+      <button class="btn btn-secondary" data-act="speak-status">🔊 Read status aloud</button>
+      <button class="btn btn-secondary" data-act="voice-command">🎤 Voice command</button>
       <button class="btn btn-ghost" data-act="cancel-sos">${esc(t('cancel_sos'))}</button>
     </section>
+    ${v.evidenceCount ? `<p class="small muted">🎙️ ${v.evidenceCount} evidence recording(s) sent securely to the operators.</p>` : st.evidenceRecording ? '<p class="small">🎙️ Recording 15 seconds of audio as evidence…</p>' : ''}
     ${contacts.list().length ? `<div class="card"><h2>📞 ${esc(t('contacts'))}</h2><p class="small muted">${esc(t('text_contacts'))}: <a href="${esc(smsHref(contacts.list().map((c) => c.phone), sosMessage(v.location || geo.last)))}">💬 SMS with latest location</a></p><div class="row">${contacts.list().map((c) => `<a class="btn btn-secondary" href="${telHref(c.phone)}">📞 ${esc(c.name)}</a>`).join('')}</div></div>` : ''}
     <div class="card"><div class="row">${smsButtons()}<button class="btn btn-ghost" data-act="native-share">📤 Share…</button></div></div>
     ${locationCard(v.location, { live: true })}
@@ -546,10 +572,11 @@ async function viewSettings() {
       <p class="muted">${esc(t('helplines'))}: ${[`${c.emergency}`, ...(c.extra || []).map((h) => `${h.label} ${h.number}`)].map(esc).join(' · ')}</p>
     </section>
     ${me.role === 'user' ? `
-    <section class="card"><h2>👥 ${esc(t('contacts'))}</h2>
+    <a class="alert alert-info alert-link" href="#/places">📍 <b>Places & contacts</b> — set 3–5 contacts for each place you go (home, college, office). Your SOS goes to the right people automatically wherever you are.</a>
+    <section class="card"><h2>👥 ${esc(t('contacts'))} (default list)</h2>
       <ul class="contact-list">${contacts.list().map((x, i) => `<li><span>${esc(x.name)} · ${esc(x.phone)}</span><button class="btn btn-ghost btn-sm" data-act="contact-del" data-i="${i}" aria-label="Remove ${esc(x.name)}">✕</button></li>`).join('') || '<li class="muted">No contacts yet. They get a pre-filled SMS from your phone during an SOS.</li>'}</ul>
       <form class="inline-form" data-form="contact"><label>${esc(t('name'))}<input name="name" required maxlength="40"></label><label>${esc(t('phone'))}<input name="phone" type="tel" required></label><button class="btn btn-secondary">${esc(t('add'))}</button></form>
-      <p class="muted small">Stored only on this device.</p>
+      <p class="muted small">Mark important contacts (told everywhere) in Places & contacts.</p>
     </section>
     <section class="card form"><h2>🔐 ${esc(t('your_safety_pin'))}</h2>
       <p class="muted">${me.hasPins ? 'PINs are set.' : 'Without a PIN, cancelling needs only a confirmation tap.'} The <strong>duress PIN</strong> makes the app show "cancelled" while it secretly keeps help coming — useful if someone forces you to cancel.</p>
@@ -564,6 +591,13 @@ async function viewSettings() {
       <label class="switch"><input type="checkbox" data-change="shake" ${p.shake ? 'checked' : ''}> ${esc(t('shake_trigger'))}</label>
       <label class="switch"><input type="checkbox" data-change="voice" ${p.voice ? 'checked' : ''} ${voice.supported ? '' : 'disabled'}> ${esc(t('voice_trigger'))} ${voice.supported ? '' : '<small>(not supported in this browser)</small>'}</label>
       <label class="switch"><input type="checkbox" data-change="autoRecord" ${p.autoRecord ? 'checked' : ''}> ${esc(t('auto_record'))}</label>
+      <label class="switch"><input type="checkbox" data-change="autoEvidence" ${p.autoEvidence !== false ? 'checked' : ''}> Record 15 s of audio when SOS starts and send it securely to the operators (evidence)</label>
+      ${native.available() ? `<label class="switch"><input type="checkbox" data-change="voiceNative" ${p.voiceNative ? 'checked' : ''}> <b>Voice SOS</b>: say "bachao", "help" or "kapadandi" ${platform === 'android' ? '— works with the screen locked while background protection is on' : '— works while the app is open (locked phone: "Hey Siri, Beti Bachao SOS")'}</label>` : ''}
+      <a class="btn btn-ghost btn-sm" href="#/blink">👁️ Blink SOS (3 slow blinks at the front camera)</a>
+    </section>
+    <section class="card form"><h2>♿ Accessibility</h2>
+      <label class="switch"><input type="checkbox" data-change="voiceGuide" ${p.voiceGuide ? 'checked' : ''}> <b>Spoken guidance</b> — the app speaks every update (who is coming, how far, police contacted) and repeats your SOS status every minute</label>
+      <p class="muted small">${a11y.screenReader ? 'Screen reader detected — updates are announced through TalkBack/VoiceOver.' : 'Works with TalkBack and VoiceOver.'} Hold-to-SOS works with a screen reader: double-tap and hold the SOS button, or press shake/power button/voice. Tap 🎤 Voice command and say "help", "status", "call police" or "I am safe".</p>
       <p class="muted small">Shake and voice triggers start a 5-second countdown you can cancel, then send SOS. They work while this app is open on screen; browsers pause sensors in the background.</p>
     </section>
     <section class="card"><h2>📜 ${esc(t('history'))}</h2><ul class="history">${history.map((h) => `<li><a href="#/incident/${esc(h.id)}">${esc(new Date(h.createdAt).toLocaleString())}</a> — ${esc(pretty(h.status))}</li>`).join('') || '<li class="muted">No SOS yet.</li>'}</ul></section>` : ''}
@@ -694,7 +728,7 @@ async function viewOps() {
     <div class="ops-layout">
       <section class="card ops-list"><h2>Incidents (${list.length})</h2>
         <ul>${list.map((i) => `<li><button class="alert-item status-${esc(i.color)} ${i.id === selId ? 'sel' : ''}" data-act="op-select" data-id="${esc(i.id)}"><span class="dot"></span>
-          <span>${i.duress ? '🚩 DURESS · ' : ''}${i.severity === 'HIGH' ? '🔥 ' : ''}${esc(pretty(i.status))}</span>
+          <span>${i.duress ? '🚩 DURESS · ' : ''}${!i.opAckAt && !i.police && !['CLOSED', 'USER_CANCELLED'].includes(i.status) ? '✋ NEEDS ACK · ' : ''}${i.police ? '🚓 ' : ''}${i.severity === 'HIGH' ? '🔥 ' : ''}${esc(pretty(i.status))}</span>
           <small>${esc(fmtTime(i.createdAt))} · ${i.radiusKm ? esc(i.radiusKm) + ' km' : '—'} · ${esc(i.responders)} resp · ${i.location ? `±${esc(i.location.accuracyM)}m` : 'no location'}${i.flags.includes('LOCATION_STALE') ? ' · stale' : ''}</small></button></li>`).join('') || '<li class="muted">No active incidents.</li>'}</ul>
       </section>
       ${d ? opsDetail(d, tl, cfg) : '<section class="card"><p class="muted">Select an incident.</p></section>'}
@@ -723,6 +757,7 @@ function opsDetail(d, tl, cfg) {
     </div>` : '';
   return `<section class="card ops-detail">
     <div class="row space"><h2>${esc(d.requester?.displayName)} · <span class="status-text-${esc(d.color)}">${esc(pretty(d.status))}</span></h2><span class="badge">${esc(d.severity)}</span></div>
+    ${P.opsAck(d)}
     ${d.duress ? '<div class="alert alert-danger"><strong>🚩 DURESS PIN USED.</strong> The user\'s app shows "cancelled". Treat as active danger. Do not contact her in a way that could reveal this.</div>' : ''}
     <p>Trigger: ${esc(d.trigger)}${d.silent ? ' (silent)' : ''} · Escalation: <strong>${esc(d.escalationStatus)}</strong> · Alerted: ${esc(d.alertedCount)} · Battery: ${d.battery ? Math.round(d.battery.level * 100) + '%' : 'unknown'}</p>
     ${d.location ? `${scope}
@@ -747,7 +782,7 @@ function opsDetail(d, tl, cfg) {
     <p class="small">${d.notifications.length} sent · ${d.notifications.filter((n) => n.status === 'FAILED').length} failed · ${d.notifications.filter((n) => n.attemptCount > 1).length} used fallback</p>
     ${!d.closed ? `
     <div class="ops-actions">
-      <form class="card form" data-form="handoff" data-id="${esc(d.id)}"><h3>Record emergency-service handoff</h3><p class="muted small">Manual record of what you did (e.g. phoned the control room). There is no automated dispatch.</p>
+      <form class="card form" data-form="handoff" data-id="${esc(d.id)}"><h3>Record emergency-service handoff</h3><p class="muted small">Record what you did (e.g. phoned the control room). Automatic police contact is shown above.</p>
         <label>Status<select name="status"><option>ATTEMPTED</option><option>DELIVERED</option><option>ACKNOWLEDGED</option><option>FAILED</option></select></label>
         <label>Details / reference<input name="reason" required minlength="5" maxlength="300"></label><button class="btn btn-warn">Record handoff</button></form>
       <form class="card form" data-form="closure" data-id="${esc(d.id)}"><h3>Closure exception</h3><p class="muted small">Only when the user cannot confirm safety. Fully audited.</p>
@@ -762,10 +797,12 @@ function opsDetail(d, tl, cfg) {
 // ------------------------------------------------------------------ admin
 async function viewAdmin() {
   const tab = st.adminTab;
-  const tabs = [['policy', 'Policy'], ['volunteers', 'Volunteers'], ['users', 'Users'], ['staff', 'Operators'], ['abuse', 'Abuse reports'], ['audit', 'Audit log'], ['integrations', 'Integrations']];
+  const tabs = [['impact', 'Impact'], ['policy', 'Policy'], ['stations', 'Police stations'], ['volunteers', 'Volunteers'], ['users', 'Users'], ['staff', 'Operators'], ['abuse', 'Abuse reports'], ['audit', 'Audit log'], ['integrations', 'Integrations']];
   let body = '';
   try {
-    if (tab === 'policy') {
+    if (tab === 'impact') body = await P.adminImpactTab();
+    else if (tab === 'stations') body = await P.adminStationsTab();
+    else if (tab === 'policy') {
       const { config } = await st.api.adminConfig();
       const f = (k, label, v = config[k]) => `<label>${esc(label)}<input name="${k}" value="${esc(Array.isArray(v) ? v.join(',') : v)}" required></label>`;
       body = `<form class="card form grid-2" data-form="config"><h2 class="full">Dispatch policy</h2>
@@ -773,6 +810,10 @@ async function viewAdmin() {
         ${f('targetResponders', 'Target responders (backup search until reached)')}${f('maxResponders', 'Max responders')}${f('acceptToEnRouteStallSec', 'Accepted→en-route stall sec')}
         ${f('enRouteStallMinSec', 'Min en-route stall sec')}${f('locationStaleSec', 'Location stale after sec')}${f('lowAccuracyM', 'Low accuracy threshold m')}
         ${f('volunteerLocationMaxAgeMin', 'Volunteer location max age min')}${f('sosPerHourLimit', 'SOS per user per hour')}
+        <h3 class="full">Automatic protection</h3>
+        ${f('operatorAckSec', 'Operator must acknowledge within (sec) — then all operators re-alerted')}${f('policeAutoConnectSec', 'Nearest police station connected automatically after (sec)')}
+        <label>Police auto-connect when no volunteer accepts<select name="autoPoliceOnNoResponder"><option value="true" ${config.autoPoliceOnNoResponder ? 'selected' : ''}>Yes</option><option value="false" ${config.autoPoliceOnNoResponder ? '' : 'selected'}>No</option></select></label>
+        ${f('tripGraceMin', 'Travel: minutes late before "Are you OK?"')}${f('tripCheckSec', 'Travel: seconds to answer before automatic SOS')}${f('evidenceRetentionDays', 'Delete SOS recordings after (days)')}
         <label>Default country<select name="countryCode">${Object.entries(st.cfg.countries).map(([k, v]) => `<option value="${k}" ${k === config.countryCode ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></label>
         <div class="full"><button class="btn btn-primary">Save policy</button></div></form>`;
     } else if (tab === 'volunteers') {
@@ -840,6 +881,7 @@ async function render() {
     case 'home': if (!guard(['user'])) return; html = await viewHome(); break;
     case 'incident': if (!guard(['user'])) return; html = await viewIncident(parts[1], params); st.pollTimer = setInterval(refreshSoft, 3000); break;
     case 'tools': if (!guard(['user'])) return; html = await viewTools(); break;
+    case 'places': case 'trip': case 'help': case 'dashboard': case 'blink': if (!guard(['user'])) return; html = await P.views[parts[0]](); if (parts[0] === 'trip') st.pollTimer = setInterval(refreshSoft, 15000); break;
     case 'settings': if (!guard()) return; html = await viewSettings(); break;
     case 'volunteer': if (!guard(['volunteer'])) return; html = await viewVolunteer(); st.pollTimer = setInterval(refreshSoft, 3000); break;
     case 'ops': if (!guard(['operator', 'admin'])) return; html = await viewOps(); st.pollTimer = setInterval(refreshSoft, 3000); break;
@@ -861,6 +903,7 @@ async function render() {
   st.softRefresh = false;
   bindHold();
   updateLive();
+  P.afterRender(parts[0]);
 }
 
 // Background refresh: swap only the blocks whose content changed, so the
@@ -915,6 +958,8 @@ function updateLive() {
     const s = Math.max(0, Math.round((now - Date.parse(el.dataset.at)) / 1000));
     el.textContent = el.dataset.fmt === 'short' ? ago(s) : t('updated_ago', { s });
   }
+  for (const el of $$('[data-live="ack-countdown"]')) { const left = Math.max(0, Math.round((Date.parse(el.dataset.deadline) - now) / 1000)); el.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`; }
+  for (const el of $$('[data-live="due"]')) { const left = Math.round((Date.parse(el.dataset.at) - Date.now()) / 60000); el.textContent = left >= 0 ? `${left} min left` : `${-left} min late`; }
   for (const el of $$('[data-live="stage-countdown"],[data-live="stage-countdown-raw"]')) {
     const left = Math.max(0, Math.round((Date.parse(el.dataset.deadline) - now) / 1000));
     el.textContent = el.dataset.live === 'stage-countdown' ? t('next_stage_in', { s: left }) : `${left}s`;
@@ -1076,6 +1121,12 @@ const actions = {
   async 'adm-resolve'(el) { const r = await modal({ title: 'Resolve report', body: '<label>Resolution<input name="resolution" maxlength="300"></label>', actions: [{ id: 'go', label: 'Resolve', kind: 'primary' }, { id: 'no', label: t('cancel') }] }); if (r.id !== 'go') return; try { await st.api.resolveAbuse(el.dataset.id, { resolution: r.data.resolution }); render(); } catch (e) { showErr(e); } },
 };
 
+function mergeProtect() {
+  P = initProtect({ st, esc, toast, modal, showErr, go, render, geo, contacts, prefs, store, native, platform, telHref, fmtTime, pretty, nativeShare, serverUrl, isNative,
+    shell, emergencyBar, triggerSOS, startCountdown, syncNative, syncContactsToServer, vibrate, country, openExternal });
+  Object.assign(actions, P.actions); Object.assign(forms, P.forms); Object.assign(changes, P.changes);
+}
+
 async function volLoc() {
   try { return await geo.once(8000); } catch { return null; }
 }
@@ -1129,7 +1180,8 @@ const forms = {
     const nums = (s) => s.split(',').map((x) => parseInt(x.trim(), 10));
     const patch = {};
     for (const k of ['radiusStagesKm', 'stageTimeoutsSec', 'highSeverityStageTimeoutsSec']) patch[k] = nums(f[k].value);
-    for (const k of ['targetResponders', 'maxResponders', 'acceptToEnRouteStallSec', 'enRouteStallMinSec', 'locationStaleSec', 'lowAccuracyM', 'volunteerLocationMaxAgeMin', 'sosPerHourLimit']) patch[k] = parseInt(f[k].value, 10);
+    for (const k of ['targetResponders', 'maxResponders', 'acceptToEnRouteStallSec', 'enRouteStallMinSec', 'locationStaleSec', 'lowAccuracyM', 'volunteerLocationMaxAgeMin', 'sosPerHourLimit', 'operatorAckSec', 'policeAutoConnectSec', 'tripGraceMin', 'tripCheckSec', 'evidenceRetentionDays']) patch[k] = parseInt(f[k].value, 10);
+    patch.autoPoliceOnNoResponder = f.autoPoliceOnNoResponder.value === 'true';
     patch.countryCode = f.countryCode.value;
     try { await st.api.patchConfig(patch); toast('Policy saved & audited', 'ok'); } catch (e) { showErr(e); }
   },
@@ -1173,7 +1225,7 @@ async function pullContacts() {
 }
 function afterLogin() {
   const p = prefs.get();
-  if (['user', 'volunteer'].includes(st.me.role)) { pullContacts().then(syncNative); registerAppPush(); }
+  if (['user', 'volunteer'].includes(st.me.role)) { pullContacts().then(() => st.me?.role === 'user' && P.pullPlaces()).then(syncNative); registerAppPush(); }
   if (st.me.role === 'user') {
     if (p.shake) shake.enable(() => startCountdown('shake'));
     if (p.voice) voice.start(() => startCountdown('voice'));
@@ -1186,10 +1238,13 @@ function afterLogin() {
 // ------------------------------------------------------------------ boot
 async function boot() {
   setLang(detectLang());
+  mergeProtect();
+  a11y.init(prefs.get());
   st.api = await createApi();
   st.offline = !!st.api.unreachable;
   try { st.cfg = await st.api.publicConfig(); } catch { st.offline = true; st.cfg = { demo: false, countries: { IN: { name: 'India', emergency: '112', extra: [], verified: true } }, defaultCountry: 'IN', simulatedLabel: 'SIMULATED — NOT SENT TO EMERGENCY SERVICES' }; }
   try { st.me = (await st.api.me()).user; st.api.connect(); } catch { st.me = null; }
+  if (!st.me) { try { st.impact = await st.api.impact(); } catch {} }
 
   document.addEventListener('click', (e) => {
     const el = e.target.closest('[data-act]');
@@ -1210,7 +1265,7 @@ async function boot() {
   st.api.subscribe((ev) => {
     if (ev.type === 'volunteer.alerted' && st.me?.role === 'volunteer') vibrate([300, 100, 300]);
     const route = location.hash.split('/')[1];
-    if (['incident', 'volunteer', 'ops'].includes(route)) refreshSoft();
+    if (['incident', 'volunteer', 'ops', 'trip'].includes(route)) refreshSoft();
   });
 
   setInterval(() => {
@@ -1218,6 +1273,7 @@ async function boot() {
     streamLocation();
     streamVolunteerLocation();
     streamDutyLocation();
+    P.tick();
     const sw = safeWalk.get();
     if (sw && Date.now() >= sw.endsAt && st.me?.role === 'user') { safeWalk.stop(); startCountdown('safewalk', 30); }
   }, 1000);
@@ -1241,7 +1297,7 @@ async function boot() {
 }
 function afterLoginSilent() {
   const p = prefs.get();
-  if (['user', 'volunteer'].includes(st.me.role)) { pullContacts().then(syncNative); registerAppPush(); }
+  if (['user', 'volunteer'].includes(st.me.role)) { pullContacts().then(() => st.me?.role === 'user' && P.pullPlaces()).then(syncNative); registerAppPush(); }
   if (p.shake) shake.enable(() => startCountdown('shake'));
   if (p.voice) voice.start(() => startCountdown('voice'));
   geo.permission().then((s) => { if (s === 'granted') geo.start(); });
