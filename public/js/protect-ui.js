@@ -2,10 +2,10 @@
 // places & location-based contacts, Track my travel, nearby help, dashboards,
 // police auto-connect status, operator acknowledgement, evidence, admin impact &
 // police-station import, blink trigger page, spoken guidance for blind users.
-import { sosWords, heardSosWord, lang as curLang } from './i18n.js?v=mw8jxb86';
-import { pickContacts } from '../core/protect.js?v=mw8jxb86';
-import { announce, speakStatus, listenOnce, a11y } from './a11y.js?v=mw8jxb86';
-import { blinkGuard } from './blink.js?v=mw8jxb86';
+import { sosWords, heardSosWord, lang as curLang } from './i18n.js?v=6af158e2';
+import { pickContacts } from '../core/protect.js?v=6af158e2';
+import { announce, speakStatus, listenOnce, a11y } from './a11y.js?v=6af158e2';
+import { blinkGuard } from './blink.js?v=6af158e2';
 
 export function initProtect(c) {
   const { st, esc, toast, modal, showErr, go, render, geo, contacts, prefs, store, native, platform, telHref, fmtTime, pretty, nativeShare, serverUrl, isNative } = c;
@@ -138,6 +138,7 @@ export function initProtect(c) {
   }
 
   // ---------------- her dashboard ----------------
+  const TRIP_OUTCOME = { ARRIVED: '💚 reached safely', ENDED: 'sharing stopped (not marked safe)', REPLACED: 'replaced by a new trip', SOS: '🔴 SOS started automatically', ACTIVE: '🚕 in progress' };
   const tile = (n, label, sub = '') => `<div class="stat-tile"><span class="stat-n">${esc(n)}</span><span class="stat-l">${esc(label)}</span>${sub ? `<small>${esc(sub)}</small>` : ''}</div>`;
   async function viewDashboard() {
     let d;
@@ -159,7 +160,8 @@ export function initProtect(c) {
         <ul class="checklist">${checks.map(([ok, label, href]) => `<li>${ok ? '✅' : '⬜'} ${ok ? esc(label) : `<a href="${href}">${esc(label)}</a>`}</li>`).join('')}</ul></section>
       <section class="card"><h2>My SOS & trips</h2><div class="stat-row">
         ${tile(d.sos.total, 'SOS raised')}${tile(d.sos.safe, 'Ended safely')}${tile(fmtMin(d.sos.medianAcceptMin), 'Typical time to a volunteer accepting')}${tile(fmtMin(d.sos.medianArriveMin), 'Typical time to arrival')}
-        ${tile(d.trips.arrived, 'Trips reached safely')}${tile(d.trips.autoSos, 'Trips where help started automatically')}</div></section>
+        ${tile(d.trips.arrived, 'Trips reached safely')}${tile(d.trips.autoSos, 'Trips where help started automatically')}${d.trips.stopped ? tile(d.trips.stopped, 'Trips stopped without "reached safely"') : ''}</div>
+        ${d.trips.recent?.length ? `<h3>My trips</h3><ul class="history">${d.trips.recent.map((t) => `<li>${esc(new Date(t.startedAt).toLocaleString())} → ${esc(t.destination)} — ${esc(TRIP_OUTCOME[t.status] || pretty(t.status))}</li>`).join('')}</ul>` : ''}</section>
       ${d.area ? `<section class="card"><h2>Around ${esc(d.area.label)} (${d.area.radiusKm} km, last 30 days)</h2><div class="stat-row">
         ${tile(d.area.volunteersOnDutyNow, 'Verified volunteers on duty now')}${tile(d.area.sos30d, 'SOS raised')}${tile(d.area.protected30d, 'Women protected')}${tile(fmtMin(d.area.medianArriveMin), 'Typical arrival time')}</div></section>` : '<a class="alert alert-info alert-link" href="#/places">Save your home in Places & contacts to see how many volunteers protect your area.</a>'}
       <section class="card impact-card"><h2>💚 Beti Bachao community</h2><div class="stat-row">
@@ -359,7 +361,14 @@ export function initProtect(c) {
       const add = box.querySelector('[data-act="row-add"]'); add.hidden = false; add.textContent = `＋ ${add.dataset.label} (${rows.length}/${add.dataset.max})`;
     },
     async 'trip-safe'() { try { await api().endTrip({ safe: true }); store.set('tripActive', null); if (native.available()) prefs.get().armed ? native.startSafety('armed') : native.stopSafety(); toast('💚 Trip ended — your contacts are told you are safe', 'ok'); announce('Trip ended. You are marked safe.'); render(); } catch (e) { showErr(e); } },
-    async 'trip-end'() { try { await api().endTrip({ safe: false }); store.set('tripActive', null); if (native.available()) prefs.get().armed ? native.startSafety('armed') : native.stopSafety(); render(); } catch (e) { showErr(e); } },
+    // "Stop sharing" first asks whether she reached safely, so a safe arrival is never lost.
+    'trip-end'(el) {
+      const row = el.closest('.row');
+      if (!row || row.nextElementSibling?.matches('[data-trip-ask]')) return;
+      row.insertAdjacentHTML('afterend', `<div class="alert alert-info" data-trip-ask role="alert"><strong>Did you reach safely?</strong><div class="row"><button class="btn btn-safe" data-act="trip-safe">✅ Yes, I'm safe</button><button class="btn btn-ghost" data-act="trip-stop">No — just stop sharing</button></div></div>`);
+      announce('Did you reach safely? Choose yes, I am safe, or no, just stop sharing.');
+    },
+    async 'trip-stop'() { try { await api().endTrip({ safe: false }); store.set('tripActive', null); if (native.available()) prefs.get().armed ? native.startSafety('armed') : native.stopSafety(); render(); } catch (e) { showErr(e); } },
     async 'trip-extend'() { try { await api().extendTrip({ minutes: 15 }); toast('15 more minutes', 'ok'); render(); } catch (e) { showErr(e); } },
     async 'trip-share'(el) { if (!(await nativeShare(`Follow my trip live: ${el.dataset.link}`))) { try { await navigator.clipboard.writeText(el.dataset.link); toast('Link copied', 'ok'); } catch { toast(el.dataset.link, 'info', 10000); } } },
     async 'op-ack'(el) { try { await api().opAck(el.dataset.id); toast('Acknowledged — you are handling this SOS', 'ok'); render(); } catch (e) { showErr(e); } },

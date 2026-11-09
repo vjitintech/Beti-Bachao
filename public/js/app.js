@@ -1,11 +1,11 @@
-import { createApi, uuid } from './api.js?v=mw8jxb86';
-import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang } from './i18n.js?v=mw8jxb86';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mw8jxb86';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mw8jxb86';
-import { TRAINING_MODULES } from '../core/engine.js?v=mw8jxb86';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mw8jxb86';
-import { initProtect } from './protect-ui.js?v=mw8jxb86';
-import { a11y, announce, speakStatus } from './a11y.js?v=mw8jxb86';
+import { createApi, uuid } from './api.js?v=6af158e2';
+import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang } from './i18n.js?v=6af158e2';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=6af158e2';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=6af158e2';
+import { TRAINING_MODULES } from '../core/engine.js?v=6af158e2';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=6af158e2';
+import { initProtect } from './protect-ui.js?v=6af158e2';
+import { a11y, announce, speakStatus } from './a11y.js?v=6af158e2';
 let P = null; // autonomous-protection screens (protect-ui.js), set up in boot()
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'impact', volSel: null };
@@ -135,6 +135,7 @@ function shell(content, { nav = true } = {}) {
 
 // ------------------------------------------------------------------ landing / auth
 function viewLanding() {
+  st.api?.impact?.().then((i) => { const was = JSON.stringify(st.impact); st.impact = i; if (was !== JSON.stringify(i) && !st.me && !location.hash.replace('#', '').replace('/', '')) render(); }).catch(() => {});
   return shell(`
     ${st.cfg?.setupNeeded ? '<a class="alert alert-warn alert-link" href="#/setup">⚙️ No administrator yet — finish first-time setup</a>' : ''}
     <section class="hero">

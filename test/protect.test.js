@@ -185,3 +185,20 @@ test('live SOS link: phone-made token works, shows live position until safe, hid
   const dv = t2.e.publicSos('ef'.repeat(16));
   assert.equal(dv.status, 'ENDED'); assert.equal(dv.last, undefined); assert.equal(dv.live, false);
 });
+
+test('trip counts: reached safely vs stopped sharing vs replaced, with her trip history', () => {
+  const t = setup();
+  const dest = { ...offset(DEMO_CENTER, 5, 45), label: 'Hostel' };
+  t.e.startTrip(t.her, { destination: dest, expectedMin: 20, location: t.loc() }); t.e.endTrip(t.her, { safe: true });
+  t.e.startTrip(t.her, { destination: dest, expectedMin: 20, location: t.loc() }); t.e.endTrip(t.her, { safe: true });
+  t.e.startTrip(t.her, { destination: dest, expectedMin: 20, location: t.loc() }); t.e.endTrip(t.her, { safe: false });
+  t.e.startTrip(t.her, { destination: dest, expectedMin: 20, location: t.loc() });
+  t.e.startTrip(t.her, { destination: dest, expectedMin: 20, location: t.loc() }); // replaces the one before
+  const d = t.e.myDashboard(t.her);
+  assert.equal(d.trips.arrived, 2);
+  assert.equal(d.community.safeTrips, 2);
+  assert.equal(t.e.publicImpact().safeTrips, 2);
+  assert.equal(d.trips.stopped, 2);
+  assert.equal(d.trips.active, 1);
+  assert.deepEqual(d.trips.recent.map((x) => x.status), ['ACTIVE', 'REPLACED', 'ENDED', 'ARRIVED', 'ARRIVED']);
+});

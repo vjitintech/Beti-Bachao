@@ -175,13 +175,15 @@ try {
   await fam.goto(link.trim());
   await fam.waitForFunction(() => document.body.innerText.includes("trip to College"));
   await shot(fam, '11-trip-family'); step('family opens the live trip link without logging in');
-  await user.click('[data-act="trip-safe"]');
+  await user.click('[data-act="trip-end"]');
+  await user.click('[data-trip-ask] [data-act="trip-safe"]');
   await user.waitForFunction(() => document.body.innerText.includes('reached safely'));
   await user.goto(base + '#/help');
   await user.waitForFunction(() => document.body.innerText.includes('Kurnool I Town PS'));
   await shot(user, '12-help'); step('nearby help lists the nearest police station');
   await user.goto(base + '#/dashboard');
   await user.waitForSelector('svg.meter');
+  await user.waitForFunction(() => document.body.innerText.includes('Hostel') || document.body.innerText.includes('reached safely'));
   await shot(user, '13-dashboard'); step('her safety dashboard');
 
   const cam = await chromium.launch({ args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });

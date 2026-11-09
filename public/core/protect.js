@@ -5,8 +5,8 @@
 //  • "Track my travel" trips with auto-arrival and auto-SOS when overdue
 //  • SOS evidence (audio/video) metadata — bytes are stored encrypted by the server
 //  • dashboards: hers, admin impact, public impact counter
-import { haversineKm, isValidLatLng } from './geo.js?v=mw8jxb86';
-import { COUNTRIES } from './config.js?v=mw8jxb86';
+import { haversineKm, isValidLatLng } from './geo.js?v=6af158e2';
+import { COUNTRIES } from './config.js?v=6af158e2';
 
 const SAFE_CLOSURES = new Set(['USER_CONFIRMED_SAFE', 'HANDED_TO_EMERGENCY_SERVICES_CONFIRMED_SAFE']);
 const median = (xs) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
@@ -371,7 +371,11 @@ export const protectMethods = {
     const onDutyNear = anchor ? this.db.volunteers.filter((v) => this.volunteerEligibility(v).eligible && haversineKm(v.lastLocation, anchor) <= 10).length : null;
     return {
       sos: { total: mine.length, safe: mine.filter((i) => this.isProtected(i)).length, open: mine.filter((i) => this.isOpen(i)).length, medianAcceptMin: round1(median(times.map((t) => t.acceptMin).filter((x) => x != null))), medianArriveMin: round1(median(times.map((t) => t.arriveMin).filter((x) => x != null))) },
-      trips: { total: trips.length, arrived: trips.filter((t) => t.status === 'ARRIVED').length, autoSos: trips.filter((t) => t.status === 'SOS').length },
+      trips: {
+        total: trips.length, arrived: trips.filter((t) => t.status === 'ARRIVED').length, autoSos: trips.filter((t) => t.status === 'SOS').length,
+        stopped: trips.filter((t) => t.status === 'ENDED' || t.status === 'REPLACED').length, active: trips.filter((t) => t.status === 'ACTIVE').length,
+        recent: trips.slice(-10).reverse().map((t) => ({ destination: t.destination.label, startedAt: t.startedAt, endedAt: t.endedAt, status: t.status })),
+      },
       setup: { places: (u.places || []).length, placesReady: (u.places || []).filter((p) => p.contacts.length >= 1).length, defaultContacts: (u.contacts || []).length, alwaysContacts: (u.contacts || []).filter((c) => c.always).length, pins: !!u.pins, phone: !!u.phone },
       area: anchor ? { label: anchor.label, radiusKm: 10, sos30d: area.length, protected30d: area.filter((i) => this.isProtected(i)).length, medianArriveMin: round1(median(areaTimes)), volunteersOnDutyNow: onDutyNear } : null,
       community: this.publicImpact(),
