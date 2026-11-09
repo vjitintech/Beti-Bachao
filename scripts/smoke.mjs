@@ -8,7 +8,8 @@ import path from 'node:path';
 import { boot, world, ADMIN, PASSWORD, totp } from '../test/helpers.js';
 
 const { chromium } = createRequire(import.meta.url)('playwright');
-const SHOTS = process.argv.includes('--shots');
+const VIDEO = process.argv.includes('--video');
+const SHOTS = VIDEO || process.argv.includes('--shots');
 const outDir = path.resolve('screenshots');
 if (SHOTS) fs.mkdirSync(outDir, { recursive: true });
 const S = await boot();
@@ -25,7 +26,25 @@ async function page(name, opts = mobile) {
   p.on('pageerror', (e) => errors.push(`[${name}] ${e.message}`));
   return p;
 }
-const shot = async (p, n) => { if (SHOTS) await p.screenshot({ path: path.join(outDir, `${n}.png`), fullPage: true }); };
+const shot = async (p, n) => {
+  if (!SHOTS) return;
+  await p.screenshot({ path: path.join(outDir, `${n}.png`), fullPage: true });
+  if (VIDEO) { // phone-sized frames for the explainer video: no toasts, top of screen
+    fs.mkdirSync(path.join(outDir, 'video'), { recursive: true });
+    await p.evaluate(() => { document.getElementById('toasts')?.style.setProperty('display', 'none'); window.scrollTo(0, 0); });
+    await p.screenshot({ path: path.join(outDir, 'video', `${n}.png`) });
+    await p.evaluate(() => document.getElementById('toasts')?.style.removeProperty('display'));
+  }
+};
+// Extra frame scrolled to one section (video mode only).
+const shotAt = async (p, n, sel) => {
+  if (!VIDEO) return;
+  await p.evaluate(() => document.getElementById('toasts')?.style.setProperty('display', 'none'));
+  await p.locator(sel).first().evaluate((el) => el.scrollIntoView({ block: 'start' }));
+  await p.evaluate(() => window.scrollBy(0, -70));
+  await p.screenshot({ path: path.join(outDir, 'video', `${n}.png`) });
+  await p.evaluate(() => document.getElementById('toasts')?.style.removeProperty('display'));
+};
 async function signIn(p, email, password = PASSWORD, mfa = null) {
   await p.goto(base + '#/login');
   await p.fill('[name="email"]', email);
@@ -72,6 +91,7 @@ try {
   const vol = await page('volunteer');
   await signIn(vol, 'asha@test.betibachao.app');
   await vol.waitForSelector('.sos-incoming');
+  if (VIDEO) await shot(vol, 'v04a-volunteer-alert');
   if ((await vol.content()).includes('15.8281')) throw new Error('unassigned volunteer page leaked exact coordinates');
   await vol.click('.sos-incoming');
   await vol.click('[data-act="vol-accept"]');
@@ -86,6 +106,7 @@ try {
   await shot(op, '05-operator'); step('new operator enrols authenticator at first login, sees radars');
 
   await user.waitForFunction(() => document.querySelector('.status-hero')?.className.includes('AMBER'), null, { timeout: 15000 });
+  if (VIDEO) await shot(user, 'v05b-help-coming');
   await user.click('[data-act="are-you-safe"]');
   await user.click('[data-modal="YES"]');
   await user.click('[data-modal="confirm"]');
@@ -197,6 +218,20 @@ try {
   await shot(bp, '14-blink'); step('Blink SOS: on-device face model loads and runs on the camera (no face in fake feed)');
   await cam.close();
 
+  if (VIDEO) {
+    await shotAt(user, 'v13b-my-trips', 'h2:has-text("My SOS & trips")');
+    await user.goto(base + '#/places'); await user.waitForSelector('h2:has-text("Important contacts")');
+    await shotAt(user, 'v09b-important', 'h2:has-text("Important contacts")');
+    await user.goto(base + '#/tools'); await user.waitForTimeout(600); await shot(user, 'v15-tools');
+    await user.goto(base + '#/settings'); await user.waitForSelector('h2:has-text("Accessibility")');
+    await shotAt(user, 'v16-accessibility', 'h2:has-text("Accessibility")');
+    for (const l of ['te', 'hi', 'ur']) {
+      await user.goto(base + '#/home'); await user.waitForSelector('#sos-btn');
+      await user.selectOption('#lang-select', l); await user.waitForTimeout(2000); await user.waitForSelector('#sos-btn');
+      await shot(user, `v17-lang-${l}`);
+    }
+    await user.selectOption('#lang-select', 'en'); await user.waitForTimeout(500);
+  }
   const reg = await page('register');
   await reg.goto(base + '#/register');
   await reg.fill('[name="displayName"]', 'New Person');

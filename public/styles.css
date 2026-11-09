@@ -23,8 +23,8 @@ main { max-width: 1100px; margin: 0 auto; padding: 0 16px 24px; outline: none; }
 .small, small { font-size: .85rem; }
 .hidden { display: none !important; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.skip-link { position: absolute; left: -999px; top: 8px; background: var(--surface); padding: 8px 12px; z-index: 100; border-radius: 8px; }
-.skip-link:focus { left: 8px; }
+.skip-link { position: absolute; inset-inline-start: 8px; top: -200px; background: var(--surface); padding: 8px 12px; z-index: 100; border-radius: 8px; }
+.skip-link:focus { top: 8px; }
 :focus-visible { outline: 3px solid var(--saffron); outline-offset: 2px; }
 .boot img { border-radius: 16px; }
 .boot { display: grid; place-items: center; min-height: 70vh; color: var(--ink-2); }
