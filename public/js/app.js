@@ -1,11 +1,11 @@
-import { createApi, uuid } from './api.js?v=mw85u9y9';
-import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang } from './i18n.js?v=mw85u9y9';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mw85u9y9';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mw85u9y9';
-import { TRAINING_MODULES } from '../core/engine.js?v=mw85u9y9';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mw85u9y9';
-import { initProtect } from './protect-ui.js?v=mw85u9y9';
-import { a11y, announce, speakStatus } from './a11y.js?v=mw85u9y9';
+import { createApi, uuid } from './api.js?v=mw8jxb86';
+import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang } from './i18n.js?v=mw8jxb86';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mw8jxb86';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mw8jxb86';
+import { TRAINING_MODULES } from '../core/engine.js?v=mw8jxb86';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mw8jxb86';
+import { initProtect } from './protect-ui.js?v=mw8jxb86';
+import { a11y, announce, speakStatus } from './a11y.js?v=mw8jxb86';
 let P = null; // autonomous-protection screens (protect-ui.js), set up in boot()
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'impact', volSel: null };
@@ -576,11 +576,10 @@ async function viewSettings() {
       <p class="muted">${esc(t('helplines'))}: ${[`${c.emergency}`, ...(c.extra || []).map((h) => `${h.label} ${h.number}`)].map(esc).join(' · ')}</p>
     </section>
     ${me.role === 'user' ? `
-    <a class="alert alert-info alert-link" href="#/places">📍 <b>Places & contacts</b> — set 3–5 contacts for each place you go (home, college, office). Your SOS goes to the right people automatically wherever you are.</a>
-    <section class="card"><h2>👥 ${esc(t('contacts'))} (default list)</h2>
-      <ul class="contact-list">${contacts.list().map((x, i) => `<li><span>${esc(x.name)} · ${esc(x.phone)}</span><button class="btn btn-ghost btn-sm" data-act="contact-del" data-i="${i}" aria-label="Remove ${esc(x.name)}">✕</button></li>`).join('') || '<li class="muted">No contacts yet. They get a pre-filled SMS from your phone during an SOS.</li>'}</ul>
-      <form class="inline-form" data-form="contact"><label>${esc(t('name'))}<input name="name" required maxlength="40"></label><label>${esc(t('phone'))}<input name="phone" type="tel" required></label><button class="btn btn-secondary">${esc(t('add'))}</button></form>
-      <p class="muted small">Mark important contacts (told everywhere) in Places & contacts.</p>
+    <a class="alert alert-info alert-link" href="#/places">📍 <b>Places & contacts</b> — 1–3 contacts for each place you go (home, college, office) plus 1–5 important contacts told every time. Your SOS goes to the right people automatically wherever you are.</a>
+    <section class="card"><h2>👥 ${esc(t('contacts'))}</h2>
+      <p>⭐ Important: ${contacts.list().map((x) => esc(x.name)).join(', ') || '<span class="danger-text">none yet — add at least 1</span>'}</p>
+      <a class="btn btn-secondary" href="#/places">Edit important contacts & places</a>
     </section>
     <section class="card form"><h2>🔐 ${esc(t('your_safety_pin'))}</h2>
       <p class="muted">${me.hasPins ? 'PINs are set.' : 'Without a PIN, cancelling needs only a confirmation tap.'} The <strong>duress PIN</strong> makes the app show "cancelled" while it secretly keeps help coming — useful if someone forces you to cancel.</p>

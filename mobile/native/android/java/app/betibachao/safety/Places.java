@@ -13,8 +13,8 @@ import java.util.Set;
 
 /**
  * Location-based contacts on the phone itself (same rule as the server, public/core/protect.js):
- * the 3–5 contacts of the saved place she is at (or the nearest within 25 km), plus every
- * "important" contact. Falls back to the default list when she is away from all places.
+ * the 1–3 contacts of the saved place she is at (or the nearest within 25 km), plus all of her
+ * 1–5 important contacts, who are told about every SOS wherever she is.
  */
 public final class Places {
     private Places() {}
@@ -23,7 +23,7 @@ public final class Places {
         Set<String> out = new LinkedHashSet<>();
         try {
             JSONArray defaults = new JSONArray(orEmpty(Store.get(ctx, "contacts")));
-            for (int i = 0; i < defaults.length(); i++) { JSONObject c = defaults.getJSONObject(i); if (c.optBoolean("always")) out.add(c.optString("phone")); }
+            for (int i = 0; i < defaults.length(); i++) out.add(defaults.getJSONObject(i).optString("phone")); // important contacts: always told
             JSONObject place = null;
             if (loc != null) {
                 JSONArray places = new JSONArray(orEmpty(Store.get(ctx, "places")));
@@ -37,7 +37,7 @@ public final class Places {
                 }
                 if (place == null && nearest != null && bestOf(nearest, loc) <= 25000) place = nearest;
             }
-            JSONArray base = place != null ? place.optJSONArray("contacts") : defaults;
+            JSONArray base = place != null ? place.optJSONArray("contacts") : null;
             if (base != null) for (int i = 0; i < base.length(); i++) out.add(base.getJSONObject(i).optString("phone"));
         } catch (Exception ignored) {}
         out.remove("");

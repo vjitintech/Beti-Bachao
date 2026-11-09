@@ -147,9 +147,18 @@ try {
   await user.click('[data-act="place-here"]');
   await user.waitForFunction(() => document.body.innerText.includes('Set:'));
   await user.fill('[name="label"]', 'Home');
-  for (const [i, n] of ['Amma', 'Akka', 'Neighbour'].entries()) { await user.fill(`[name="cn${i}"]`, n); await user.fill(`[name="cp${i}"]`, `+9190000001${i}0`); }
+  for (const [i, n] of ['Amma', 'Akka', 'Neighbour'].entries()) {
+    if (i > 0) await user.click('[data-form="place"] [data-act="row-add"]');
+    await user.locator('[data-form="place"] [name="cname"]').nth(i).fill(n); await user.locator('[data-form="place"] [name="cphone"]').nth(i).fill(`+9190000001${i}0`);
+  }
+  if (await user.locator('[data-form="place"] [data-act="row-add"]').isVisible()) throw new Error('+ button should hide at 3 contacts');
   await user.click('[data-form="place"] button.btn-primary');
   await user.waitForFunction(() => document.body.innerText.includes('You are at Home'));
+  await user.locator('[data-form="important"] [name="cname"]').first().fill('Maa'); await user.locator('[data-form="important"] [name="cphone"]').first().fill('+919000000999');
+  await user.click('[data-form="important"] [data-act="row-add"]');
+  await user.locator('[data-form="important"] [name="cname"]').nth(1).fill('Papa'); await user.locator('[data-form="important"] [name="cphone"]').nth(1).fill('+919000000998');
+  await user.click('[data-form="important"] button.btn-primary');
+  await user.waitForFunction(() => document.body.innerText.includes('Maa, Papa'));
   await shot(user, '09-places'); step('places: 3–5 contacts per place, active place detected from location');
   await user.goto(base + '#/home');
   await user.waitForFunction(() => document.body.innerText.includes('SOS goes to your Home contacts'));

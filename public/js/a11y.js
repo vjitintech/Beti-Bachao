@@ -3,7 +3,7 @@
 //  • "Spoken guidance" speaks it aloud for people not using a screen reader
 //  • status read-out of the SOS (who is coming, how far, how long) — repeats every minute
 //  • one-tap voice commands ("help", "status", "call police", "I am safe")
-import { native } from './native.js?v=mw85u9y9';
+import { native } from './native.js?v=mw8jxb86';
 
 let guide = false, screenReader = false, lang = 'en-IN';
 export const a11y = {

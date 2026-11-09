@@ -15,9 +15,9 @@
 //   • escalation adapter is SIMULATED until a real integration is approved
 //   • append-only, hash-chained audit log
 
-import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mw85u9y9';
-import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mw85u9y9';
-import { protectMethods } from './protect.js?v=mw85u9y9';
+import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mw8jxb86';
+import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mw8jxb86';
+import { protectMethods } from './protect.js?v=mw8jxb86';
 
 export const S = Object.freeze({
   CREATED: 'CREATED',
@@ -246,8 +246,9 @@ export class Engine {
   setContacts(actor, { contacts, prefs, phone } = {}) {
     const u = this.requireRole(actor, 'user', 'volunteer');
     if (contacts !== undefined) {
-      if (!Array.isArray(contacts) || contacts.length > 10) fail(400, 'INVALID_CONTACTS', 'Up to 10 contacts');
-      u.contacts = contacts.map((c) => this.cleanContact(c));
+      // Important contacts: told about every SOS, wherever she is (1–5; the app requires at least 1).
+      if (!Array.isArray(contacts) || contacts.length > 5) fail(400, 'INVALID_CONTACTS', 'Up to 5 important contacts');
+      u.contacts = contacts.map((c) => ({ ...this.cleanContact(c), always: true }));
     }
     if (prefs) u.prefs = { ...(u.prefs || {}), serverSms: prefs.serverSms !== false };
     if (phone !== undefined) { const ph = normPhone(phone); if (phone && !ph) fail(400, 'INVALID_PHONE'); u.phone = ph; }

@@ -1,7 +1,7 @@
 // On-device safety capabilities. Everything degrades gracefully: if a browser
 // lacks a sensor or permission is denied, the UI says so and offers the next
 // best option (call / SMS). Nothing here pretends to work when it doesn't.
-import { lang, speechLang, sosWords, heardSosWord } from './i18n.js?v=mw85u9y9';
+import { lang, speechLang, sosWords, heardSosWord } from './i18n.js?v=mw8jxb86';
 
 const store = {
   get(k, d) { try { const v = localStorage.getItem('bb.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
@@ -205,9 +205,10 @@ export const contacts = {
   add(name, phone) {
     const p = String(phone).replace(/[^\d+]/g, '');
     if (!name.trim() || p.length < 6) return false;
-    const l = this.list(); if (l.length >= 10) return false;
+    const l = this.list(); if (l.length >= 5) return false;
     l.push({ name: name.trim().slice(0, 40), phone: p }); store.set('contacts', l); return true;
   },
+  replace(list) { store.set('contacts', list.slice(0, 5).map((c) => ({ name: String(c.name).trim().slice(0, 40), phone: String(c.phone).replace(/[^\d+]/g, ''), always: true }))); },
   toggleAlways(i) { const l = this.list(); if (l[i]) { l[i].always = !l[i].always; store.set('contacts', l); } },
   remove(i) { const l = this.list(); l.splice(i, 1); store.set('contacts', l); },
 };

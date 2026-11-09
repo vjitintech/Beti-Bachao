@@ -5,8 +5,8 @@
 //  • "Track my travel" trips with auto-arrival and auto-SOS when overdue
 //  • SOS evidence (audio/video) metadata — bytes are stored encrypted by the server
 //  • dashboards: hers, admin impact, public impact counter
-import { haversineKm, isValidLatLng } from './geo.js?v=mw85u9y9';
-import { COUNTRIES } from './config.js?v=mw85u9y9';
+import { haversineKm, isValidLatLng } from './geo.js?v=mw8jxb86';
+import { COUNTRIES } from './config.js?v=mw8jxb86';
 
 const SAFE_CLOSURES = new Set(['USER_CONFIRMED_SAFE', 'HANDED_TO_EMERGENCY_SERVICES_CONFIRMED_SAFE']);
 const median = (xs) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
@@ -15,14 +15,14 @@ const day = (iso) => iso.slice(0, 10);
 
 // Shared by the server and the phone app (so the phone texts the same people the server would).
 export function pickContacts(places, defaults, loc) {
-  const always = (defaults || []).filter((c) => c.always);
+  const always = defaults || []; // important contacts: told about every SOS
   let place = null;
   if (loc && places?.length) {
     const ranked = places.map((p) => ({ p, d: haversineKm(loc, p) * 1000 })).sort((a, b) => a.d - b.d);
     const inside = ranked.find((x) => x.d <= x.p.radiusM);
     place = inside?.p || (ranked[0].d <= 25000 ? ranked[0].p : null);
   }
-  const base = place ? place.contacts : (defaults || []);
+  const base = place ? place.contacts : [];
   const seen = new Set(); const out = [];
   for (const c of [...always, ...base]) if (!seen.has(c.phone)) { seen.add(c.phone); out.push(c); }
   return { place: place ? { id: place.id, label: place.label } : null, contacts: out };
@@ -50,7 +50,7 @@ export const protectMethods = {
       if (!label) this.fail(400, 'INVALID_PLACE', `Place ${i + 1} needs a name`);
       if (!isValidLatLng(Number(p.lat), Number(p.lng))) this.fail(400, 'INVALID_PLACE', `Set the location of "${label}"`);
       const contacts = Array.isArray(p.contacts) ? p.contacts.map((c) => this.cleanContact(c)) : [];
-      if (contacts.length < 3 || contacts.length > 5) this.fail(400, 'PLACE_CONTACTS', `"${label}" needs 3 to 5 contacts`);
+      if (contacts.length < 1 || contacts.length > 3) this.fail(400, 'PLACE_CONTACTS', `"${label}" needs 1 to 3 contacts`);
       const radiusM = Math.min(50000, Math.max(200, Math.round(Number(p.radiusM) || 2000)));
       return { id: p.id && /^[\w-]{4,40}$/.test(p.id) ? p.id : this.deps.uuid(), label, lat: +Number(p.lat).toFixed(5), lng: +Number(p.lng).toFixed(5), radiusM, contacts };
     });
@@ -372,7 +372,7 @@ export const protectMethods = {
     return {
       sos: { total: mine.length, safe: mine.filter((i) => this.isProtected(i)).length, open: mine.filter((i) => this.isOpen(i)).length, medianAcceptMin: round1(median(times.map((t) => t.acceptMin).filter((x) => x != null))), medianArriveMin: round1(median(times.map((t) => t.arriveMin).filter((x) => x != null))) },
       trips: { total: trips.length, arrived: trips.filter((t) => t.status === 'ARRIVED').length, autoSos: trips.filter((t) => t.status === 'SOS').length },
-      setup: { places: (u.places || []).length, placesReady: (u.places || []).filter((p) => p.contacts.length >= 3).length, defaultContacts: (u.contacts || []).length, alwaysContacts: (u.contacts || []).filter((c) => c.always).length, pins: !!u.pins, phone: !!u.phone },
+      setup: { places: (u.places || []).length, placesReady: (u.places || []).filter((p) => p.contacts.length >= 1).length, defaultContacts: (u.contacts || []).length, alwaysContacts: (u.contacts || []).filter((c) => c.always).length, pins: !!u.pins, phone: !!u.phone },
       area: anchor ? { label: anchor.label, radiusKm: 10, sos30d: area.length, protected30d: area.filter((i) => this.isProtected(i)).length, medianArriveMin: round1(median(areaTimes)), volunteersOnDutyNow: onDutyNear } : null,
       community: this.publicImpact(),
       history: mine.slice(-10).reverse().map((i) => ({ id: i.id, createdAt: i.createdAt, status: i.status, protected: this.isProtected(i), trigger: i.trigger, ...this.incidentTimes(i) })),

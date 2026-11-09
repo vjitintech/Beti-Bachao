@@ -21,21 +21,23 @@ Nearby PS,Kurnool,${offset(DEMO_CENTER, 1.2, 90).lat},${offset(DEMO_CENTER, 1.2,
 "Far PS, Town",Kurnool,${offset(DEMO_CENTER, 15, 0).lat},${offset(DEMO_CENTER, 15, 0).lng},+918518000002,+918518000003
 broken row,,999,0,+91,`;
 
-test('places: each needs 3–5 contacts; contacts switch automatically with her location; "always" contact everywhere', () => {
+test('places: 1–3 contacts each; contacts switch automatically with her location; important contacts (1–5) everywhere', () => {
   const t = setup();
-  assert.throws(() => t.e.setPlaces(t.her, { places: [{ ...DEMO_CENTER, label: 'Home', contacts: [C(1), C(2)] }] }), /3 to 5 contacts/);
+  assert.throws(() => t.e.setPlaces(t.her, { places: [{ ...DEMO_CENTER, label: 'Home', contacts: [] }] }), /1 to 3 contacts/);
+  assert.throws(() => t.e.setPlaces(t.her, { places: [{ ...DEMO_CENTER, label: 'Home', contacts: [C(1), C(2), C(3), C(4)] }] }), /1 to 3 contacts/);
+  assert.throws(() => t.e.setContacts(t.her, { contacts: [C(11), C(12), C(13), C(14), C(15), C(16)] }), /Up to 5 important/);
   const office = offset(DEMO_CENTER, 8, 90);
-  t.e.setContacts(t.her, { contacts: [{ ...C(9), always: true }, C(10)] });
-  t.e.setPlaces(t.her, { places: [{ ...DEMO_CENTER, label: 'Home', radiusM: 1500, contacts: [C(1), C(2), C(3)] }, { label: 'Office', ...office, contacts: [C(4), C(5), C(6), C(7)] }] });
+  t.e.setContacts(t.her, { contacts: [C(9), C(10)] });
+  t.e.setPlaces(t.her, { places: [{ ...DEMO_CENTER, label: 'Home', radiusM: 1500, contacts: [C(1), C(2), C(3)] }, { label: 'Office', ...office, contacts: [C(4)] }] });
   const atHome = t.e.contactsFor(t.her.id, DEMO_CENTER);
   assert.equal(atHome.place.label, 'Home');
-  assert.deepEqual(atHome.contacts.map((c) => c.name), ['C9', 'C1', 'C2', 'C3']);
+  assert.deepEqual(atHome.contacts.map((c) => c.name), ['C9', 'C10', 'C1', 'C2', 'C3']);
   const atOffice = t.e.contactsFor(t.her.id, offset(office, 0.3, 10));
   assert.equal(atOffice.place.label, 'Office');
-  assert.deepEqual(atOffice.contacts.map((c) => c.name), ['C9', 'C4', 'C5', 'C6', 'C7']);
+  assert.deepEqual(atOffice.contacts.map((c) => c.name), ['C9', 'C10', 'C4']);
   const faraway = t.e.contactsFor(t.her.id, offset(DEMO_CENTER, 200, 0));
   assert.equal(faraway.place, null);
-  assert.deepEqual(faraway.contacts.map((c) => c.name), ['C9', 'C10']); // default list when far from every place
+  assert.deepEqual(faraway.contacts.map((c) => c.name), ['C9', 'C10']); // important contacts when far from every place
   const { incident } = t.e.createIncident(t.her, { idempotencyKey: 'p1', location: t.loc(offset(office, 0.2, 0)) });
   assert.equal(incident.contactsPlace, 'Office');
 });

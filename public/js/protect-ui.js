@@ -2,10 +2,10 @@
 // places & location-based contacts, Track my travel, nearby help, dashboards,
 // police auto-connect status, operator acknowledgement, evidence, admin impact &
 // police-station import, blink trigger page, spoken guidance for blind users.
-import { sosWords, heardSosWord, lang as curLang } from './i18n.js?v=mw85u9y9';
-import { pickContacts } from '../core/protect.js?v=mw85u9y9';
-import { announce, speakStatus, listenOnce, a11y } from './a11y.js?v=mw85u9y9';
-import { blinkGuard } from './blink.js?v=mw85u9y9';
+import { sosWords, heardSosWord, lang as curLang } from './i18n.js?v=mw8jxb86';
+import { pickContacts } from '../core/protect.js?v=mw8jxb86';
+import { announce, speakStatus, listenOnce, a11y } from './a11y.js?v=mw8jxb86';
+import { blinkGuard } from './blink.js?v=mw8jxb86';
 
 export function initProtect(c) {
   const { st, esc, toast, modal, showErr, go, render, geo, contacts, prefs, store, native, platform, telHref, fmtTime, pretty, nativeShare, serverUrl, isNative } = c;
@@ -25,8 +25,17 @@ export function initProtect(c) {
     const m = txt.match(/(-?\d{1,2}\.\d{3,})\s*,\s*(-?\d{1,3}\.\d{3,})/);
     return m ? { lat: Number(m[1]), lng: Number(m[2]) } : null;
   };
+  // One editable contact row; the first `min` rows are required, extra rows can be removed.
+  const contactRow = (c = {}, n = 1, required = true) => `<div class="contact-row" data-row>
+      <label>Name ${n}<input name="cname" maxlength="40" value="${esc(c.name || '')}" ${required ? 'required' : ''} autocomplete="off"></label>
+      <label>Phone ${n}<input name="cphone" type="tel" inputmode="tel" value="${esc(c.phone || '')}" ${required ? 'required' : ''}></label>
+      <button type="button" class="btn btn-ghost btn-sm row-del" data-act="row-del" aria-label="Remove contact ${n}" ${n === 1 ? 'hidden' : ''}>✕</button>
+    </div>`;
+  const rowsFor = (list, min) => { const xs = list.length ? list : Array.from({ length: min }, () => ({})); return xs.map((c, i) => contactRow(c, i + 1, true)).join(''); };
+  const addBtn = (count, max, label) => `<button type="button" class="btn btn-secondary btn-sm" data-act="row-add" data-max="${max}" data-label="${esc(label)}" ${count >= max ? 'hidden' : ''}>＋ ${esc(label)} (${count}/${max})</button>`;
+
   function placeForm(p) {
-    const cs = [...(p?.contacts || []), {}, {}, {}, {}, {}].slice(0, 5);
+    const cs = p?.contacts || [];
     const d = st.placeDraft || (p ? { lat: p.lat, lng: p.lng } : null);
     return `<form class="card form" data-form="place" data-i="${esc(st.placeEdit)}">
       <h2>${p ? `Edit ${esc(p.label)}` : 'Add a place'}</h2>
@@ -37,10 +46,23 @@ export function initProtect(c) {
         <label>…or paste a Google Maps link / "lat, lng"<input name="where" inputmode="url" placeholder="https://maps.google.com/?q=15.83,78.04"></label>
       </fieldset>
       <label>Area size<select name="radiusM">${[[500, '500 m'], [1000, '1 km'], [2000, '2 km'], [5000, '5 km'], [10000, '10 km'], [25000, 'Whole town (25 km)']].map(([v, l]) => `<option value="${v}" ${(p?.radiusM || 2000) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-      <fieldset class="fs"><legend>Contacts for this place — 3 to 5 people who can reach you quickly here</legend>
-        ${cs.map((x, i) => `<div class="contact-row"><label>Name ${i + 1}${i < 3 ? ' (required)' : ''}<input name="cn${i}" maxlength="40" value="${esc(x.name || '')}" ${i < 3 ? 'required' : ''}></label><label>Phone ${i + 1}<input name="cp${i}" type="tel" value="${esc(x.phone || '')}" ${i < 3 ? 'required' : ''}></label></div>`).join('')}
+      <fieldset class="fs" data-rows><legend>Contacts for this place — 1 to 3 people who can reach you quickly here</legend>
+        ${rowsFor(cs, 1)}
+        ${addBtn(Math.max(1, cs.length), 3, 'Add contact')}
       </fieldset>
       <div class="row"><button class="btn btn-primary">Save place</button><button type="button" class="btn btn-ghost" data-act="place-cancel">Cancel</button></div>
+    </form>`;
+  }
+  function importantForm() {
+    const cs = contacts.list();
+    return `<form class="card form" data-form="important" id="important">
+      <h2>⭐ Important contacts</h2>
+      <p class="muted small">Told about <b>every</b> SOS, wherever you are — for example your mother, father or husband. At least 1, up to 5. You can change names and numbers any time.</p>
+      <fieldset class="fs" data-rows><legend class="sr-only">Important contacts</legend>
+        ${rowsFor(cs, 1)}
+        ${addBtn(Math.max(1, cs.length), 5, 'Add important contact')}
+      </fieldset>
+      <button class="btn btn-primary">Save important contacts</button>
     </form>`;
   }
   async function viewPlaces() {
@@ -50,18 +72,15 @@ export function initProtect(c) {
     if (st.placeEdit != null) return c.shell(`<h1>📍 Places & contacts</h1>${placeForm(st.placeEdit === 'new' ? null : list[Number(st.placeEdit)])}`);
     return c.shell(`
       <h1>📍 Places & contacts</h1>
-      <div class="alert alert-info"><strong>Automatic:</strong> when you raise an SOS, the contacts of the place you are at get your live location. Move to another place and its contacts are added automatically — you never have to change contacts by hand.</div>
+      <div class="alert alert-info"><strong>Automatic:</strong> when you raise an SOS, your ⭐ important contacts and the contacts of the place you are at get your live location. Move to another place and its contacts are added automatically — you never have to change contacts by hand.</div>
+      ${contacts.list().length ? '' : '<div class="alert alert-warn" role="alert"><b>Add at least 1 important contact</b> below — otherwise nobody you know gets your SOS message.</div>'}
       <section class="card"><h2>Right now</h2><p>${now.place ? `You are at <b>${esc(now.place.label)}</b>` : geo.last ? 'You are not near any saved place — your default contacts will be used' : 'Location is off — your default contacts will be used'}: ${now.contacts.map((x) => esc(x.name)).join(', ') || '<span class="danger-text">nobody yet</span>'}</p></section>
-      ${list.map((p, i) => `<section class="card place-card"><div class="row space"><h2>${esc(p.label)}</h2><span class="badge ${p.contacts.length >= 3 ? 'badge-ok' : 'badge-warn'}">${p.contacts.length} contacts</span></div>
+      ${list.map((p, i) => `<section class="card place-card"><div class="row space"><h2>${esc(p.label)}</h2><span class="badge badge-ok">${p.contacts.length}/3 contacts</span></div>
         <p class="small muted">Within ${p.radiusM >= 1000 ? `${p.radiusM / 1000} km` : `${p.radiusM} m`} of ${esc(p.lat.toFixed(4))}, ${esc(p.lng.toFixed(4))}</p>
         <ul class="contact-list">${p.contacts.map((x) => `<li><span>${esc(x.name)} · ${esc(x.phone)}</span><a class="btn btn-ghost btn-sm" href="${telHref(x.phone)}" aria-label="Call ${esc(x.name)}">📞</a></li>`).join('')}</ul>
         <div class="row"><button class="btn btn-secondary btn-sm" data-act="place-edit" data-i="${i}">Edit</button><button class="btn btn-ghost btn-sm danger-text" data-act="place-del" data-i="${i}">Delete</button></div></section>`).join('')}
       ${list.length < 10 ? '<button class="btn btn-primary btn-lg" data-act="place-new">＋ Add a place (home, college, office…)</button>' : ''}
-      <section class="card"><h2>⭐ Important contacts & default list</h2>
-        <p class="muted small">Mark someone ⭐ <b>important</b> (for example your mother) and they are told about every SOS, wherever you are. The rest of this list is used when you are away from all saved places.</p>
-        <ul class="contact-list">${contacts.list().map((x, i) => `<li><span>${x.always ? '⭐ ' : ''}${esc(x.name)} · ${esc(x.phone)}</span><span><button class="btn btn-ghost btn-sm" data-act="contact-always" data-i="${i}" aria-pressed="${!!x.always}">${x.always ? 'Important ✓' : 'Mark important'}</button><button class="btn btn-ghost btn-sm" data-act="contact-del" data-i="${i}" aria-label="Remove ${esc(x.name)}">✕</button></span></li>`).join('') || '<li class="muted">No default contacts yet.</li>'}</ul>
-        <form class="inline-form" data-form="contact"><label>Name<input name="name" required maxlength="40"></label><label>Phone<input name="phone" type="tel" required></label><button class="btn btn-secondary">Add</button></form>
-      </section>`);
+      ${importantForm()}`);
   }
 
   // ---------------- Track my travel ----------------
@@ -125,8 +144,8 @@ export function initProtect(c) {
     try { d = await api().myDashboard(); } catch (e) { return c.shell(`<div class="alert alert-danger">${esc(e.message)}</div>`); }
     const p = prefs.get();
     const checks = [
-      [d.setup.placesReady > 0, 'Saved at least one place with 3–5 contacts', '#/places'],
-      [d.setup.alwaysContacts > 0, 'Marked an important contact (told everywhere)', '#/places'],
+      [d.setup.placesReady > 0, 'Saved at least one place with its contacts', '#/places'],
+      [d.setup.defaultContacts > 0, 'Added at least 1 important contact (told about every SOS)', '#/places'],
       [d.setup.pins, 'Set cancel & duress PINs', '#/settings'],
       [d.setup.phone, 'Added your mobile number (police can call you back)', '#/settings'],
       [!!p.armed || !native.available(), native.available() ? 'Background protection on (lock-screen / power button / shake)' : 'Install the phone app for background protection', '#/settings'],
@@ -322,7 +341,23 @@ export function initProtect(c) {
       const list = places().filter((_, i) => i !== Number(el.dataset.i));
       try { const res = await api().savePlaces(list); store.set('places', res.places); c.syncNative(); render(); } catch (e) { showErr(e); }
     },
-    'contact-always'(el) { contacts.toggleAlways(Number(el.dataset.i)); c.syncContactsToServer(); render(); },
+    'row-add'(el) {
+      const box = el.closest('[data-rows]'); const max = Number(el.dataset.max);
+      const n = box.querySelectorAll('[data-row]').length;
+      if (n >= max) return;
+      el.insertAdjacentHTML('beforebegin', contactRow({}, n + 1, true));
+      box.querySelectorAll('[data-row]')[n].querySelector('input')?.focus();
+      el.textContent = `＋ ${el.dataset.label} (${n + 1}/${max})`;
+      if (n + 1 >= max) el.hidden = true;
+    },
+    'row-del'(el) {
+      const box = el.closest('[data-rows]'); const row = el.closest('[data-row]');
+      if (box.querySelectorAll('[data-row]').length <= 1) return;
+      row.remove();
+      const rows = [...box.querySelectorAll('[data-row]')];
+      rows.forEach((r, i) => { const [a, b] = r.querySelectorAll('label'); a.firstChild.textContent = `Name ${i + 1}`; b.firstChild.textContent = `Phone ${i + 1}`; r.querySelector('.row-del').hidden = i === 0; });
+      const add = box.querySelector('[data-act="row-add"]'); add.hidden = false; add.textContent = `＋ ${add.dataset.label} (${rows.length}/${add.dataset.max})`;
+    },
     async 'trip-safe'() { try { await api().endTrip({ safe: true }); store.set('tripActive', null); if (native.available()) prefs.get().armed ? native.startSafety('armed') : native.stopSafety(); toast('💚 Trip ended — your contacts are told you are safe', 'ok'); announce('Trip ended. You are marked safe.'); render(); } catch (e) { showErr(e); } },
     async 'trip-end'() { try { await api().endTrip({ safe: false }); store.set('tripActive', null); if (native.available()) prefs.get().armed ? native.startSafety('armed') : native.stopSafety(); render(); } catch (e) { showErr(e); } },
     async 'trip-extend'() { try { await api().extendTrip({ minutes: 15 }); toast('15 more minutes', 'ok'); render(); } catch (e) { showErr(e); } },
@@ -341,14 +376,23 @@ export function initProtect(c) {
     'voice-command'() { voiceCommand(); },
     'speak-status'() { speakStatus(st.incident, { force: true }); },
   };
+  const readRows = (f) => [...f.querySelectorAll('[data-row]')].map((r) => ({ name: r.querySelector('[name="cname"]').value.trim(), phone: r.querySelector('[name="cphone"]').value.trim() })).filter((x) => x.name || x.phone);
   const forms = {
+    async important(f) {
+      const cs = readRows(f);
+      if (cs.length < 1) return toast('Add at least 1 important contact', 'error');
+      if (cs.length > 5) return toast('Up to 5 important contacts', 'error');
+      if (cs.some((x) => !x.name || x.phone.replace(/[^\d]/g, '').length < 6)) return toast('Each contact needs a name and a valid phone number', 'error');
+      try { const r = await api().saveContacts({ contacts: cs }); contacts.replace(r.contacts || cs); c.syncNative(); toast('Important contacts saved', 'ok'); render(); } catch (e) { showErr(e); }
+    },
     async place(f) {
       const list = [...places()];
       const i = f.dataset.i === 'new' ? -1 : Number(f.dataset.i);
       const where = parseLatLng(f.where.value) || st.placeDraft || (i >= 0 ? { lat: list[i].lat, lng: list[i].lng } : null);
       if (!where) return toast('Set the location: tap "Use where I am now" or paste a Google Maps link', 'error');
-      const cs = [0, 1, 2, 3, 4].map((k) => ({ name: f[`cn${k}`].value.trim(), phone: f[`cp${k}`].value.trim() })).filter((x) => x.name || x.phone);
-      if (cs.length < 3) return toast('Add at least 3 contacts for this place', 'error');
+      const cs = readRows(f);
+      if (cs.length < 1) return toast('Add at least 1 contact for this place', 'error');
+      if (cs.length > 3) return toast('Up to 3 contacts per place', 'error');
       const p = { id: i >= 0 ? list[i].id : undefined, label: f.label.value.trim(), lat: where.lat, lng: where.lng, radiusM: Number(f.radiusM.value), contacts: cs };
       if (i >= 0) list[i] = p; else list.push(p);
       try { const r = await api().savePlaces(list); store.set('places', r.places); st.placeEdit = null; st.placeDraft = null; c.syncNative(); toast('Saved — contacts will switch automatically with your location', 'ok'); render(); } catch (e) { showErr(e); }
