@@ -1,11 +1,11 @@
-import { createApi, uuid } from './api.js?v=6af158e2';
-import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang } from './i18n.js?v=6af158e2';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=6af158e2';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=6af158e2';
-import { TRAINING_MODULES } from '../core/engine.js?v=6af158e2';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=6af158e2';
-import { initProtect } from './protect-ui.js?v=6af158e2';
-import { a11y, announce, speakStatus } from './a11y.js?v=6af158e2';
+import { createApi, uuid } from './api.js?v=mw94n77g';
+import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang } from './i18n.js?v=mw94n77g';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mw94n77g';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mw94n77g';
+import { TRAINING_MODULES } from '../core/engine.js?v=mw94n77g';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mw94n77g';
+import { initProtect } from './protect-ui.js?v=mw94n77g';
+import { a11y, announce, speakStatus } from './a11y.js?v=mw94n77g';
 let P = null; // autonomous-protection screens (protect-ui.js), set up in boot()
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'impact', volSel: null };
@@ -185,10 +185,14 @@ async function viewLogin(params) {
 }
 
 function viewChangePassword() {
-  return shell(`<section class="narrow"><h1>Choose a new password</h1><p class="muted">Your password was reset. Choose a new one to continue.</p>
-    <form class="card form" data-form="change-pw"><label>Temporary / current password<input name="cur" type="password" required autocomplete="current-password"></label>
-    <label>New password (${['operator', 'admin'].includes(st.me?.role) ? 12 : 10}+ characters)<input name="pw" type="password" minlength="10" required autocomplete="new-password"></label>
-    <button class="btn btn-primary">Save</button></form></section>`, { nav: false });
+  const forced = !!st.me?.mustChangePassword, min = ['operator', 'admin'].includes(st.me?.role) ? 12 : 10;
+  return shell(`<section class="narrow"><h1>Choose a new password</h1><p class="muted">${forced ? 'Your password was reset by the admin. Choose your own new password to continue — you will use it from now on.' : 'Enter your current password, then the new one twice.'}</p>
+    <form class="card form" data-form="change-pw">
+    ${forced ? '' : '<label>Current password<input name="cur" type="password" required autocomplete="current-password"></label>'}
+    <label>New password (${min}+ characters)<input name="pw" type="password" minlength="${min}" required autocomplete="new-password" autocapitalize="off" spellcheck="false"></label>
+    <label>Type the new password again<input name="pw2" type="password" minlength="${min}" required autocomplete="new-password" autocapitalize="off" spellcheck="false"></label>
+    <label class="switch"><input type="checkbox" data-change="show-pw"> Show passwords</label>
+    <button class="btn btn-primary">Save new password</button></form></section>`, { nav: false });
 }
 
 function viewConnect() {
@@ -1221,7 +1225,16 @@ const forms = {
     patch.countryCode = f.countryCode.value;
     try { await st.api.patchConfig(patch); toast('Policy saved & audited', 'ok'); } catch (e) { showErr(e); }
   },
-  async 'change-pw'(f) { try { await st.api.changePassword({ currentPassword: f.cur.value, newPassword: f.pw.value }); st.me = (await st.api.me()).user; toast('Password changed', 'ok'); go(roleHome(st.me.role)); } catch (e) { showErr(e); } },
+  async 'change-pw'(f) {
+    if (f.pw.value !== f.pw2.value) return toast('The two new passwords do not match — type them again', 'error', 5000);
+    try {
+      await st.api.changePassword({ currentPassword: f.cur ? f.cur.value : '', newPassword: f.pw.value });
+      st.me = (await st.api.me()).user;
+      toast('✅ Password changed. Use your new password next time you log in.', 'ok', 6000);
+      afterLogin();
+      go(roleHome(st.me.role));
+    } catch (e) { showErr(e); }
+  },
   async connect(f) {
     const url = f.url.value.trim().replace(/\/$/, '');
     try { const r = await fetch(url + '/api/v1/health'); if (!r.ok) throw new Error(); } catch { return toast('Could not reach that server', 'error'); }
@@ -1239,6 +1252,7 @@ const changes = {
   customSosWords(el) { const words = el.value.split(',').map((w) => w.trim()).filter((w) => w.length >= 3).slice(0, 5); prefs.set({ customSosWords: words }); syncNative(); toast(words.length ? `Secret words saved: ${words.join(', ')}` : 'Secret words cleared', 'ok'); },
   lang(el) { setLang(el.value); render(); syncNative(); if (voice.active) { voice.stop(); voice.start(() => startCountdown('voice')); } },
   country(el) { prefs.set({ country: el.value }); render(); },
+  'show-pw'(el) { el.closest('form').querySelectorAll('input[name^="pw"], input[name="cur"]').forEach((i) => { i.type = el.checked ? 'text' : 'password'; }); },
   async shake(el) {
     if (el.checked) { const r = await shake.enable(() => startCountdown('shake')); if (r !== 'on') { el.checked = false; return toast(r === 'denied' ? 'Motion permission denied' : 'Motion sensors not available', 'error'); } }
     else shake.disable();
@@ -1261,6 +1275,7 @@ async function pullContacts() {
   try { const c = await st.api.getContacts(); if (!contacts.list().length && c.contacts?.length) store.set('contacts', c.contacts); else if (contacts.list().length && !c.contacts?.length) await st.api.saveContacts({ contacts: contacts.list() }); } catch {}
 }
 function afterLogin() {
+  if (st.me?.mustChangePassword) return go('#/change-password'); // the rest runs once she has chosen her own password
   const p = prefs.get();
   if (['user', 'volunteer'].includes(st.me.role)) { pullContacts().then(() => st.me?.role === 'user' && P.pullPlaces()).then(syncNative); registerAppPush(); }
   if (st.me.role === 'user') {
@@ -1333,6 +1348,7 @@ async function boot() {
   }
 }
 function afterLoginSilent() {
+  if (st.me?.mustChangePassword) return;
   const p = prefs.get();
   if (['user', 'volunteer'].includes(st.me.role)) { pullContacts().then(() => st.me?.role === 'user' && P.pullPlaces()).then(syncNative); registerAppPush(); }
   if (p.shake) shake.enable(() => startCountdown('shake'));

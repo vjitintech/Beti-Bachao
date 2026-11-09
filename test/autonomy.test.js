@@ -121,3 +121,25 @@ test('dashboards and public impact counter', async () => {
   assert.ok(pub.womenRegistered >= 1); assert.ok('womenProtected' in pub);
   assert.equal((await W.user.call('GET', '/admin/dashboard')).status, 403);
 });
+
+test('admin reset → temporary password → new password works, wrong current password never logs the phone out', async () => {
+  const { boot, client, world } = await import('./helpers.js');
+  const S = await boot(); const W = await world(S.base);
+  const id = (await W.admin.call('GET', '/admin/users?q=aamani')).body.items[0].id;
+  const temp = (await W.admin.call('POST', `/admin/users/${id}/reset-password`)).body.temporaryPassword;
+  const login = (pw) => fetch(S.base + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-BB-CSRF': '1' }, body: JSON.stringify({ email: 'aamani@test.betibachao.app', password: pw, client: 'mobile' }) });
+  const tok = (await (await login(temp)).json()).token;
+  const H = { 'Content-Type': 'application/json', 'X-BB-CSRF': '1', Authorization: 'Bearer ' + tok };
+  // forced change straight after the reset: the temporary password need not be typed again
+  const ch = await fetch(S.base + '/auth/change-password', { method: 'POST', headers: H, body: JSON.stringify({ currentPassword: 'mistyped', newPassword: 'my-own-new-pass-1' }) });
+  assert.equal(ch.status, 200);
+  assert.equal((await fetch(S.base + '/me', { headers: H })).status, 200, 'still signed in');
+  assert.equal((await login('my-own-new-pass-1')).status, 200, 'new password works');
+  assert.equal((await login(temp)).status, 401, 'temporary password no longer works');
+  // a normal change with a wrong current password is a 400 (the app keeps the session)
+  const bad = await fetch(S.base + '/auth/change-password', { method: 'POST', headers: H, body: JSON.stringify({ currentPassword: 'wrong', newPassword: 'whatever-pass-99' }) });
+  assert.equal(bad.status, 400);
+  assert.equal((await bad.json()).error.code, 'WRONG_CURRENT_PASSWORD');
+  assert.equal((await fetch(S.base + '/me', { headers: H })).status, 200);
+  S.app.server.close();
+});

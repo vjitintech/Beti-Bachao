@@ -430,11 +430,15 @@ export function createServer(opts = {}) {
   }, { limit: [30, 3600e3] });
   route('POST', '/auth/change-password', ({ actor, body }) => {
     const u = engine.user(actor.id);
-    if (!verifyPassword(body.currentPassword || '', u.passwordHash)) throw new EngineError(401, 'INVALID_CREDENTIALS', 'Current password is incorrect');
+    // Right after an admin reset she has just signed in with the temporary password,
+    // so that session itself proves it: no need to type the temporary password again.
+    const freshAfterReset = u.mustChangePassword && actor.session && actor.session.createdAt >= (u.passwordResetAt || 0);
+    // 400, not 401: a wrong current password must not look like an expired session (the app would log her out).
+    if (!freshAfterReset && !verifyPassword(body.currentPassword || '', u.passwordHash)) throw new EngineError(400, 'WRONG_CURRENT_PASSWORD', 'Current password is incorrect');
     const min = ['operator', 'admin'].includes(u.role) ? 12 : 10;
     if (typeof body.newPassword !== 'string' || body.newPassword.length < min) throw new EngineError(400, 'WEAK_PASSWORD', `New password must be at least ${min} characters`);
-    u.passwordHash = hashPassword(body.newPassword); u.mustChangePassword = false;
-    store.db.sessions = store.db.sessions.filter((x) => x.userId !== u.id || x === actor.session);
+    u.passwordHash = hashPassword(body.newPassword); u.mustChangePassword = false; u.passwordResetAt = null;
+    store.db.sessions = store.db.sessions.filter((x) => x.userId !== u.id || x.tokenHash === actor.session?.tokenHash);
     engine.audit(u.id, 'PASSWORD_CHANGED', 'user', u.id);
     return { ok: true };
   }, { limit: [10, 3600e3] });

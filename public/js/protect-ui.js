@@ -2,10 +2,10 @@
 // places & location-based contacts, Track my travel, nearby help, dashboards,
 // police auto-connect status, operator acknowledgement, evidence, admin impact &
 // police-station import, blink trigger page, spoken guidance for blind users.
-import { sosWords, heardSosWord, lang as curLang } from './i18n.js?v=6af158e2';
-import { pickContacts } from '../core/protect.js?v=6af158e2';
-import { announce, speakStatus, listenOnce, a11y } from './a11y.js?v=6af158e2';
-import { blinkGuard } from './blink.js?v=6af158e2';
+import { sosWords, heardSosWord, lang as curLang } from './i18n.js?v=mw94n77g';
+import { pickContacts } from '../core/protect.js?v=mw94n77g';
+import { announce, speakStatus, listenOnce, a11y } from './a11y.js?v=mw94n77g';
+import { blinkGuard } from './blink.js?v=mw94n77g';
 
 export function initProtect(c) {
   const { st, esc, toast, modal, showErr, go, render, geo, contacts, prefs, store, native, platform, telHref, fmtTime, pretty, nativeShare, serverUrl, isNative } = c;

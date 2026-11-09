@@ -242,6 +242,24 @@ try {
   await reg.click('[data-form="register"] button[type="submit"]');
   await reg.waitForSelector('#sos-btn');
   step('self-registration with consent works');
+
+  const nid = (await W.admin.call('GET', '/admin/users?q=new@test')).body.items[0].id;
+  const temp = (await W.admin.call('POST', `/admin/users/${nid}/reset-password`)).body.temporaryPassword;
+  const rp = await page('reset');
+  await signIn(rp, 'new@test.betibachao.app', temp);
+  await rp.waitForSelector('[data-form="change-pw"]');
+  if (await rp.$('[data-form="change-pw"] [name="cur"]')) throw new Error('temporary password asked again');
+  await rp.fill('[name="pw"]', 'my-own-new-pass-1'); await rp.fill('[name="pw2"]', 'my-own-new-pass-2');
+  await rp.click('[data-form="change-pw"] button');
+  await rp.waitForFunction(() => document.body.innerText.includes('do not match')).catch(async (e) => { console.log('BODY:', (await rp.innerText('body')).slice(0, 600)); throw e; });
+  await rp.fill('[name="pw2"]', 'my-own-new-pass-1');
+  await shot(rp, '15-change-password');
+  await rp.click('[data-form="change-pw"] button');
+  await rp.waitForSelector('#sos-btn');
+  await rp.click('[data-act="logout"]');
+  await signIn(rp, 'new@test.betibachao.app', 'my-own-new-pass-1');
+  await rp.waitForSelector('#sos-btn');
+  step('admin reset → temporary password → own new password → log out → log in with new password');
 } catch (e) {
   console.error('✗', e.message);
   process.exitCode = 1;

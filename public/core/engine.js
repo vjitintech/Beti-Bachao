@@ -15,9 +15,9 @@
 //   • escalation adapter is SIMULATED until a real integration is approved
 //   • append-only, hash-chained audit log
 
-import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=6af158e2';
-import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=6af158e2';
-import { protectMethods } from './protect.js?v=6af158e2';
+import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mw94n77g';
+import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mw94n77g';
+import { protectMethods } from './protect.js?v=mw94n77g';
 
 export const S = Object.freeze({
   CREATED: 'CREATED',
@@ -1104,7 +1104,7 @@ export class Engine {
     const a = this.requireRole(actor, 'admin');
     const u = this.user(userId);
     if (!u || u.status === 'DELETED') fail(404, 'NOT_FOUND');
-    u.passwordHash = passwordHash; u.mustChangePassword = true; u.updatedAt = this.iso();
+    u.passwordHash = passwordHash; u.mustChangePassword = true; u.passwordResetAt = this.now(); u.updatedAt = this.iso();
     if (['operator', 'admin'].includes(u.role)) { u.mfaEnrolled = false; u.mfaSecret = null; u.pendingMfaSecret = null; }
     this.audit(a.id, 'PASSWORD_RESET_BY_ADMIN', 'user', u.id);
     return { ok: true };

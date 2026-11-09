@@ -5,7 +5,7 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xx
 export class ApiError extends Error { constructor(status, code, message) { super(message || code); this.status = status; this.code = code; } }
 
 // ------------------------------------------------------------------ server
-import { isNative, native, serverUrl } from './native.js?v=6af158e2';
+import { isNative, native, serverUrl } from './native.js?v=mw94n77g';
 
 class ServerApi {
   constructor() { this.mode = isNative ? 'app' : 'server'; this.listeners = new Set(); this.es = null; this.token = null; }
@@ -20,7 +20,8 @@ class ServerApi {
     } catch { throw new ApiError(0, 'NETWORK', 'No connection'); }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      if (res.status === 401 && this.token && path !== '/auth/login') await this.setToken(null);
+      // Only a dead session logs her out — not a wrong password or code typed into a form.
+      if (res.status === 401 && this.token && path !== '/auth/login' && (data.error?.code || 'UNAUTHENTICATED') === 'UNAUTHENTICATED') await this.setToken(null);
       throw new ApiError(res.status, data.error?.code || 'ERROR', data.error?.message || 'Request failed');
     }
     return data;
