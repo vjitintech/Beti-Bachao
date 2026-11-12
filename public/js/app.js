@@ -1,12 +1,12 @@
-import { createApi, uuid } from './api.js?v=mwdlp5hy';
-import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang, ownSosWords, sosVoiceLang } from './i18n.js?v=mwdlp5hy';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwdlp5hy';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwdlp5hy';
-import { TRAINING_MODULES } from '../core/engine.js?v=mwdlp5hy';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwdlp5hy';
-import { initProtect } from './protect-ui.js?v=mwdlp5hy';
-import { a11y, announce, speakStatus } from './a11y.js?v=mwdlp5hy';
-import { phoneInput, readPhone, guessCountry, bindPhoneFields } from './phone.js?v=mwdlp5hy';
+import { createApi, uuid } from './api.js?v=mwdob6or';
+import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang, ownSosWords, sosVoiceLang } from './i18n.js?v=mwdob6or';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwdob6or';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwdob6or';
+import { TRAINING_MODULES } from '../core/engine.js?v=mwdob6or';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwdob6or';
+import { initProtect } from './protect-ui.js?v=mwdob6or';
+import { a11y, announce, speakStatus } from './a11y.js?v=mwdob6or';
+import { phoneInput, readPhone, guessCountry, bindPhoneFields } from './phone.js?v=mwdob6or';
 let P = null; // autonomous-protection screens (protect-ui.js), set up in boot()
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'impact', volSel: null };
@@ -36,7 +36,26 @@ const statusText = (v) => {
 function openExternal(href) { const a = document.createElement('a'); a.href = href; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove(); }
 // A timeline entry as a readable sentence (escalations keep their own capitalised label).
 const tlText = (it) => (it?.kind === 'escalation' && String(it.text).includes(': ') ? String(it.text).split(': ').slice(1).join(': ') : pretty(it?.text));
-const pretty = (s) => String(s || '').replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
+// Status codes (EN_ROUTE, POLICE_AUTO_CONNECT) → sentence case ("En route"); real text, names and
+// labels keep their own capitals ("Kurnool Test PS", "SOS", "OTP").
+const STATUS_TEXT = {
+  CREATED: 'SOS received', ALERTING_10KM: 'Alerting volunteers within 10 km', ALERTING_20KM: 'Alerting volunteers within 20 km', ALERTING_30KM: 'Alerting volunteers within 30 km',
+  RESPONDER_ASSIGNED: 'Volunteer accepted', EN_ROUTE: 'Volunteer on the way', ARRIVED: 'Volunteer arrived', ASSISTANCE_IN_PROGRESS: 'Volunteer is helping',
+  ESCALATION_REQUIRED: 'Escalated to operators', NO_RESPONDER_AVAILABLE: 'No volunteer available yet', EMERGENCY_HANDOFF: 'Handed to emergency services',
+  USER_CANCELLED: 'Cancelled by her', RESPONDER_CANCELLED: 'Volunteer stood down', LOCATION_UNAVAILABLE: 'Waiting for her location', SAFE_CONFIRMED: 'She confirmed she is safe',
+  CLOSED: 'Closed', FALSE_ALARM_REVIEW: 'Under review as a false alarm', IMMEDIATE_DANGER: 'Immediate danger', OPERATOR_NO_ACK: 'No operator acknowledged yet',
+  NO_RESPONDER: 'No volunteer accepted', POLICE_AUTO_CONNECT: 'Police auto-connect', USER_REPORTED_DANGER: 'She reported danger', CONTACTS_STILL_WAITING: 'Contacts told she is still waiting',
+  ATTEMPTED: 'Attempted', REQUIRED: 'Required', DELIVERED: 'Delivered', ACKNOWLEDGED: 'Acknowledged', ACCEPTED: 'Accepted', DECLINED: 'Declined', UNABLE: 'Unable to help', COMPLETED: 'Completed',
+};
+const KEEP_UPPER = new Set(['sos', 'otp', 'sms', 'gps', 'eta', 'id', 'ps', 'mfa', 'pin', 'ai']);
+const pretty = (s) => {
+  const t = String(s || '');
+  if (STATUS_TEXT[t]) return STATUS_TEXT[t];
+  if (!/^[A-Z0-9_ ]+$/.test(t) || !/[A-Z]/.test(t)) return t; // already human text: leave it alone
+  const words = t.replace(/_/g, ' ').toLowerCase().split(' ').map((w) => (KEEP_UPPER.has(w) ? w.toUpperCase() : w));
+  const out = words.join(' ');
+  return out.charAt(0).toUpperCase() + out.slice(1);
+};
 
 // Google Maps embedded inside the app (no API key, nothing opens externally).
 // Rounded to ~11 m so the frame only reloads when the position really changes.
@@ -149,7 +168,6 @@ function shell(content, { nav = true } = {}) {
   }[role] || [];
   const cur = location.hash.split('/').slice(0, 2).join('/');
   return `
-    ${st.offline ? `<div class="offline-banner" role="alert">⚠️ Can't reach the Beti Bachao server. Your SOS will be queued; call ${esc(country().emergency)} now if you are in danger.</div>` : ''}
     <header class="topbar">
       <a href="${role ? roleHome(role) : '#/'}" class="brand" aria-label="Beti Bachao home"><img src="icons/icon-192.png" alt="" width="30" height="30" class="brand-icon"><span>Beti Bachao</span></a>
       <div class="topbar-right">
@@ -158,6 +176,7 @@ function shell(content, { nav = true } = {}) {
         ${role ? `<button class="btn btn-ghost btn-sm" data-act="logout">${esc(t('logout'))}</button>` : `<a class="btn btn-ghost btn-sm" href="#/login">${esc(t('login'))}</a>`}
       </div>
     </header>
+    ${st.offline ? `<div class="offline-banner" role="alert"><b>No connection to Beti Bachao.</b> Your SOS will be sent as soon as you're back online. In danger, call ${esc(country().emergency)} now.</div>` : ''}
     <main id="main" tabindex="-1">${content}</main>
     ${nav && links.length ? `<nav class="bottom-nav" aria-label="Primary">${links.map(([h, i, l]) => `<a href="${h}" class="${cur === h ? 'active' : ''}" ${cur === h ? 'aria-current="page"' : ''}><span aria-hidden="true">${i}</span>${esc(l)}</a>`).join('')}</nav>` : ''}
   `;
@@ -344,7 +363,7 @@ const newShareToken = () => [...crypto.getRandomValues(new Uint8Array(16))].map(
 // The SMS her phone sends by itself: short, plain GSM-7 English (no emoji / Indic script),
 // so it fits in 1–2 SMS parts and goes out and arrives fastest on every network.
 function sosSmsText(loc, shareToken) {
-  const where = loc ? `https://maps.google.com/?q=${loc.lat.toFixed(5)},${loc.lng.toFixed(5)}${loc.accuracyM ? ` (+/-${Math.round(loc.accuracyM)}m)` : ''}` : 'location coming in next SMS';
+  const where = loc ? `https://maps.google.com/?q=${loc.lat.toFixed(5)},${loc.lng.toFixed(5)}${loc.accuracyM ? ` (+/-${Math.round(loc.accuracyM)}m)` : ''}` : 'see live link';
   const live = shareToken ? ` Live: ${liveLink(`/s/${shareToken}`)}` : '';
   return `SOS! I need help (Beti Bachao). Location: ${where}.${live} Call me or 112.`;
 }
@@ -403,7 +422,6 @@ async function triggerSOS({ severity = 'HIGH', silent = false, trigger = 'button
       smsP = native.sendSos({ numbers: nums, message: sosSmsText(loc0, pending.shareToken), sms112: !!prefs.get().sms112 })
         .then((r) => { deviceSmsSent = !!(r && r.sent > 0); })
         .catch(() => {});
-      if (!loc0) smsP = smsP.then(() => locP).then((l) => { if (l && deviceSmsSent) native.sendSos({ numbers: nums, message: `SOS update - my location: https://maps.google.com/?q=${l.lat.toFixed(5)},${l.lng.toFixed(5)} (+/-${Math.round(l.accuracyM || 0)}m)`, sms112: false }).catch(() => {}); });
     } else if (nums.length) openExternal(smsHref(nums, sosMessage(loc0, pending.shareToken)));
   }
   if (!silent) vibrate([200, 100, 200]);
@@ -558,7 +576,7 @@ async function viewIncident(id, params) {
         <div class="stars" role="radiogroup" aria-label="Rating">${[1, 2, 3, 4, 5].map((n) => `<label class="star"><input type="radio" name="stars" value="${n}" required> ${'★'.repeat(n)}</label>`).join('')}</div>
         <label class="switch"><input type="checkbox" name="feltUnsafe"> I felt unsafe with this volunteer (the trust team will review)</label>
         <label>Comment (optional)<input name="comment" maxlength="500"></label><button class="btn btn-primary btn-sm">Submit rating</button></form>`).join('')}<button class="btn btn-ghost btn-sm" data-act="skip-rating" data-id="${esc(v.id)}">Skip</button></section>` : ''}`}
-    <details class="card" data-keep="user-timeline"><summary>${esc(t('timeline'))} (${tl.length})</summary><ol class="timeline">${tl.map((x) => `<li><time>${esc(fmtTime(x.at))}</time> ${esc(pretty(x.text))}${x.reason ? ` <small class="muted">— ${esc(x.reason)}</small>` : ''}</li>`).join('')}</ol></details>
+    <details class="card" data-keep="user-timeline"><summary>${esc(t('timeline'))} (${tl.length})</summary><ol class="timeline">${tl.map((x) => `<li><time>${esc(fmtTime(x.at))}</time> ${esc(tlText(x))}${x.reason ? ` <small class="muted">— ${esc(x.reason)}</small>` : ''}</li>`).join('')}</ol></details>
   `);
 }
 
@@ -822,7 +840,7 @@ async function viewOps() {
     <div class="ops-layout">
       <section class="card ops-list"><h2>Incidents (${list.length})</h2>
         <ul>${list.map((i) => `<li><button class="alert-item status-${esc(i.color)} ${i.id === selId ? 'sel' : ''}" data-act="op-select" data-id="${esc(i.id)}"><span class="dot"></span>
-          <span>${i.duress ? '🚩 DURESS · ' : ''}${!i.opAckAt && !i.police && !['CLOSED', 'USER_CANCELLED'].includes(i.status) ? '✋ NEEDS ACK · ' : ''}${i.police ? '🚓 ' : ''}${i.severity === 'HIGH' ? '🔥 ' : ''}${esc(pretty(i.status))}</span>
+          <span>${i.duress ? '🚩 DURESS · ' : ''}${!i.opAckAt && !i.police && !['CLOSED', 'USER_CANCELLED'].includes(i.status) ? '✋ Needs acknowledgement · ' : ''}${i.police ? '🚓 ' : ''}${i.severity === 'HIGH' ? '🔥 ' : ''}${esc(pretty(i.status))}</span>
           <small>${esc(fmtTime(i.createdAt))} · ${i.radiusKm ? esc(i.radiusKm) + ' km' : '—'} · ${esc(i.responders)} resp · ${i.location ? `±${esc(i.location.accuracyM)}m` : 'no location'}${i.flags.includes('LOCATION_STALE') ? ' · stale' : ''}</small></button></li>`).join('') || '<li class="muted">No active incidents.</li>'}</ul>
       </section>
       ${d ? opsDetail(d, tl, cfg) : '<section class="card"><p class="muted">Select an incident.</p></section>'}
@@ -853,7 +871,7 @@ function opsDetail(d, tl, cfg) {
     <div class="row space"><h2>${esc(d.requester?.displayName)} · <span class="status-text-${esc(d.color)}">${esc(pretty(d.status))}</span></h2><span class="badge">${esc(d.severity)}</span></div>
     ${P.opsAck(d)}
     ${d.duress ? '<div class="alert alert-danger"><strong>🚩 DURESS PIN USED.</strong> The user\'s app shows "cancelled". Treat as active danger. Do not contact her in a way that could reveal this.</div>' : ''}
-    <p>Trigger: ${esc(d.trigger)}${d.silent ? ' (silent)' : ''} · Escalation: <strong>${esc(d.escalationStatus)}</strong> · Alerted: ${esc(d.alertedCount)} · Battery: ${d.battery ? Math.round(d.battery.level * 100) + '%' : 'unknown'}</p>
+    <p>Trigger: ${esc(pretty(String(d.trigger || "").toUpperCase()))}${d.silent ? ' (silent)' : ''} · Escalation: <strong>${esc(pretty(d.escalationStatus))}</strong> · Alerted: ${esc(d.alertedCount)} · Battery: ${d.battery ? Math.round(d.battery.level * 100) + '%' : 'unknown'}</p>
     ${d.location ? `${scope}
       <h3>📍 Her live location</h3>${googleMap(d.location, 'Her live location', 'ops')}
       <p>📍 ${esc(d.location.lat.toFixed(5))}, ${esc(d.location.lng.toFixed(5))} · ±${esc(d.location.accuracyM)} m · ${esc(d.location.source)} · <span data-live="age" data-fmt="short" data-at="${esc(d.location.observedAt)}"></span> old ${d.location.stale ? '<span class="badge badge-warn">STALE</span>' : ''} · ${esc(d.location.vertical)}</p>
@@ -871,20 +889,20 @@ function opsDetail(d, tl, cfg) {
     </div>
     ${d.requester?.phone ? `<p>📞 Her number: <a href="tel:${esc(d.requester.phone)}">${esc(d.requester.phone)}</a>${d.duress ? ' <strong class="danger-text">— DURESS: do not call openly</strong>' : ''}</p>` : ''}
     <h3>Escalations</h3>
-    <ul>${d.escalations.map((e) => `<li><strong>${esc(e.type)}</strong> · ${esc(e.status)} · <em>${esc(e.label)}</em> · ${esc(fmtTime(e.attemptedAt))}${e.reason ? ` — ${esc(e.reason)}` : ''}</li>`).join('') || '<li class="muted">None</li>'}</ul>
+    <ul>${d.escalations.map((e) => `<li><strong>${esc(pretty(e.type))}</strong> · ${esc(pretty(e.status))} · ${esc(e.label)} · ${esc(fmtTime(e.attemptedAt))}${e.reason ? ` — ${esc(e.reason)}` : ''}</li>`).join('') || '<li class="muted">None</li>'}</ul>
     <h3>Notifications</h3>
     <p class="small">${d.notifications.length} sent · ${d.notifications.filter((n) => n.status === 'FAILED').length} failed · ${d.notifications.filter((n) => n.attemptCount > 1).length} used fallback</p>
     ${!d.closed ? `
     <div class="ops-actions">
       <form class="card form" data-form="handoff" data-id="${esc(d.id)}"><h3>Record emergency-service handoff</h3><p class="muted small">Record what you did (e.g. phoned the control room). Automatic police contact is shown above.</p>
-        <label>Status<select name="status"><option>ATTEMPTED</option><option>DELIVERED</option><option>ACKNOWLEDGED</option><option>FAILED</option></select></label>
+        <label>Status<select name="status"><option value="ATTEMPTED">Attempted</option><option value="DELIVERED">Delivered</option><option value="ACKNOWLEDGED">Acknowledged</option><option value="FAILED">Failed</option></select></label>
         <label>Details / reference<input name="reason" required minlength="5" maxlength="300"></label><button class="btn btn-warn">Record handoff</button></form>
       <form class="card form" data-form="closure" data-id="${esc(d.id)}"><h3>Closure exception</h3><p class="muted small">Only when the user cannot confirm safety. Fully audited.</p>
         <label>Reason<select name="reason"><option value="HANDED_TO_EMERGENCY_SERVICES_CONFIRMED_SAFE">Handed to emergency services — confirmed safe</option><option value="USER_UNREACHABLE_EMERGENCY_SERVICES_IN_CHARGE">User unreachable — emergency services in charge</option><option value="DUPLICATE_INCIDENT">Duplicate incident</option><option value="VERIFIED_FALSE_ALARM">Verified false alarm</option></select></label>
         <label>Note (10+ chars)<textarea name="note" required minlength="10" maxlength="500"></textarea></label><button class="btn btn-ghost danger-text">Close with exception</button></form>
       <button class="btn btn-danger" data-act="op-escalate" data-id="${esc(d.id)}">Mark escalation required</button>
     </div>` : `<p>Closed: ${esc(pretty(d.closureReason))}</p>`}
-    <details data-keep="ops-timeline"><summary>Timeline (${tl.length})</summary><ol class="timeline">${tl.map((x) => `<li><time>${esc(fmtTime(x.at))}</time> ${esc(pretty(x.text))}${x.reason ? ` <small class="muted">— ${esc(x.reason)}</small>` : ''}</li>`).join('')}</ol></details>
+    <details data-keep="ops-timeline"><summary>Timeline (${tl.length})</summary><ol class="timeline">${tl.map((x) => `<li><time>${esc(fmtTime(x.at))}</time> ${esc(tlText(x))}${x.reason ? ` <small class="muted">— ${esc(x.reason)}</small>` : ''}</li>`).join('')}</ol></details>
   </section>`;
 }
 
@@ -1103,8 +1121,11 @@ function morph(a, b) {
 // Re-render without losing typing: skip if the user is in a form field.
 function refreshSoft() {
   const a = document.activeElement;
-  if (a && ['INPUT', 'TEXTAREA', 'SELECT'].includes(a.tagName) && a.closest('form')) return;
+  if (a && ['INPUT', 'TEXTAREA', 'SELECT'].includes(a.tagName)) return; // typing or choosing
   if ($('.modal-backdrop')) return;
+  // While someone is filling in a form (handoff note, closure reason, police station…), live updates
+  // wait until they submit or leave it alone for 30 s, so nothing they typed or picked is lost.
+  if (Date.now() < (st.editingUntil || 0)) { clearTimeout(st.editRetry); st.editRetry = setTimeout(refreshSoft, 2000); return; }
   st.softRefresh = true;
   render();
 }
@@ -1557,6 +1578,8 @@ async function boot() {
     forms[f.dataset.form]?.(f);
   });
   document.addEventListener('change', (e) => { const el = e.target.closest('[data-change]'); if (el) changes[el.dataset.change]?.(el); });
+  for (const ev of ['input', 'change', 'focusin']) document.addEventListener(ev, (e) => { if (e.target.closest?.('form:not([data-form="login"])') && !e.target.closest('[data-change]')) st.editingUntil = Date.now() + 30000; });
+  document.addEventListener('submit', () => { st.editingUntil = 0; }, true);
   // Phone country picker ↔ sign-up "Country" select stay in step.
   bindPhoneFields(document, (iso, sel) => { const c = sel.form?.countryCode; if (c && [...c.options].some((o) => o.value === iso)) c.value = iso; });
   document.addEventListener('change', (e) => { const c = e.target; if (c.name !== 'countryCode' || !c.form) return; const p = c.form.querySelector('[name="phone_cc"]'); if (p && !c.form.phone?.value) p.value = c.value; });

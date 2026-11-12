@@ -104,7 +104,7 @@ public final class NativeSos {
             MAIN.postDelayed(() -> { if (!done[0]) { done[0] = true; cts.cancel(); report(app, trigger, quick, shareToken, first); } }, 3500);
             fused.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.getToken()).addOnCompleteListener(t -> {
                 Location fix = t.isSuccessful() ? t.getResult() : null;
-                if (fix != null && quick == null && first.sent > 0) sendSms(app, fix, null, true); // location the first SMS lacked
+                // No second SMS here: the live link in the first SMS shows her location as soon as it arrives.
                 if (done[0]) return;
                 done[0] = true;
                 report(app, trigger, fix != null ? fix : quick, shareToken, first);
@@ -121,7 +121,7 @@ public final class NativeSos {
         List<String> numbers = Places.numbersFor(app, loc); // the contacts for the place she is at
         r.numbers.addAll(numbers);
         if (!followUp && Store.getBool(app, "sms112", false)) numbers.add("112");
-        String where = loc == null ? "location coming in next SMS"
+        String where = loc == null ? "see live link"
                 : String.format(Locale.US, "https://maps.google.com/?q=%.5f,%.5f (+/-%dm)", loc.getLatitude(), loc.getLongitude(), Math.round(loc.getAccuracy()));
         String msg;
         if (followUp) msg = "SOS update - my location: " + where;
