@@ -1,11 +1,11 @@
-import { createApi, uuid } from './api.js?v=mwcy6y57';
-import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang } from './i18n.js?v=mwcy6y57';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwcy6y57';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwcy6y57';
-import { TRAINING_MODULES } from '../core/engine.js?v=mwcy6y57';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwcy6y57';
-import { initProtect } from './protect-ui.js?v=mwcy6y57';
-import { a11y, announce, speakStatus } from './a11y.js?v=mwcy6y57';
+import { createApi, uuid } from './api.js?v=mwd3p2ns';
+import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang } from './i18n.js?v=mwd3p2ns';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwd3p2ns';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwd3p2ns';
+import { TRAINING_MODULES } from '../core/engine.js?v=mwd3p2ns';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwd3p2ns';
+import { initProtect } from './protect-ui.js?v=mwd3p2ns';
+import { a11y, announce, speakStatus } from './a11y.js?v=mwd3p2ns';
 let P = null; // autonomous-protection screens (protect-ui.js), set up in boot()
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'impact', volSel: null };
@@ -206,9 +206,12 @@ function viewChangePassword() {
     <button class="btn btn-primary">Save new password</button></form></section>`, { nav: false });
 }
 
+// The official server. Phone apps start with it filled in; admins can still point to another one.
+export const OFFICIAL_SERVER = 'https://betibachao24x7.com';
 function viewConnect() {
-  return shell(`<section class="narrow"><h1>Connect to Beti Bachao</h1><p class="muted">Enter the address of your Beti Bachao server (from your admin, e.g. https://beti-bachao.onrender.com).</p>
-    <form class="card form" data-form="connect"><label>Server address<input name="url" type="url" required placeholder="https://…" value="${esc(serverUrl())}"></label><button class="btn btn-primary">Connect</button></form></section>`, { nav: false });
+  return shell(`<section class="narrow"><h1>Connect to Beti Bachao</h1><p class="muted">Tap Connect to use the official Beti Bachao server. Change the address only if your organisation runs its own server.</p>
+    <form class="card form" data-form="connect"><label>Server address<input name="url" type="url" required placeholder="${OFFICIAL_SERVER}" value="${esc(serverUrl() || OFFICIAL_SERVER)}" autocapitalize="off" spellcheck="false"></label><button class="btn btn-primary btn-lg">Connect</button></form>
+    <p class="small muted">Backup address: https://beti-bachao.onrender.com</p></section>`, { nav: false });
 }
 
 function viewSetup(params) {
@@ -1266,7 +1269,7 @@ const forms = {
   },
   async connect(f) {
     const url = normalizeServerUrl(f.url.value);
-    if (!url) return toast('Type the server address, e.g. https://beti-bachao.onrender.com', 'error', 6000);
+    if (!url) return toast(`Type the server address, e.g. ${OFFICIAL_SERVER}`, 'error', 6000);
     f.url.value = url;
     const btn = f.querySelector('button'); if (btn) btn.disabled = true;
     // A free server can take up to a minute to wake: keep trying for ~75 s before giving up.

@@ -34,7 +34,7 @@ services:
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
-      - key: PUBLIC_URL        # e.g. https://beti-bachao.onrender.com (set after the first deploy)
+      - key: PUBLIC_URL        # https://betibachao24x7.com (your own domain; links in SMS use it)
         sync: false
       - key: BACKUP_KEY        # 64 hex characters — keep a copy offline
         sync: false

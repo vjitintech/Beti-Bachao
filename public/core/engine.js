@@ -15,9 +15,9 @@
 //   • escalation adapter is SIMULATED until a real integration is approved
 //   • append-only, hash-chained audit log
 
-import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mwcy6y57';
-import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mwcy6y57';
-import { protectMethods } from './protect.js?v=mwcy6y57';
+import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mwd3p2ns';
+import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mwd3p2ns';
+import { protectMethods } from './protect.js?v=mwd3p2ns';
 
 export const S = Object.freeze({
   CREATED: 'CREATED',

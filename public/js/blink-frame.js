@@ -1,5 +1,5 @@
 // Runs inside blink-frame.html (same origin, isolated). Reports to the app with postMessage.
-import { blinkGuard } from './blink.js?v=mwcy6y57';
+import { blinkGuard } from './blink.js?v=mwd3p2ns';
 const post = (msg) => parent.postMessage({ src: 'bb-blink', ...msg }, location.origin === 'null' ? '*' : location.origin);
 let guard = null;
 blinkGuard(document.getElementById('v'), {
