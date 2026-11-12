@@ -202,3 +202,19 @@ test('trip counts: reached safely vs stopped sharing vs replaced, with her trip 
   assert.equal(d.trips.active, 1);
   assert.deepEqual(d.trips.recent.map((x) => x.status), ['ACTIVE', 'REPLACED', 'ENDED', 'ARRIVED', 'ARRIVED']);
 });
+
+test('delete my account removes phone, contacts, places, trips and evidence', () => {
+  const t = setup();
+  const u = t.db.users.find((x) => x.id === t.her.id);
+  t.e.setPlaces(t.her, { places: [{ label: 'Home', ...DEMO_CENTER, contacts: [{ name: 'Amma', phone: '+919000000001' }] }] });
+  t.e.startTrip(t.her, { destination: { ...offset(DEMO_CENTER, 5, 45), label: 'Hostel' }, expectedMin: 20, location: t.loc() });
+  t.e.endTrip(t.her, { safe: true });
+  const r = t.e.deleteMyAccount(t.her);
+  assert.equal(r.ok, true);
+  assert.equal(u.status, 'DELETED');
+  assert.equal(u.phone, null);
+  assert.deepEqual(u.contacts, []);
+  assert.deepEqual(u.places, []);
+  assert.equal(t.db.trips.filter((x) => x.userId === u.id).length, 0);
+  assert.ok(Array.isArray(r.evidenceKeys));
+});

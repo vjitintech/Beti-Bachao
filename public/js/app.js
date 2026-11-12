@@ -1,11 +1,11 @@
-import { createApi, uuid } from './api.js?v=mwd3p2ns';
-import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang } from './i18n.js?v=mwd3p2ns';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwd3p2ns';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwd3p2ns';
-import { TRAINING_MODULES } from '../core/engine.js?v=mwd3p2ns';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwd3p2ns';
-import { initProtect } from './protect-ui.js?v=mwd3p2ns';
-import { a11y, announce, speakStatus } from './a11y.js?v=mwd3p2ns';
+import { createApi, uuid } from './api.js?v=mwd43mfp';
+import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang } from './i18n.js?v=mwd43mfp';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwd43mfp';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwd43mfp';
+import { TRAINING_MODULES } from '../core/engine.js?v=mwd43mfp';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwd43mfp';
+import { initProtect } from './protect-ui.js?v=mwd43mfp';
+import { a11y, announce, speakStatus } from './a11y.js?v=mwd43mfp';
 let P = null; // autonomous-protection screens (protect-ui.js), set up in boot()
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'impact', volSel: null };

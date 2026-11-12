@@ -15,9 +15,9 @@
 //   • escalation adapter is SIMULATED until a real integration is approved
 //   • append-only, hash-chained audit log
 
-import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mwd3p2ns';
-import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mwd3p2ns';
-import { protectMethods } from './protect.js?v=mwd3p2ns';
+import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mwd43mfp';
+import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mwd43mfp';
+import { protectMethods } from './protect.js?v=mwd43mfp';
 
 export const S = Object.freeze({
   CREATED: 'CREATED',
@@ -1176,9 +1176,15 @@ export class Engine {
     const incIds = new Set(this.db.incidents.filter((i) => i.requesterId === u.id).map((i) => i.id));
     this.db.locations = this.db.locations.filter((l) => !incIds.has(l.incidentId));
     u.status = 'DELETED'; u.email = `deleted+${u.id}@invalid`; u.displayName = 'Deleted user'; u.passwordHash = null; u.pins = null;
+    // Personal data goes: phone, contacts, places, settings, trips and evidence. Only an anonymous SOS skeleton stays.
+    u.phone = null; u.contacts = []; u.places = []; u.prefs = null; u.totp = null;
+    for (const i of this.db.incidents) if (i.requesterId === u.id) { i.requesterName = null; i.requesterPhone = null; i.shareToken = null; }
+    this.db.trips = (this.db.trips || []).filter((t) => t.userId !== u.id);
+    const gone = (this.db.evidence || []).filter((e) => incIds.has(e.incidentId)).map((e) => e.storageKey);
+    this.db.evidence = (this.db.evidence || []).filter((e) => !incIds.has(e.incidentId));
     const v = this.vol(u.id); if (v) { v.lastLocation = null; v.available = false; }
-    this.audit(u.id, 'ACCOUNT_DELETED', 'user', u.id, 'precise location history purged; incident skeletons retained for audit');
-    return { ok: true };
+    this.audit(u.id, 'ACCOUNT_DELETED', 'user', u.id, 'profile, contacts, places, trips, evidence and location history deleted; anonymous incident skeletons retained');
+    return { ok: true, evidenceKeys: gone };
   }
 }
 

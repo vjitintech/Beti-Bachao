@@ -1,7 +1,7 @@
 // On-device safety capabilities. Everything degrades gracefully: if a browser
 // lacks a sensor or permission is denied, the UI says so and offers the next
 // best option (call / SMS). Nothing here pretends to work when it doesn't.
-import { lang, speechLang, sosWords, heardSosWord } from './i18n.js?v=mwd3p2ns';
+import { lang, speechLang, sosWords, heardSosWord } from './i18n.js?v=mwd43mfp';
 
 const store = {
   get(k, d) { try { const v = localStorage.getItem('bb.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },

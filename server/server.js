@@ -361,7 +361,14 @@ export function createServer(opts = {}) {
   route('PATCH', '/me/pins', ({ actor, body }) => engine.setPins(actor, body), { limit: [10, 3600e3] });
   route('GET', '/me/incidents', ({ actor }) => ({ items: engine.myIncidents(actor) }));
   route('GET', '/me/export', ({ actor }) => engine.exportMyData(actor));
-  route('DELETE', '/me', ({ actor }) => { const r = engine.deleteMyAccount(actor); store.db.sessions = store.db.sessions.filter((s) => s.userId !== actor.id); return r; });
+  route('DELETE', '/me', ({ actor }) => {
+    const { evidenceKeys = [], ...r } = engine.deleteMyAccount(actor);
+    for (const k of evidenceKeys) media.del(k);
+    store.db.sessions = store.db.sessions.filter((s) => s.userId !== actor.id);
+    store.db.devices = (store.db.devices || []).filter((d) => d.userId !== actor.id);
+    store.db.pushSubs = (store.db.pushSubs || []).filter((d) => d.userId !== actor.id);
+    return r;
+  });
 
   route('POST', '/me/push-subscriptions', ({ actor, body }) => {
     const endpoint = String(body.endpoint || '');
@@ -579,6 +586,7 @@ export function createServer(opts = {}) {
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://local');
     if (/^\/[ts]\/[a-f0-9]{32}$/.test(url.pathname)) return serveStatic(req, res, '/track.html');
+    if (url.pathname === '/privacy' || url.pathname === '/delete-account') return serveStatic(req, res, url.pathname + '.html');
     if (!url.pathname.startsWith('/api/')) return serveStatic(req, res, url.pathname);
 
     // CORS only for the native apps' WebView origins (bearer tokens, no cookies).
