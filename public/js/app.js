@@ -1,12 +1,12 @@
-import { createApi, uuid } from './api.js?v=mwdle3e0';
-import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang, ownSosWords, sosVoiceLang } from './i18n.js?v=mwdle3e0';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwdle3e0';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwdle3e0';
-import { TRAINING_MODULES } from '../core/engine.js?v=mwdle3e0';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwdle3e0';
-import { initProtect } from './protect-ui.js?v=mwdle3e0';
-import { a11y, announce, speakStatus } from './a11y.js?v=mwdle3e0';
-import { phoneInput, readPhone, guessCountry, bindPhoneFields } from './phone.js?v=mwdle3e0';
+import { createApi, uuid } from './api.js?v=mwdlp5hy';
+import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang, ownSosWords, sosVoiceLang } from './i18n.js?v=mwdlp5hy';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwdlp5hy';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwdlp5hy';
+import { TRAINING_MODULES } from '../core/engine.js?v=mwdlp5hy';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwdlp5hy';
+import { initProtect } from './protect-ui.js?v=mwdlp5hy';
+import { a11y, announce, speakStatus } from './a11y.js?v=mwdlp5hy';
+import { phoneInput, readPhone, guessCountry, bindPhoneFields } from './phone.js?v=mwdlp5hy';
 let P = null; // autonomous-protection screens (protect-ui.js), set up in boot()
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'impact', volSel: null };

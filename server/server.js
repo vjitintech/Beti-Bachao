@@ -35,6 +35,9 @@ export function createServer(opts = {}) {
   const store = new JsonStore(env.DATA_FILE || path.join(ROOT, 'data', 'db.json'));
   if (opts.pg) attachPostgres(store, opts.pg, { url: opts.pgUrl || null });
   const limiter = new RateLimiter();
+  let flushTimer = null;
+  const scheduleFlush = () => { if (!flushTimer) flushTimer = setTimeout(() => { flushTimer = null; try { store.flush(); } catch (e) { console.error('[store]', e.message); } }, 1000); };
+  const loginFails = new Map(); // email → recent failed-login times (account lockout)
   const deps = { uuid, hash: sha256, hashSecret, now: () => Date.now(), notify: (n) => { queuePush(n); return { ok: true }; } };
   let engine = new Engine(store.db, deps);
   const fetchImpl = opts.fetchImpl || fetch;
@@ -312,21 +315,23 @@ export function createServer(opts = {}) {
     store.db.sessions.push({ tokenHash: sha256(tok), userId: user.id, createdAt: Date.now(), expiresAt: Date.now() + SESSION_TTL_MS });
     return `bb_session=${tok}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL_MS / 1000}${SECURE ? '; Secure' : ''}`;
   }
-  const ip = (req) => (env.TRUST_PROXY === 'true' ? String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : '') || req.socket.remoteAddress || 'unknown';
+  const TRUST_PROXY = env.TRUST_PROXY === 'true' || (env.RENDER === 'true' && env.TRUST_PROXY !== 'false'); // Render's proxy sets X-Forwarded-For
+  const ip = (req) => (TRUST_PROXY ? String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : '') || req.socket.remoteAddress || 'unknown';
   const meView = (u) => ({ id: u.id, displayName: u.displayName, email: u.email, phone: u.phone || null, role: u.role, countryCode: u.countryCode, hasPins: !!u.pins, hasDuressPin: !!u.pins?.duress, mustChangePassword: !!u.mustChangePassword });
 
   // ---------- routes ----------
   const routes = [];
-  const route = (method, pattern, handler, { auth = true, limit = null, maxBody = 32 * 1024 } = {}) => {
+  const route = (method, pattern, handler, { auth = true, limit = null, maxBody = 32 * 1024, batchWrite = false } = {}) => {
     const keys = [];
     const re = new RegExp('^/api/v1' + pattern.replace(/:(\w+)/g, (_, k) => { keys.push(k); return '([A-Za-z0-9-]+)'; }) + '$');
-    routes.push({ method, re, keys, handler, auth, limit, maxBody });
+    routes.push({ method, re, keys, handler, auth, limit, maxBody, batchWrite });
   };
 
   let chainCheck = { at: 0, ok: true }; // the audit-chain check walks every entry — monitors probe often, so cache it a minute
   route('GET', '/health', () => {
     if (deps.now() - chainCheck.at > 60000) chainCheck = { at: deps.now(), ok: engine.verifyAuditChain().ok };
-    return { ok: true, time: new Date(deps.now()).toISOString(), auditChain: chainCheck.ok };
+    const db = store.pg ? { kind: 'postgresql', ok: store.pg.status.ok, lastWriteAt: store.pg.status.lastWriteAt } : { kind: 'file', ok: true };
+    return { ok: db.ok, time: new Date(deps.now()).toISOString(), auditChain: chainCheck.ok, db };
   }, { auth: false });
   route('POST', '/setup', ({ body }) => {
     if (store.db.users.some((u) => u.role === 'admin')) throw new EngineError(409, 'ALREADY_SET_UP', 'Setup is already complete. Please log in.');
@@ -355,9 +360,14 @@ export function createServer(opts = {}) {
   }, { auth: false, limit: [20, 3600e3] });
 
   route('POST', '/auth/login', async ({ body, res }) => {
-    const u = store.db.users.find((x) => x.email === String(body.email || '').trim().toLowerCase());
+    const email = String(body.email || '').trim().toLowerCase();
+    const u = store.db.users.find((x) => x.email === email);
+    // Account lockout: 5 wrong passwords in 15 min locks that account for 15 min (any IP).
+    const lk = (loginFails.get(email) || []).filter((t) => Date.now() - t < 15 * 60000);
+    if (lk.length >= 5) { engine.audit(u?.id || 'anonymous', 'LOGIN_LOCKED', 'user', u?.id || 'unknown'); throw new EngineError(429, 'ACCOUNT_LOCKED', 'Too many wrong passwords. Try again in 15 minutes, or use "Forgot password". In danger, call 112.'); }
     const okPw = u && u.status === 'ACTIVE' && verifyPassword(body.password || '', u.passwordHash);
-    if (!okPw) { engine.audit(u?.id || 'anonymous', 'LOGIN_FAILED', 'user', u?.id || 'unknown'); throw new EngineError(401, 'INVALID_CREDENTIALS', 'Email or password is incorrect'); }
+    if (!okPw) { lk.push(Date.now()); loginFails.set(email, lk); if (loginFails.size > 5000) loginFails.delete(loginFails.keys().next().value); engine.audit(u?.id || 'anonymous', 'LOGIN_FAILED', 'user', u?.id || 'unknown'); throw new EngineError(401, 'INVALID_CREDENTIALS', 'Email or password is incorrect'); }
+    loginFails.delete(email);
     if (['operator', 'admin'].includes(u.role) && MFA_REQUIRED) {
       if (!u.mfaEnrolled) {
         // First staff sign-in: enrol an authenticator app before any access.
@@ -419,7 +429,8 @@ export function createServer(opts = {}) {
     engine.audit(actor.id, 'DEVICE_REGISTERED', 'user', actor.id, body.platform);
     return { ok: true, push: body.platform === 'ios' ? !!(apns || fcm) : !!fcm };
   }, { limit: [30, 3600e3] });
-  route('POST', '/me/location', ({ actor, body }) => engine.ingestDeviceLocation(actor, body), { limit: [600, 3600e3] });
+  // Location pings are ~95 % of traffic: saved to disk in a batch (≤1 s later), not one full write each.
+  route('POST', '/me/location', ({ actor, body }) => engine.ingestDeviceLocation(actor, body), { limit: [600, 3600e3], batchWrite: true });
   route('GET', '/me/contacts', ({ actor }) => engine.getContacts(actor));
   route('GET', '/me/places', ({ actor }) => engine.getPlaces(actor));
   route('PUT', '/me/places', ({ actor, body }) => engine.setPlaces(actor, body), { limit: [30, 3600e3] });
@@ -567,7 +578,7 @@ export function createServer(opts = {}) {
     return r;
   }, { limit: [12, 3600e3] });
   route('GET', '/incidents/:id', ({ actor, p }) => engine.viewIncident(actor, p.id));
-  route('POST', '/incidents/:id/locations', ({ actor, p, body }) => engine.addLocation(actor, p.id, body), { limit: [240, 600e3] });
+  route('POST', '/incidents/:id/locations', ({ actor, p, body }) => engine.addLocation(actor, p.id, body), { limit: [240, 600e3], batchWrite: true });
   route('POST', '/incidents/:id/cancel', ({ actor, p, body }) => engine.cancelIncident(actor, p.id, body), { limit: [8, 600e3] });
   route('GET', '/incidents/:id/timeline', ({ actor, p }) => ({ items: engine.timeline(actor, p.id) }));
   route('POST', '/incidents/:id/accept', ({ actor, p }) => { const r = engine.acceptIncident(actor, p.id); setImmediate(() => { try { sideJobs(); } catch (err) { console.error('[accept-route]', err); } }); return r; }, { limit: [30, 600e3] });
@@ -625,6 +636,12 @@ export function createServer(opts = {}) {
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://local');
+    // Structured access log (one JSON line per API call; no bodies, no tokens) + request id.
+    if (url.pathname.startsWith('/api/') && url.pathname !== '/api/v1/events') {
+      const rid = crypto.randomBytes(6).toString('hex'); const t0 = process.hrtime.bigint();
+      res.setHeader('X-Request-Id', rid);
+      res.on('finish', () => { if (env.ACCESS_LOG === 'off' || (url.pathname === '/api/v1/health' && res.statusCode < 400)) return; console.log(JSON.stringify({ level: res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info', type: 'http', rid, method: req.method, path: url.pathname.replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/g, ':id').replace(/\/[a-f0-9]{32}$/, '/:token'), status: res.statusCode, ms: Number((process.hrtime.bigint() - t0) / 1000000n) })); });
+    }
     if (/^\/[ts]\/[a-f0-9]{32}$/.test(url.pathname)) return serveStatic(req, res, '/track.html');
     if (url.pathname === '/privacy' || url.pathname === '/delete-account') return serveStatic(req, res, url.pathname + '.html');
     // Uptime monitors (UptimeRobot etc.) often probe /health with HEAD — answer like the API health check.
@@ -670,14 +687,14 @@ export function createServer(opts = {}) {
       const m = url.pathname.match(r.re);
       const p = Object.fromEntries(r.keys.map((k, i) => [k, m[i + 1]]));
       const body = method === 'GET' ? {} : await readBody(req, r.maxBody);
-      if (!env.PUBLIC_URL && req.headers.host) publicOrigin = `${env.TRUST_PROXY === 'true' ? String(req.headers['x-forwarded-proto'] || 'https').split(',')[0] : (SECURE ? 'https' : 'http')}://${req.headers.host}`;
+      if (!env.PUBLIC_URL && req.headers.host) publicOrigin = `${TRUST_PROXY ? String(req.headers['x-forwarded-proto'] || 'https').split(',')[0] : (SECURE ? 'https' : 'http')}://${req.headers.host}`;
       const result = await r.handler({ req, res, actor, body, p, q: url.searchParams });
       if (result && result.__raw) {
         res.writeHead(200, { 'Content-Type': result.type, 'Content-Length': result.body.length, 'Cache-Control': 'no-store', ...securityHeaders(SECURE), ...(origin && APP_ORIGINS.includes(origin) ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : {}) });
         return res.end(result.body);
       }
       store.markDirty();
-      store.flush();
+      if (r.batchWrite) scheduleFlush(); else store.flush(); // SOS, cancel, safety answers, accounts: written before we answer
       broadcast();
       json(res, req.method === 'POST' && /\/incidents$/.test(url.pathname) && !result.duplicate ? 201 : 200, result, origin && APP_ORIGINS.includes(origin) ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : {});
     } catch (e) {
@@ -689,7 +706,18 @@ export function createServer(opts = {}) {
   });
 
   server.on('close', () => { clearInterval(timer); clearInterval(heartbeat); for (const c of clients) c.res.end(); store.flush(); });
-  return { server, store, get engine() { return engine; } };
+  // Timeouts: slow or stuck clients can't hold connections forever (SSE streams are long-lived by design).
+  server.headersTimeout = 20000; server.requestTimeout = 60000; server.keepAliveTimeout = 65000;
+  // Graceful shutdown (Render sends SIGTERM on every deploy): stop accepting, end live streams,
+  // write the last changes to disk / PostgreSQL, then exit. Forced exit after 10 s.
+  async function shutdown() {
+    for (const c of clients) { try { c.res.end(); } catch {} }
+    clients.clear();
+    await new Promise((r) => { server.close(() => r()); server.closeIdleConnections?.(); setTimeout(r, 8000).unref?.(); });
+    clearTimeout(flushTimer); try { store.flush(); } catch (e) { console.error('[shutdown] save', e.message); }
+    if (store.pg) { await store.pg.flush().catch(() => {}); try { store.pg.close(); } catch {} }
+  }
+  return { server, store, shutdown, get engine() { return engine; } };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
@@ -700,8 +728,9 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
   // An SOS server must not die from one unexpected background error: log it loudly and keep serving.
   process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e));
   process.on('uncaughtException', (e) => console.error('[uncaughtException]', e));
-  const { server, store } = createServer({ pg, pgUrl: env.DATABASE_URL });
+  const { server, shutdown } = createServer({ pg, pgUrl: env.DATABASE_URL });
   server.listen(port, () => console.log(`Beti Bachao listening on port ${port}${pg ? ' (PostgreSQL storage)' : ''}`));
-  const stop = () => server.close(async () => { if (store.pg) { await store.pg.flush().catch(() => {}); store.pg.close(); } process.exit(0); });
-  process.on('SIGINT', stop); process.on('SIGTERM', stop);
+  let stopping = false;
+  const stop = async (sig) => { if (stopping) return; stopping = true; console.log(JSON.stringify({ level: 'info', type: 'shutdown', signal: sig })); setTimeout(() => process.exit(1), 10000).unref(); await shutdown(); process.exit(0); };
+  process.on('SIGINT', () => stop('SIGINT')); process.on('SIGTERM', () => stop('SIGTERM'));
 }

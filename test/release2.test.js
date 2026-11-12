@@ -148,3 +148,26 @@ test('admin user search: name prefix, phone digits, status, role, location', asy
   assert.ok((await q(`lat=${HER.lat + 3}&lng=${HER.lng}&km=5`)).every((u) => u.id !== her.id), 'not near a far point');
   assert.deepEqual(await q('q=ab'), []);
 });
+
+test('account lockout: 5 wrong passwords lock that account for 15 minutes; request ids and health db status', async () => {
+  const c = client(S.base);
+  await c.call('POST', '/auth/register', { displayName: 'Lock Test', email: 'lock@test.x', role: 'user', phone: '+919811111111', password: 'right-password-123', countryCode: 'IN', consent: true });
+  for (let i = 0; i < 5; i++) assert.equal((await client(S.base).call('POST', '/auth/login', { email: 'lock@test.x', password: 'wrong-' + i })).status, 401);
+  const locked = await client(S.base).call('POST', '/auth/login', { email: 'lock@test.x', password: 'right-password-123' });
+  assert.equal(locked.status, 429); assert.equal(locked.body.error.code, 'ACCOUNT_LOCKED');
+  const other = await client(S.base).call('GET', '/health');
+  assert.ok(other.headers.get('x-request-id'));
+  assert.equal(other.body.db.kind, 'file'); assert.equal(other.body.ok, true);
+});
+
+test('graceful shutdown writes the last changes to disk', async () => {
+  const { boot } = await import('./helpers.js');
+  const T = await boot();
+  const r = await client(T.base).call('POST', '/auth/register', { displayName: 'Last Write', email: 'last@test.x', role: 'user', phone: '+919822222222', password: 'right-password-123', countryCode: 'IN', consent: true });
+  assert.equal(r.status, 200);
+  T.app.store.db.users.find((u) => u.email === 'last@test.x').displayName = 'Changed just before shutdown';
+  T.app.store.markDirty();
+  await T.app.shutdown();
+  const saved = JSON.parse(fs.readFileSync(T.file, 'utf8'));
+  assert.equal(saved.users.find((u) => u.email === 'last@test.x').displayName, 'Changed just before shutdown');
+});
