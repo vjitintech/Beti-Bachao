@@ -1,11 +1,11 @@
-import { createApi, uuid } from './api.js?v=mw94n77g';
-import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang } from './i18n.js?v=mw94n77g';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mw94n77g';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mw94n77g';
-import { TRAINING_MODULES } from '../core/engine.js?v=mw94n77g';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mw94n77g';
-import { initProtect } from './protect-ui.js?v=mw94n77g';
-import { a11y, announce, speakStatus } from './a11y.js?v=mw94n77g';
+import { createApi, uuid } from './api.js?v=mwcw5b39';
+import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang } from './i18n.js?v=mwcw5b39';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwcw5b39';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwcw5b39';
+import { TRAINING_MODULES } from '../core/engine.js?v=mwcw5b39';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwcw5b39';
+import { initProtect } from './protect-ui.js?v=mwcw5b39';
+import { a11y, announce, speakStatus } from './a11y.js?v=mwcw5b39';
 let P = null; // autonomous-protection screens (protect-ui.js), set up in boot()
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'impact', volSel: null };
@@ -1236,8 +1236,22 @@ const forms = {
     } catch (e) { showErr(e); }
   },
   async connect(f) {
-    const url = f.url.value.trim().replace(/\/$/, '');
-    try { const r = await fetch(url + '/api/v1/health'); if (!r.ok) throw new Error(); } catch { return toast('Could not reach that server', 'error'); }
+    const url = normalizeServerUrl(f.url.value);
+    if (!url) return toast('Type the server address, e.g. https://beti-bachao.onrender.com', 'error', 6000);
+    f.url.value = url;
+    const btn = f.querySelector('button'); if (btn) btn.disabled = true;
+    // A free server can take up to a minute to wake: keep trying for ~75 s before giving up.
+    const until = Date.now() + 75000; let ok = false, n = 0;
+    while (!ok && Date.now() < until) {
+      try {
+        const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 20000);
+        const r = await fetch(url + '/api/v1/health', { signal: ctl.signal, cache: 'no-store' }); clearTimeout(t);
+        ok = r.ok && (await r.json().catch(() => ({}))).ok === true;
+      } catch { /* asleep or unreachable: retry */ }
+      if (!ok) { if (n++ === 0) toast('Waking the server… this can take up to a minute', 'info', 8000); await new Promise((r) => setTimeout(r, 4000)); }
+    }
+    if (btn) btn.disabled = false;
+    if (!ok) return toast(`Could not reach ${url}. Check the address and your internet, then try again.`, 'error', 8000);
     setServerUrl(url); location.hash = '#/'; location.reload();
   },
   async setup(f) { try { await st.api.setup({ code: f.code.value.trim(), displayName: f.displayName.value, email: f.email.value, password: f.password.value }); st.cfg.setupNeeded = false; toast('Admin created. Log in to set up two-step login.', 'ok'); go('#/login'); } catch (e) { showErr(e); } },
@@ -1358,3 +1372,17 @@ function afterLoginSilent() {
 }
 
 boot();
+
+// Accept what people actually type: no https://, spaces, trailing slashes, capitals, render.com for onrender.com.
+export function normalizeServerUrl(raw) {
+  let u = String(raw || '').trim().replace(/\s+/g, '-');
+  if (!u) return '';
+  if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+  try {
+    const x = new URL(u);
+    let host = x.hostname.toLowerCase();
+    if (/^[a-z0-9-]+\.render\.com$/.test(host) && !host.startsWith('dashboard.')) host = host.replace(/\.render\.com$/, '.onrender.com');
+    const proto = /^(localhost|127\.|10\.|192\.168\.)/.test(host) ? x.protocol : 'https:';
+    return `${proto}//${host}${x.port ? ':' + x.port : ''}${x.pathname.replace(/\/+$/, '')}`;
+  } catch { return ''; }
+}
