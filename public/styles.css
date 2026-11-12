@@ -616,3 +616,12 @@ label { font-weight: 600; font-size: .92rem; color: var(--ink); }
   .btn-primary, .btn-safe { background: #0E7C76; color: #fff; }
   .btn-primary:hover { background: #0B6964; }
 }
+/* Download page */
+.dl-hero { text-align: center; padding: 18px 4px 8px; }
+.dl-hero img { border-radius: 20px; box-shadow: 0 6px 18px rgba(42, 27, 61, .18); }
+.dl-hero h1 { margin: 14px 0 8px; }
+.dl-hero p { max-width: 34em; margin: 0 auto 14px; }
+.dl-steps { padding-inline-start: 1.3em; margin: 0; }
+.dl-steps li { margin: 0 0 10px; line-height: 1.5; }
+.dl-share { text-align: center; }
+.dl-share img { background: #fff; padding: 8px; border-radius: 12px; }

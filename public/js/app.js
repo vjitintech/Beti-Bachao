@@ -1,12 +1,12 @@
-import { createApi, uuid } from './api.js?v=mwdpd10v';
-import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang, ownSosWords, sosVoiceLang } from './i18n.js?v=mwdpd10v';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwdpd10v';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwdpd10v';
-import { TRAINING_MODULES } from '../core/engine.js?v=mwdpd10v';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwdpd10v';
-import { initProtect } from './protect-ui.js?v=mwdpd10v';
-import { a11y, announce, speakStatus } from './a11y.js?v=mwdpd10v';
-import { phoneInput, readPhone, guessCountry, bindPhoneFields } from './phone.js?v=mwdpd10v';
+import { createApi, uuid } from './api.js?v=mwdsq0ev';
+import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang, ownSosWords, sosVoiceLang } from './i18n.js?v=mwdsq0ev';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwdsq0ev';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwdsq0ev';
+import { TRAINING_MODULES } from '../core/engine.js?v=mwdsq0ev';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwdsq0ev';
+import { initProtect } from './protect-ui.js?v=mwdsq0ev';
+import { a11y, announce, speakStatus } from './a11y.js?v=mwdsq0ev';
+import { phoneInput, readPhone, guessCountry, bindPhoneFields } from './phone.js?v=mwdsq0ev';
 let P = null; // autonomous-protection screens (protect-ui.js), set up in boot()
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'impact', volSel: null };
@@ -704,7 +704,7 @@ async function viewSettings() {
     </section>
     <section class="card"><h2>📜 ${esc(t('history'))}</h2><ul class="history">${history.map((h) => `<li><a href="#/incident/${esc(h.id)}">${esc(new Date(h.createdAt).toLocaleString())}</a> — ${esc(pretty(h.status))}</li>`).join('') || '<li class="muted">No SOS yet.</li>'}</ul></section>` : ''}
     <section class="card"><h2>🛡️ ${esc(t('privacy'))}</h2>
-      <p class="muted">Signed in as ${esc(me.displayName)} (${esc(me.role)}).${window.BB_APP_BUILD ? ` · App ${esc(String(window.BB_APP_BUILD).replace(/\((\w{7})\w*\)/, '($1)'))}` : ''}</p>
+      <p class="muted">Signed in as ${esc(me.displayName)} (${esc(me.role)}).${window.BB_APP_BUILD ? ` · App ${esc(String(window.BB_APP_BUILD).replace(/\((\w{7})\w*\)/, '($1)'))}` : ''}${isNative ? ` · Server ${esc(serverUrl().replace(/^https?:\/\//, ''))} <a href="#/connect">Change</a>` : ''}</p>
       <div class="row">${['user', 'volunteer'].includes(me.role) ? '<button class="btn btn-ghost" data-act="export">Download my data</button><button class="btn btn-ghost danger-text" data-act="delete-account">Delete my account</button>' : ''}<button class="btn btn-ghost" data-act="report-abuse">Report a concern</button></div>
     </section>
   `);
@@ -1516,7 +1516,7 @@ function permItems(role) {
     { k: 'location', alias: 'location', icon: '📍', t: 'Location — "Allow all the time"', d: 'Sends your exact place to helpers during an SOS and picks the right contacts for where you are.' },
     { k: 'notifications', alias: 'notifications', icon: '🔔', t: 'Notifications', d: 'Who is coming, how far they are, and police updates.' },
     { k: 'sms', alias: 'sms', icon: '💬', t: 'Send SMS', d: 'Your phone texts your contacts the moment SOS starts — works even without internet.' },
-    { k: 'phone', alias: 'phone', icon: '📞', t: 'Phone calls', d: 'Calls the nearest police station (or 1091 / 112) by itself if no operator responds.' },
+    { k: 'phone', alias: 'phone', icon: '📞', t: 'Phone calls', d: 'Calls the nearest police station by itself if no operator responds.' },
     { k: 'microphone', alias: 'microphone', icon: '🎙️', t: 'Microphone', d: 'Needed for Voice SOS and the 15-second evidence clip.' },
     { k: 'armed', pref: true, icon: '🛡️', t: 'Background protection', d: 'SOS from the lock screen, quick-settings tile and pressing power 5 times.' },
     { k: 'voiceNative', pref: true, needs: 'microphone', icon: '🗣️', t: 'Voice SOS', d: 'Say your SOS word (default "bachao") — even with the screen locked.' },

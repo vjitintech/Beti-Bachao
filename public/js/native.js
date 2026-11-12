@@ -67,6 +67,7 @@ async function iosPushToken() {
 export function serverUrl() {
   let v = null;
   try { v = localStorage.getItem('bb.server'); } catch {}
-  return (v || window.BB_SERVER_URL || '').replace(/\/$/, '');
+  // New installs use the official server straight away (no Connect screen); it can still be changed in Settings.
+  return (v || window.BB_SERVER_URL || 'https://betibachao24x7.com').replace(/\/$/, '');
 }
 export function setServerUrl(u) { try { localStorage.setItem('bb.server', String(u || '').trim().replace(/\/$/, '')); } catch {} }

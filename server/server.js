@@ -654,7 +654,9 @@ export function createServer(opts = {}) {
       res.on('finish', () => { if (env.ACCESS_LOG === 'off' || (url.pathname === '/api/v1/health' && res.statusCode < 400)) return; console.log(JSON.stringify({ level: res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info', type: 'http', rid, method: req.method, path: url.pathname.replace(/[0-9a-f]{8}-[0-9a-f-]{27,}/g, ':id').replace(/\/[a-f0-9]{32}$/, '/:token'), status: res.statusCode, ms: Number((process.hrtime.bigint() - t0) / 1000000n) })); });
     }
     if (/^\/[ts]\/[a-f0-9]{32}$/.test(url.pathname)) return serveStatic(req, res, '/track.html');
-    if (url.pathname === '/privacy' || url.pathname === '/delete-account') return serveStatic(req, res, url.pathname + '.html');
+    if (url.pathname === '/privacy' || url.pathname === '/delete-account' || url.pathname === '/download') return serveStatic(req, res, url.pathname + '.html');
+    // Short, permanent link to the newest Android app (fixed destination: our own GitHub release).
+    if (url.pathname === '/apk') { res.writeHead(302, { Location: env.APK_URL || 'https://github.com/vjitintech/Beti-Bachao/releases/download/android-latest/BetiBachao-debug.apk', 'Cache-Control': 'no-store' }); return res.end(); }
     // Uptime monitors (UptimeRobot etc.) often probe /health with HEAD — answer like the API health check.
     if (url.pathname === '/health' || url.pathname === '/healthz') url.pathname = '/api/v1/health';
     if (!url.pathname.startsWith('/api/')) return serveStatic(req, res, url.pathname);
