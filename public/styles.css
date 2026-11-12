@@ -428,3 +428,12 @@ body.blink-frame video { width: 100%; height: 100vh; object-fit: cover; transfor
 .btn-block { display: block; width: 100%; }
 .toast { font-size: 1.05rem; font-weight: 600; }
 .legal { padding-bottom: 48px; } .legal h2 { margin-top: 28px; } .legal li { margin-bottom: 6px; line-height: 1.5; } .legal p { line-height: 1.6; }
+/* Phone field: country code picker + number */
+.phone-field { display: flex; gap: 6px; align-items: stretch; margin-top: 4px; }
+.phone-field select { flex: 0 0 7.4em; width: 7.4em; min-width: 0; text-overflow: ellipsis; padding-inline: 6px; }
+.phone-field input { flex: 1 1 auto; min-width: 0; width: 100%; margin-top: 0; }
+.contact-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "n d" "p p"; align-items: end; }
+.contact-row > label:first-child { grid-area: n; }
+.contact-row > label:nth-child(2) { grid-area: p; }
+.contact-row > .row-del { grid-area: d; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 12px; }

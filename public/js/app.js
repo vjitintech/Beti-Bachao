@@ -1,11 +1,12 @@
-import { createApi, uuid } from './api.js?v=mwd43mfp';
-import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang } from './i18n.js?v=mwd43mfp';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwd43mfp';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwd43mfp';
-import { TRAINING_MODULES } from '../core/engine.js?v=mwd43mfp';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwd43mfp';
-import { initProtect } from './protect-ui.js?v=mwd43mfp';
-import { a11y, announce, speakStatus } from './a11y.js?v=mwd43mfp';
+import { createApi, uuid } from './api.js?v=mwd73rny';
+import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang } from './i18n.js?v=mwd73rny';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwd73rny';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwd73rny';
+import { TRAINING_MODULES } from '../core/engine.js?v=mwd73rny';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwd73rny';
+import { initProtect } from './protect-ui.js?v=mwd73rny';
+import { a11y, announce, speakStatus } from './a11y.js?v=mwd73rny';
+import { phoneInput, readPhone, guessCountry, bindPhoneFields } from './phone.js?v=mwd73rny';
 let P = null; // autonomous-protection screens (protect-ui.js), set up in boot()
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'impact', volSel: null };
@@ -66,6 +67,15 @@ const infoTip = (label, html) => `<details class="info-tip"><summary aria-label=
 // Live tracking of every accepted responder on a PPI radar scope + multi-target readout.
 const distText = (km) => (km == null ? '' : km < 1 ? `${Math.round(km * 1000)} m` : `${km} km`);
 const etaText = (status, eta) => (status === 'ARRIVED' || status === 'ASSISTING' ? 'on scene' : eta == null ? '' : eta <= 1 ? '<1 min' : `${eta} min`);
+// One line under the radar saying what the ETA is based on.
+const etaBasisNote = (list) => {
+  const live = (list || []).filter((r) => !['ARRIVED', 'ASSISTING'].includes(r.status) && r.approxEtaMin != null);
+  if (!live.length) return '';
+  const b = live.some((r) => r.etaBasis === 'traffic') ? 'traffic' : live.some((r) => r.etaBasis === 'road') ? 'road' : 'straight';
+  const delay = Math.max(0, ...live.map((r) => r.trafficDelayMin || 0));
+  const txt = b === 'traffic' ? `🚦 ETA by road with live traffic${delay ? ` (traffic adds ~${delay} min)` : ''}` : b === 'road' ? '🛣️ ETA by actual road route (usual traffic)' : '📏 ETA is a straight-line estimate — road route not available yet';
+  return `<p class="small muted eta-basis">${esc(txt)}. The radar shows direction as a straight line; the time follows the roads.</p>`;
+};
 const trkId = (r) => (r.isYou ? 'YOU' : (r.label.match(/ ([A-Z])$/) || [])[1] || r.label.slice(0, 3).toUpperCase());
 function trackingCard(list, center, radii, { title = 'Live tracking', map = true, note = '', key = 'track', viewer = 'her' } = {}) {
   list = list || [];
@@ -77,8 +87,8 @@ function trackingCard(list, center, radii, { title = 'Live tracking', map = true
       <div class="ppi-legend"><span><i class="l-her"></i>HER</span><span><i class="l-vol"></i>VOLUNTEER</span>${viewer === 'volunteer' ? '<span><i class="l-you"></i>YOU</span>' : ''}<span><i class="l-trk"></i>TRACK</span></div>
       ${infoTip('What do the radar and table show?', `<p>Each box shows that volunteer's distance and ETA; it counts down as they get closer. A blinking dot is on the move towards her.</p><p>${viewer === 'volunteer'
         ? 'She is the red dot in the centre. Blue dots are the volunteers who accepted (you are the light-blue dot); green lines show the path each one has travelled.'
-        : 'You are the red dot in the centre. Blue dots are verified volunteers who accepted your SOS; green lines show the path each one has travelled.'} Distance from the centre = how far away; the angle = direction (000° = north). The rotating line only shows the scope is live.</p><p>RNG range · BRG bearing · SPD speed · ETA straight-line estimate. ACPT accepted · ENRT en route · ONSC on scene · ▼CLS closing in · ▲OPN moving away.</p><p>Live from each responder's phone GPS. ${esc(note)}</p>`)}` : ''}
-      ${ppiTable(rows).replace(/<p class="ppi-key">[\s\S]*?<\/p>/, '')}</div>
+        : 'You are the red dot in the centre. Blue dots are verified volunteers who accepted your SOS; green lines show the path each one has travelled.'} Distance from the centre = how far away; the angle = direction (000° = north). The rotating line only shows the scope is live.</p><p>RNG straight-line range · BRG bearing · SPD speed · ETA travel time by road (with live traffic when available). ACPT accepted · ENRT en route · ONSC on scene · ▼CLS closing in · ▲OPN moving away.</p><p>Live from each responder's phone GPS. ${esc(note)}</p>`)}` : ''}
+      ${ppiTable(rows).replace(/<p class="ppi-key">[\s\S]*?<\/p>/, '')}${etaBasisNote(list)}</div>
       <ul class="track-list">${list.map((r) => `<li class="track-row ${r.isYou ? 'is-you' : ''}"><span class="track-who"><strong>${esc(r.label)}</strong> ${r.verified ? '<span class="badge badge-ok">Verified</span>' : ''}<br><small>${esc(pretty(r.status))}${r.locationUpdatedAt ? ` · GPS <span data-live="age" data-fmt="short" data-at="${esc(r.locationUpdatedAt)}"></span> ago` : ''}</small></span></li>`).join('')}</ul>`
       : `<p class="muted">${esc(t('status_red'))}</p>`}
     </section>`;
@@ -229,6 +239,9 @@ function viewSetup(params) {
     </section>`);
 }
 
+// Country preselected on the sign-up form: device locale if supported, else the server default.
+function regCountry() { const g = guessCountry(); return st.cfg?.countries?.[g] ? g : (st.cfg?.defaultCountry || 'IN'); }
+
 function viewRegister(params) {
   const asVol = params?.get('as') === 'volunteer';
   return shell(`
@@ -237,13 +250,13 @@ function viewRegister(params) {
       <form class="card form" data-form="register">
         <label>Display name<input name="displayName" required maxlength="60"></label>
         <label>Email<input name="email" type="email" required></label>
-        <label>Mobile number (for SOS SMS and password reset)<input name="phone" type="tel" required autocomplete="tel" placeholder="+91 98xxxxxxxx"></label>
+        <label>Mobile number (for SOS SMS and password reset)${phoneInput('phone', { required: true, lang: lang() })}<small class="muted">Pick your country code, then type your number.</small></label>
         <label>Password (10+ characters)<input name="password" type="password" minlength="10" required autocomplete="new-password"></label>
         <fieldset><legend>I am joining as</legend>
           <label class="radio"><input type="radio" name="role" value="user" ${asVol ? '' : 'checked'}> ${esc(t('need_safety'))}</label>
           <label class="radio"><input type="radio" name="role" value="volunteer" ${asVol ? 'checked' : ''}> ${esc(t('want_volunteer'))} (identity check + training required)</label>
         </fieldset>
-        <label>Country<select name="countryCode">${Object.entries(st.cfg.countries).map(([c, v]) => `<option value="${c}" ${c === 'IN' ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></label>
+        <label>Country (sets emergency number and police rules)<select name="countryCode">${Object.entries(st.cfg.countries).map(([c, v]) => `<option value="${c}" ${c === regCountry() ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></label>
         <label class="switch"><input type="checkbox" name="consent" required> I agree that when I raise an SOS my live location is shared with verified volunteers who accept it and with Beti Bachao operators, and that this app does not automatically contact police or ambulance.</label>
         <button class="btn btn-primary" type="submit">Create account</button>
       </form>
@@ -319,6 +332,13 @@ function sosMessage(loc, shareToken = null) {
 // Address of the live page her contacts open (the server this app talks to).
 function liveLink(p) { return (isNative ? serverUrl() : location.origin + location.pathname.replace(/[^/]*$/, '').replace(/\/$/, '')) + p; }
 const newShareToken = () => [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, '0')).join('');
+// The SMS her phone sends by itself: short, plain GSM-7 English (no emoji / Indic script),
+// so it fits in 1–2 SMS parts and goes out and arrives fastest on every network.
+function sosSmsText(loc, shareToken) {
+  const where = loc ? `https://maps.google.com/?q=${loc.lat.toFixed(5)},${loc.lng.toFixed(5)}${loc.accuracyM ? ` (+/-${Math.round(loc.accuracyM)}m)` : ''}` : 'location coming in next SMS';
+  const live = shareToken ? ` Live: ${liveLink(`/s/${shareToken}`)}` : '';
+  return `SOS! I need help (Beti Bachao). Location: ${where}.${live} Call me or 112.`;
+}
 function smsButtons() {
   const loc = geo.last || currentLoc();
   const nums = contacts.list().map((c) => c.phone);
@@ -358,26 +378,31 @@ async function triggerSOS({ severity = 'HIGH', silent = false, trigger = 'button
   // the phone's SMS app opens ready to send. The SOS continues in the background.
   let deviceSmsSent = false;
   let deviceSmsNumbers = [];
+  // Location: use the last fix at once if it is recent; otherwise ask for a fresh one *in parallel*
+  // with the SMS (the SMS never waits for GPS — a follow-up SMS carries the location if it was missing).
+  const fresh = (l) => l && Date.now() - Date.parse(l.observedAt) < 120000;
+  const loc0 = fresh(geo.last) ? geo.last : null;
+  const locP = loc0 && Date.now() - Date.parse(loc0.observedAt) < 30000 ? Promise.resolve(loc0)
+    : Promise.race([geo.once(6000).catch(() => null), new Promise((r) => setTimeout(() => r(null), 3500))]).then((l) => l || loc0);
+  geo.start();
+  let smsP = Promise.resolve();
   if (!isRetry && prefs.get().autoSms !== false && (P.activeContacts().contacts.length || prefs.get().sms112)) {
-    const loc0 = geo.last;
     const nums = P.activeContacts(loc0).contacts.map((c) => c.phone); // contacts for the place she is at
     deviceSmsNumbers = nums;
     store.set('autoSmsAt', Date.now());
     if (native.available()) {
-      const r = await native.sendSos({ numbers: nums, message: sosMessage(loc0, pending.shareToken), sms112: !!prefs.get().sms112 });
-      deviceSmsSent = !!(r && r.sent > 0);
+      smsP = native.sendSos({ numbers: nums, message: sosSmsText(loc0, pending.shareToken), sms112: !!prefs.get().sms112 })
+        .then((r) => { deviceSmsSent = !!(r && r.sent > 0); })
+        .catch(() => {});
+      if (!loc0) smsP = smsP.then(() => locP).then((l) => { if (l && deviceSmsSent) native.sendSos({ numbers: nums, message: `SOS update - my location: https://maps.google.com/?q=${l.lat.toFixed(5)},${l.lng.toFixed(5)} (+/-${Math.round(l.accuracyM || 0)}m)`, sms112: false }).catch(() => {}); });
     } else if (nums.length) openExternal(smsHref(nums, sosMessage(loc0, pending.shareToken)));
   }
   if (!silent) vibrate([200, 100, 200]);
   keepAwake(true);
   if (!silent) toast(t('sending'), 'warn');
-  let loc = null;
   const p = prefs.get();
-  {
-    if (geo.last && Date.now() - Date.parse(geo.last.observedAt) < 30000) loc = geo.last;
-    else { try { loc = await Promise.race([geo.once(6000), new Promise((r) => setTimeout(() => r(null), 4000))]); } catch { loc = null; } }
-    geo.start();
-  }
+  // Wait only for the first SMS hand-off (milliseconds) and the location race (≤3.5 s), side by side.
+  const [loc] = await Promise.all([locP, smsP.catch(() => {})]);
   const body = { idempotencyKey: pending.key, location: loc, severity: pending.severity, trigger: pending.trigger, silent: pending.silent, battery: await battery(), deviceSmsSent, deviceSmsNumbers: deviceSmsSent ? deviceSmsNumbers : [], shareToken: pending.shareToken };
   try {
     const r = await st.api.createIncident(body);
@@ -736,7 +761,7 @@ function volunteerDetail(a) {
   return `<section class="card vol-detail status-border-${esc(a.color)}">
     <h2>${a.severity === 'HIGH' ? '🔥 Immediate danger · ' : ''}${esc(a.open ? pretty(a.status) : 'Incident ended — she is safe')}</h2>
     ${stepper}
-    <p>Distance: <strong>${esc(a.distanceBand)}</strong>${a.approxEtaMin ? ` · ≈${esc(a.approxEtaMin)} min (estimate)` : ''}</p>
+    <p>Distance: <strong>${esc(a.distanceBand)}</strong>${a.approxEtaMin ? ` · ≈${esc(a.approxEtaMin)} min (${esc(a.etaLabel || 'estimate')}${a.roadKm ? `, ${esc(a.roadKm)} km by road` : ''})` : ''}</p>
     ${a.escalationStatus && a.escalationStatus !== 'NONE' ? `<p class="badge badge-warn">Escalation ${esc(a.escalationStatus)} — ${esc(st.cfg.simulatedLabel)}</p>` : ''}
     ${!asg && a.otherResponders?.length ? trackingCard(a.otherResponders, null, null, { title: 'Volunteers already responding', map: false, note: 'Exact positions are shown only to assigned responders.' }) : ''}
     ${asg && a.location ? `
@@ -797,7 +822,7 @@ function opsDetail(d, tl, cfg) {
         <p class="ppi-explain">The whole search area around her. Rings are the ${radii.join(' / ')} km search stages; the <b>bright ring</b> is the stage being searched now. Hollow circles = volunteers alerted but not yet accepted; grey = declined; solid blue = accepted. Use it to see if the search is reaching enough people.</p></div>
       ${near ? `<div class="ppi-wrap"><h3 class="ppi-title">② APPROACH radar — who is coming</h3>
         <div class="ppi-box">${ppiSvg({ center: d.location, rangeKm: near, targets: targets.filter((x) => x.kind === 'responder'), title: 'PPI · APPROACH' })}${zoomBar('ppi-zoom', 'ops-approach', 'Approach radar')}</div>
-        <p class="ppi-explain">Zoomed in on only the volunteers who accepted, with their travelled path (green). The table gives each one's range (distance), bearing (direction from her), speed, ETA and whether they are closing in. Use it to spot a responder who has stopped or is moving away.</p>${ppiTable(rows)}</div>`
+        <p class="ppi-explain">Zoomed in on only the volunteers who accepted, with their travelled path (green). The table gives each one's range (distance), bearing (direction from her), speed, ETA and whether they are closing in. Use it to spot a responder who has stopped or is moving away.</p>${ppiTable(rows)}${etaBasisNote(live)}</div>`
       : `<div class="ppi-wrap"><h3 class="ppi-title">② APPROACH radar</h3><p class="ppi-explain">Appears when a volunteer accepts. It zooms in on accepted volunteers and tracks them closing in on her.</p></div>`}
     </div>` : '';
   return `<section class="card ops-detail">
@@ -1040,7 +1065,13 @@ function updateLive() {
 // ------------------------------------------------------------------ actions
 const actions = {
   'retry-now'() { offlineDelay = 5000; render(); },
-  async logout() { try { await st.api.logout(); } catch {} if (native.available()) { native.stopSafety(); native.configure({ token: null }); } st.me = null; geo.stop(); go('#/'); },
+  async logout() {
+    // Sign out on this device at once; the server session is ended in the background.
+    st.me = null; geo.stop();
+    if (native.available()) { native.stopSafety(); native.configure({ token: null }); }
+    const done = st.api.logout().catch(() => {});
+    go('#/'); await done;
+  },
   async forgot() {
     const a = await modal({ title: 'Reset your password', body: `<label>Email<input name="email" type="email" required></label><p class="small muted">${st.cfg?.features?.smsReset ? 'We will send a 6-digit code to your registered mobile number.' : 'Ask the Beti Bachao admin to reset it for you.'}</p>`, actions: st.cfg?.features?.smsReset ? [{ id: 'go', label: 'Send code', kind: 'primary' }, { id: 'no', label: t('cancel') }] : [{ id: 'no', label: 'OK', kind: 'primary' }] });
     if (a.id !== 'go') return;
@@ -1122,10 +1153,11 @@ const actions = {
   },
   async 'vol-locate'() { try { const loc = await volLoc(); if (!loc) return toast('No location available', 'error'); await st.api.setAvailability({ location: loc }); toast('Location updated', 'ok'); render(); } catch (e) { showErr(e); } },
   async 'vol-verify'() {
-    const r = await modal({ title: 'Request identity verification', body: `<label>Phone number for the trust team to call you<input name="phone" type="tel" required maxlength="20"></label><label>Your town / area<input name="area" maxlength="60"></label><p class="muted small">Your number is used only for verification. Do not send ID photos anywhere except to the verified team during the call.</p>`, actions: [{ id: 'ok', label: 'Send request', kind: 'primary' }, { id: 'no', label: t('cancel') }] });
+    const r = await modal({ title: 'Request identity verification', body: `<label>Phone number for the trust team to call you${phoneInput('phone', { value: st.me?.phone || '', country: st.me?.countryCode, required: true, lang: lang() })}</label><label>Your town / area<input name="area" maxlength="60"></label><p class="muted small">Your number is used only for verification. Do not send ID photos anywhere except to the verified team during the call.</p>`, actions: [{ id: 'ok', label: 'Send request', kind: 'primary' }, { id: 'no', label: t('cancel') }] });
     if (r.id !== 'ok') return;
-    if (String(r.data.phone || '').replace(/\D/g, '').length < 8) return toast('Enter a valid phone number', 'error');
-    try { await st.api.submitVerification({ contactPhone: r.data.phone, area: r.data.area }); toast('Request sent. The trust team will contact you.', 'ok'); render(); } catch (e) { showErr(e); }
+    const vp = readPhone(r.data, 'phone');
+    if (vp.problem) return toast(vp.problem, 'error');
+    try { await st.api.submitVerification({ contactPhone: vp.e164, area: r.data.area }); toast('Request sent. The trust team will contact you.', 'ok'); render(); } catch (e) { showErr(e); }
   },
   async 'vol-train'(el) {
     const m = TRAINING_MODULES.find((x) => x.id === el.dataset.id);
@@ -1235,7 +1267,9 @@ const forms = {
   },
   async register(f) {
     if (!f.consent.checked) return toast('Please read and accept the location-sharing notice', 'warn');
-    try { const r = await st.api.register({ displayName: f.displayName.value, email: f.email.value, password: f.password.value, role: f.role.value, countryCode: f.countryCode.value, phone: f.phone.value, consent: true }); st.me = r.user; st.api.connect(); afterLogin(); } catch (e) { showErr(e); }
+    const ph = readPhone(f, 'phone');
+    if (ph.problem) { f.phone.focus(); return toast(ph.problem, 'error'); }
+    try { const r = await st.api.register({ displayName: f.displayName.value, email: f.email.value, password: f.password.value, role: f.role.value, countryCode: f.countryCode.value, phone: ph.e164, consent: true }); st.me = r.user; st.api.connect(); afterLogin(); } catch (e) { showErr(e); }
   },
   async pins(f) { try { await st.api.setPins({ cancelPin: f.cancelPin.value, duressPin: f.duressPin.value || null }); st.me = (await st.api.me()).user; toast('PINs saved', 'ok'); render(); } catch (e) { showErr(e); } },
   contact(f) { if (contacts.add(f.name.value, f.phone.value)) { syncContactsToServer(); render(); } else toast('Enter a name and a valid phone (max 10 contacts)', 'error'); },
@@ -1357,6 +1391,9 @@ async function boot() {
     forms[f.dataset.form]?.(f);
   });
   document.addEventListener('change', (e) => { const el = e.target.closest('[data-change]'); if (el) changes[el.dataset.change]?.(el); });
+  // Phone country picker ↔ sign-up "Country" select stay in step.
+  bindPhoneFields(document, (iso, sel) => { const c = sel.form?.countryCode; if (c && [...c.options].some((o) => o.value === iso)) c.value = iso; });
+  document.addEventListener('change', (e) => { const c = e.target; if (c.name !== 'countryCode' || !c.form) return; const p = c.form.querySelector('[name="phone_cc"]'); if (p && !c.form.phone?.value) p.value = c.value; });
   window.addEventListener('hashchange', () => { render(); $('#main')?.focus({ preventScroll: true }); });
   window.addEventListener('online', () => { if (store.get('pendingSos', null)) triggerSOS(store.get('pendingSos')); });
 

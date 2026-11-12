@@ -14,7 +14,7 @@ export const TRAINING = ['code-of-conduct', 'de-escalation', 'emergency-calling'
 export async function boot(dataFile = null, extraEnv = {}) {
   const dir = dataFile ? null : fs.mkdtempSync(path.join(os.tmpdir(), 'bb-'));
   const file = dataFile || path.join(dir, 'db.json');
-  const app = createServer({ env: { DATA_FILE: file, ADMIN_EMAIL: ADMIN.email, ADMIN_PASSWORD: ADMIN.password, ADMIN_MFA_SECRET: ADMIN.mfaSecret, RATE_LIMIT_MULTIPLIER: '50', ...extraEnv }, tickMs: 50 });
+  const app = createServer({ env: { DATA_FILE: file, ADMIN_EMAIL: ADMIN.email, ADMIN_PASSWORD: ADMIN.password, ADMIN_MFA_SECRET: ADMIN.mfaSecret, RATE_LIMIT_MULTIPLIER: '50', ROUTING_URL: 'off', ...extraEnv }, tickMs: 50 });
   await new Promise((r) => app.server.listen(0, r));
   return { app, file, dir, origin: `http://127.0.0.1:${app.server.address().port}`, base: `http://127.0.0.1:${app.server.address().port}/api/v1` };
 }

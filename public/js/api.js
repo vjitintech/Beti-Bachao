@@ -5,7 +5,7 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xx
 export class ApiError extends Error { constructor(status, code, message) { super(message || code); this.status = status; this.code = code; } }
 
 // ------------------------------------------------------------------ server
-import { isNative, native, serverUrl } from './native.js?v=mwd43mfp';
+import { isNative, native, serverUrl } from './native.js?v=mwd73rny';
 
 class ServerApi {
   constructor() { this.mode = isNative ? 'app' : 'server'; this.listeners = new Set(); this.es = null; this.token = null; }
@@ -79,6 +79,7 @@ class ServerApi {
   adminDashboard(days) { return this.req('GET', `/admin/dashboard?days=${days || 30}`); }
   stations() { return this.req('GET', '/admin/police-stations'); }
   importStations(b) { return this.req('POST', '/admin/police-stations', b); }
+  addStation(b) { return this.req('POST', '/admin/police-stations/one', b); }
   deleteStation(id) { return this.req('DELETE', `/admin/police-stations/${id}`); }
   getIncident(id) { return this.req('GET', `/incidents/${id}`); }
   addLocation(id, loc) { return this.req('POST', `/incidents/${id}/locations`, loc); }

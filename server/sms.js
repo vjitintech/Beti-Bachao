@@ -6,7 +6,7 @@
 //   SMS_PROVIDER=log     prints messages to the server log (testing only)
 
 export const TEXT = {
-  SOS: (v) => `SOS! ${v.name} is in danger and needs help. Live location: ${v.link} — Beti Bachao. Call her or 112.`,
+  SOS: (v) => `SOS! ${v.name} is in danger and needs help. Live location: ${v.link} - Beti Bachao. Call her or 112.`,
   ALERT: (v) => `Beti Bachao: SOS ${v.distance} km from you. Open the app now to respond.`,
   OTP: (v) => `Your Beti Bachao code is ${v.otp}. It expires in 10 minutes. Do not share it.`,
   POLICE: (v) => `SOS - Beti Bachao: ${v.name} (${v.phone}) needs police help near your station. Live location: ${v.link} Ref ${v.ref}`,

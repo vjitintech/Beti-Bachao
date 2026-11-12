@@ -9,6 +9,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { Engine, EngineError, SIMULATED_LABEL } from '../public/core/engine.js';
 import { COUNTRIES } from '../public/core/config.js';
+import { haversineKm } from '../public/core/geo.js';
 import { generateVapidKeys, sendPush, isValidSubscription } from './webpush.js';
 import { JsonStore } from './store.js';
 import { Fcm, parseServiceAccount } from './fcm.js';
@@ -160,7 +161,10 @@ export function createServer(opts = {}) {
       const u = engine.user(inc.requesterId);
       if (!u || u.prefs?.serverSms === false) continue;
       const loc = engine.latestLocation(inc.id);
-      if (!loc && now - Date.parse(inc.createdAt) < 20000) continue; // wait briefly for a GPS fix
+      const tok0 = publicOrigin ? engine.shareTokenFor(inc.id) : null;
+      // The live link shows her location as soon as it arrives, so SMS go out at once.
+      // Only without a live link do we wait a few seconds for a GPS fix to put in the message.
+      if (!loc && !tok0 && now - Date.parse(inc.createdAt) < 8000) continue;
       const { place, contacts } = engine.contactsFor(u.id, loc);
       inc.smsSentTo ||= [];
       const todo = contacts.filter((c) => !inc.smsSentTo.includes(c.phone));
@@ -218,16 +222,23 @@ export function createServer(opts = {}) {
       const vu = engine.user(n.recipientId);
       if (vu?.phone) sms.send(vu.phone, 'ALERT', { distance: n.meta?.distanceKm ?? '?' }).then((r) => { if (!r.ok) engine.audit('system', 'ALERT_SMS_FAILED', 'notification', n.id); });
     }
-    // 3) Road-route ETA for active responders (every 30 s).
-    if (routing && !routingBusy && now - lastRouting > 30000) {
-      lastRouting = now; routingBusy = true;
-      const jobs = store.db.assignments.filter((a) => ['ACCEPTED', 'EN_ROUTE'].includes(a.status)).map(async (a) => {
+    // 3) Road-route ETA for active responders: at once for a new responder, then every 30 s
+    //    (or sooner if they moved > 300 m). Provider results are cached in routing.js.
+    if (routing && !routingBusy && now - lastRouting > 2000) {
+      const due = store.db.assignments.filter((a) => ['ACCEPTED', 'EN_ROUTE'].includes(a.status)).map((a) => {
         const v = engine.vol(a.volunteerId); const her = engine.latestLocation(a.incidentId);
-        if (!v?.lastLocation || !her) return;
-        const r = await routing.eta(v.lastLocation, her);
-        if (r) { engine.setRouteEta(a.id, r); store.markDirty(); }
-      });
-      Promise.allSettled(jobs).finally(() => { routingBusy = false; });
+        if (!v?.lastLocation || !her) return null;
+        const d = haversineKm(v.lastLocation, her);
+        const r = a.routeEta; const age = r ? now - Date.parse(r.at) : Infinity;
+        return !r || age > 30000 || (r.fromKm != null && Math.abs(r.fromKm - d) > 0.3 && age > 8000) ? { a, from: v.lastLocation, her, d } : null;
+      }).filter(Boolean).slice(0, 10);
+      if (due.length) {
+        lastRouting = now; routingBusy = true;
+        Promise.allSettled(due.map(async ({ a, from, her, d }) => {
+          const r = await routing.eta(from, her);
+          if (r) { engine.setRouteEta(a.id, { ...r, fromKm: +d.toFixed(3) }); store.markDirty(); }
+        })).finally(() => { routingBusy = false; });
+      }
     }
     // 4) Daily automatic backup.
     if (now - lastPurge > 3600e3) { lastPurge = now; for (const k of engine.expiredEvidence()) media.del(k); store.markDirty(); }
@@ -419,6 +430,7 @@ export function createServer(opts = {}) {
   route('GET', '/admin/dashboard', ({ actor, q }) => engine.adminDashboard(actor, { days: q.get('days') }));
   route('GET', '/admin/police-stations', ({ actor }) => engine.listStations(actor));
   route('POST', '/admin/police-stations', ({ actor, body }) => engine.importStations(actor, body), { maxBody: 2 * 1024 * 1024 });
+  route('POST', '/admin/police-stations/one', ({ actor, body }) => engine.addStation(actor, body));
   route('DELETE', '/admin/police-stations/:id', ({ actor, p }) => engine.deleteStation(actor, p.id));
   route('PUT', '/me/contacts', ({ actor, body }) => engine.setContacts(actor, body), { limit: [30, 3600e3] });
   route('POST', '/incidents/:id/rate', ({ actor, p, body }) => engine.rateResponder(actor, p.id, body), { limit: [20, 3600e3] });
@@ -523,6 +535,7 @@ export function createServer(opts = {}) {
 
   route('POST', '/incidents', ({ actor, body }) => {
     const r = engine.createIncident(actor, body);
+    if (!r.duplicate) setImmediate(() => { try { sideJobs(); store.flush(); broadcast(); } catch (err) { console.error('[sos-fast]', err); } }); // SMS/push now, not at the next tick
     if (ai && !r.duplicate && body.note) ai.riskAssessment('sos_note', body.note, {}).then((risk) => { const inc = store.db.incidents.find((x) => x.id === r.incident.id); if (inc && risk) { inc.ai = { ...(inc.ai || {}), risk }; store.markDirty(); } });
     return r;
   }, { limit: [12, 3600e3] });
@@ -530,7 +543,7 @@ export function createServer(opts = {}) {
   route('POST', '/incidents/:id/locations', ({ actor, p, body }) => engine.addLocation(actor, p.id, body), { limit: [240, 600e3] });
   route('POST', '/incidents/:id/cancel', ({ actor, p, body }) => engine.cancelIncident(actor, p.id, body), { limit: [8, 600e3] });
   route('GET', '/incidents/:id/timeline', ({ actor, p }) => ({ items: engine.timeline(actor, p.id) }));
-  route('POST', '/incidents/:id/accept', ({ actor, p }) => engine.acceptIncident(actor, p.id), { limit: [30, 600e3] });
+  route('POST', '/incidents/:id/accept', ({ actor, p }) => { const r = engine.acceptIncident(actor, p.id); setImmediate(() => { try { sideJobs(); } catch (err) { console.error('[accept-route]', err); } }); return r; }, { limit: [30, 600e3] });
   route('POST', '/incidents/:id/decline', ({ actor, p, body }) => engine.declineIncident(actor, p.id, body), { limit: [30, 600e3] });
   route('POST', '/incidents/:id/safety-confirmation', ({ actor, p, body }) => engine.safetyConfirmation(actor, p.id, body), { limit: [20, 600e3] });
   route('POST', '/incidents/:id/escalations', ({ actor, p, body }) => engine.requestEscalation(actor, p.id, body), { limit: [20, 600e3] });
@@ -559,7 +572,7 @@ export function createServer(opts = {}) {
     { name: 'iPhone push (Apple APNs)', status: apns ? 'ACTIVE' : 'NOT CONFIGURED', note: apns ? `${store.db.devices.filter((d) => d.platform === 'ios').length} iPhone/iPad device(s) registered.` : 'Set APNS_KEY, APNS_KEY_ID and APNS_TEAM_ID to send alerts to the iPhone app.' },
     { name: 'SMS gateway', status: sms ? sms.name.toUpperCase() : 'NOT CONFIGURED', note: sms ? 'Sends SOS SMS for iPhone users, alert fallback to volunteers, reset codes.' : 'Set SMS_PROVIDER (msg91/twilio). Android phones still send SOS SMS themselves.' },
     { name: 'Police auto-connect', status: (store.db.policeStations || []).length ? `${store.db.policeStations.length} STATIONS` : 'NO STATION LIST', note: `If no operator acknowledges an SOS within ${engine.cfg.policeAutoConnectSec} s (or she presses SOS again), the nearest station gets an SMS${voice ? ' and an automatic call that connects them to her' : ''}. ${voice ? `Calls via ${voice.name}.` : 'Set VOICE_PROVIDER (exotel/twilio) for the automatic call.'} Import stations in Admin → Police stations.` },
-    { name: 'Road-route ETA', status: routing ? 'ACTIVE' : 'ESTIMATE', note: routing ? 'OSRM routing.' : 'Set ROUTING_URL (OSRM). Until then straight-line estimate.' },
+    { name: 'Road-route ETA', status: routing ? 'ACTIVE' : 'ESTIMATE', note: routing ? routing.describe + '. Set GOOGLE_MAPS_API_KEY (Routes API) for live traffic.' : 'Routing is off (ROUTING_URL=off). Straight-line estimate.' },
     { name: 'Local AI (Colibri)', status: ai ? 'ACTIVE' : 'OFF', note: ai ? `Model ${ai.model}. Advisory only.` : 'Set AI_BASE_URL to enable operator summaries, translation and risk flags.' },
     { name: 'Automatic backups', status: backups ? 'ACTIVE' : 'OFF', note: backups ? `Daily, kept ${Number(env.BACKUP_KEEP) || 14}${env.BACKUP_KEY ? ', encrypted' : ''}.` : 'Disabled.' },
     { name: 'Browser push notifications', status: 'ACTIVE', note: `${store.db.pushSubs.length} device(s) subscribed. Android Chrome; iPhone only when installed to Home Screen (iOS 16.4+).` },

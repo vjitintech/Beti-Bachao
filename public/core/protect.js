@@ -5,8 +5,9 @@
 //  • "Track my travel" trips with auto-arrival and auto-SOS when overdue
 //  • SOS evidence (audio/video) metadata — bytes are stored encrypted by the server
 //  • dashboards: hers, admin impact, public impact counter
-import { haversineKm, isValidLatLng } from './geo.js?v=mwd43mfp';
-import { COUNTRIES } from './config.js?v=mwd43mfp';
+import { haversineKm, isValidLatLng } from './geo.js?v=mwd73rny';
+import { COUNTRIES } from './config.js?v=mwd73rny';
+import { toE164, dialInfo } from './dial.js?v=mwd73rny';
 
 const SAFE_CLOSURES = new Set(['USER_CONFIRMED_SAFE', 'HANDED_TO_EMERGENCY_SERVICES_CONFIRMED_SAFE']);
 const median = (xs) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
@@ -82,28 +83,61 @@ export const protectMethods = {
   // ---- police station registry (admin imports the official list) ----
   listStations(actor) { this.requireRole(actor, 'operator', 'admin'); return { items: this.db.policeStations || [] }; },
 
-  importStations(actor, { csv, mode = 'merge' } = {}) {
+  // Station phone: a local number ("0851 8xxxxxx", "100") gets the station's country code; "+..." is kept.
+  stationPhone(raw, iso) {
+    const s = String(raw ?? '').trim();
+    if (!s) return null;
+    return this.normPhone(s.startsWith('+') || s.startsWith('00') || !dialInfo(iso) ? s : toE164(iso, s));
+  },
+
+  // One station from the admin form. Same merge key as the CSV import (name + phone).
+  addStation(actor, b = {}) {
+    const a = this.requireRole(actor, 'admin');
+    const country = dialInfo(b.country) ? String(b.country).toUpperCase() : (this.cfg.countryCode || 'IN');
+    const lat = Number(b.lat), lng = Number(b.lng);
+    const name = String(b.name || '').trim().slice(0, 80);
+    const phone = this.stationPhone(b.phone, country); const phone2 = this.stationPhone(b.phone2, country);
+    if (!name) this.fail(400, 'STATION_NAME', 'Enter the station name');
+    if (!isValidLatLng(lat, lng)) this.fail(400, 'STATION_LOCATION', 'Set the station location (paste a Google Maps link or lat,lng)');
+    if (!phone) this.fail(400, 'STATION_PHONE', 'Enter a valid station phone number');
+    const row = { name, country, state: String(b.state || '').trim().slice(0, 60), district: String(b.district || '').trim().slice(0, 60), lat, lng, phone, phone2 };
+    if (!this.db.policeStations) this.db.policeStations = [];
+    const old = b.id ? this.db.policeStations.find((s) => s.id === b.id) : this.db.policeStations.find((s) => s.name.toLowerCase() === name.toLowerCase() && s.phone === phone);
+    if (old) Object.assign(old, row); else this.db.policeStations.push({ id: this.deps.uuid(), ...row });
+    this.audit(a.id, old ? 'POLICE_STATION_UPDATED' : 'POLICE_STATION_ADDED', 'config', old?.id || 'police_stations', null, { country, state: row.state });
+    return { ok: true, updated: !!old, total: this.db.policeStations.length };
+  },
+
+  // CSV import. The admin picks the country (and optionally the state) above the box, so the CSV
+  // only needs name,lat,lng,phone — district, state, country and phone2 columns are optional and win when present.
+  importStations(actor, { csv, mode = 'merge', country, state } = {}) {
     const a = this.requireRole(actor, 'admin');
     const lines = String(csv || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     if (!lines.length) this.fail(400, 'EMPTY', 'Paste the station list (CSV)');
-    const header = lines[0].toLowerCase().split(',').map((h) => h.trim());
+    const header = splitCsv(lines[0]).map((h) => String(h).trim().toLowerCase().replace(/^latitude$/, 'lat').replace(/^(lon|long|longitude)$/, 'lng'));
     const col = (n) => header.indexOf(n);
-    for (const need of ['name', 'lat', 'lng', 'phone']) if (col(need) < 0) this.fail(400, 'CSV_HEADER', 'Header must include: name,district,lat,lng,phone (phone2 optional)');
+    for (const need of ['name', 'lat', 'lng', 'phone']) if (col(need) < 0) this.fail(400, 'CSV_HEADER', 'Header must include: name,lat,lng,phone (district,state,country,phone2 optional)');
+    const defC = dialInfo(country) ? String(country).toUpperCase() : (this.cfg.countryCode || 'IN');
+    const defS = String(state || '').trim().slice(0, 60);
+    const get = (f, n) => (col(n) >= 0 ? String(f[col(n)] ?? '').trim() : '');
     const rows = []; const errors = [];
     for (const [i, line] of lines.slice(1).entries()) {
       const f = splitCsv(line);
-      const lat = Number(f[col('lat')]), lng = Number(f[col('lng')]);
-      const phone = this.normPhone(f[col('phone')]); const phone2 = col('phone2') >= 0 ? this.normPhone(f[col('phone2')]) : null;
-      const name = String(f[col('name')] || '').trim().slice(0, 80);
+      const lat = Number(get(f, 'lat')), lng = Number(get(f, 'lng'));
+      const cc = dialInfo(get(f, 'country')) ? get(f, 'country').toUpperCase() : defC;
+      const phone = this.stationPhone(get(f, 'phone'), cc); const phone2 = this.stationPhone(get(f, 'phone2'), cc);
+      const name = get(f, 'name').slice(0, 80);
       if (!name || !isValidLatLng(lat, lng) || !phone) { errors.push(`row ${i + 2}`); continue; }
-      rows.push({ id: this.deps.uuid(), name, district: col('district') >= 0 ? String(f[col('district')] || '').trim().slice(0, 60) : '', lat, lng, phone, phone2 });
+      rows.push({ id: this.deps.uuid(), name, country: cc, state: (get(f, 'state') || defS).slice(0, 60), district: get(f, 'district').slice(0, 60), lat, lng, phone, phone2 });
     }
     if (!rows.length) this.fail(400, 'NO_VALID_ROWS', `No valid rows (${errors.slice(0, 5).join(', ')})`);
-    if (mode === 'replace' || !this.db.policeStations) this.db.policeStations = [];
+    if (!this.db.policeStations) this.db.policeStations = [];
+    // "Replace" only replaces the chosen country/state, so loading Telangana never wipes Andhra Pradesh.
+    if (mode === 'replace') this.db.policeStations = this.db.policeStations.filter((s) => (s.country || defC) !== defC || (defS && (s.state || '') !== defS));
     const key = (s) => `${s.name.toLowerCase()}|${s.phone}`;
     const have = new Map(this.db.policeStations.map((s) => [key(s), s]));
     for (const r of rows) { const old = have.get(key(r)); if (old) Object.assign(old, { ...r, id: old.id }); else this.db.policeStations.push(r); }
-    this.audit(a.id, 'POLICE_STATIONS_IMPORTED', 'config', 'police_stations', null, { added: rows.length, skipped: errors.length, mode });
+    this.audit(a.id, 'POLICE_STATIONS_IMPORTED', 'config', 'police_stations', null, { added: rows.length, skipped: errors.length, mode, country: defC, state: defS });
     return { imported: rows.length, skipped: errors.length, total: this.db.policeStations.length, skippedRows: errors.slice(0, 20) };
   },
 

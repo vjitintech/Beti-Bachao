@@ -12,6 +12,7 @@ import android.os.Vibrator;
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 
+import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.LocationServices;
 import com.google.android.gms.location.Priority;
 import com.google.android.gms.tasks.CancellationTokenSource;
@@ -87,36 +88,61 @@ public final class NativeSos {
     private static void send(Context app, String trigger) {
         vibrate(app, 800);
         boolean hasLoc = ContextCompat.checkSelfPermission(app, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
-        if (!hasLoc) { finish(app, trigger, null); return; }
-        CancellationTokenSource cts = new CancellationTokenSource();
-        final boolean[] done = {false};
-        MAIN.postDelayed(() -> { if (!done[0]) { done[0] = true; cts.cancel(); finish(app, trigger, null); } }, 6000);
-        LocationServices.getFusedLocationProviderClient(app)
-                .getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.getToken())
-                .addOnCompleteListener(t -> {
-                    if (done[0]) return;
-                    done[0] = true;
-                    finish(app, trigger, t.isSuccessful() ? t.getResult() : null);
-                });
+        if (!hasLoc) { finish(app, trigger, null, null); return; }
+        final FusedLocationProviderClient fused = LocationServices.getFusedLocationProviderClient(app);
+        // Fast path: the last known fix (instant). If it is recent, the SMS goes out right now
+        // with it; a fresh high-accuracy fix is still taken for the server and a follow-up SMS.
+        fused.getLastLocation().addOnCompleteListener(last -> {
+            Location l0 = last.isSuccessful() ? last.getResult() : null;
+            boolean recent = l0 != null && (System.currentTimeMillis() - l0.getTime()) < 120_000;
+            final Location quick = recent ? l0 : null;
+            final String shareToken = newShareToken();
+            final SmsResult first = sendSms(app, quick, shareToken, false);
+            CancellationTokenSource cts = new CancellationTokenSource();
+            final boolean[] done = {false};
+            // Never hold the server alert for GPS longer than 3.5 s.
+            MAIN.postDelayed(() -> { if (!done[0]) { done[0] = true; cts.cancel(); report(app, trigger, quick, shareToken, first); } }, 3500);
+            fused.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.getToken()).addOnCompleteListener(t -> {
+                Location fix = t.isSuccessful() ? t.getResult() : null;
+                if (fix != null && quick == null && first.sent > 0) sendSms(app, fix, null, true); // location the first SMS lacked
+                if (done[0]) return;
+                done[0] = true;
+                report(app, trigger, fix != null ? fix : quick, shareToken, first);
+            });
+        });
     }
 
-    private static void finish(Context app, String trigger, Location loc) {
-        // 1) SMS from her own phone (works without internet). The live-tracking link is made
-        //    here so it can go out before the server is reached.
-        final String shareToken = newShareToken();
-        int sent = 0;
-        final List<String> smsNumbers = new ArrayList<>();
-        if (Store.getBool(app, "autoSms", true)) {
-            List<String> numbers = Places.numbersFor(app, loc); // the contacts for the place she is at
-            smsNumbers.addAll(numbers);
-            if (Store.getBool(app, "sms112", false)) numbers.add("112");
-            String link = loc == null ? "(location pending)" : String.format(Locale.US, "https://maps.google.com/?q=%.6f,%.6f", loc.getLatitude(), loc.getLongitude());
-            String acc = loc == null ? "?" : String.valueOf(Math.round(loc.getAccuracy()));
+    private static final class SmsResult { int sent; final List<String> numbers = new ArrayList<>(); }
+
+    /** SMS from her own phone (works without internet). Plain GSM-7 English so it fits in 1–2 parts. */
+    private static SmsResult sendSms(Context app, Location loc, String shareToken, boolean followUp) {
+        SmsResult r = new SmsResult();
+        if (!Store.getBool(app, "autoSms", true)) return r;
+        List<String> numbers = Places.numbersFor(app, loc); // the contacts for the place she is at
+        r.numbers.addAll(numbers);
+        if (!followUp && Store.getBool(app, "sms112", false)) numbers.add("112");
+        String where = loc == null ? "location coming in next SMS"
+                : String.format(Locale.US, "https://maps.google.com/?q=%.5f,%.5f (+/-%dm)", loc.getLatitude(), loc.getLongitude(), Math.round(loc.getAccuracy()));
+        String msg;
+        if (followUp) msg = "SOS update - my location: " + where;
+        else {
             String server = Store.get(app, "serverUrl");
-            String live = server == null || server.isEmpty() ? "" : " 🔴 Live: " + server.replaceAll("/+$", "") + "/s/" + shareToken;
-            String msg = "SOS! I am in danger and need help. My location: " + link + " (accuracy ±" + acc + " m). Please call me or 112. — Beti Bachao" + live;
-            sent = SmsSender.send(app, numbers, msg);
+            String live = server == null || server.isEmpty() || shareToken == null ? "" : " Live: " + server.replaceAll("/+$", "") + "/s/" + shareToken;
+            msg = "SOS! I need help (Beti Bachao). Location: " + where + "." + live + " Call me or 112.";
         }
+        r.sent = SmsSender.send(app, numbers, msg);
+        return r;
+    }
+
+    // Kept for callers that pass a location directly.
+    private static void finish(Context app, String trigger, Location loc, String unused) {
+        String token = newShareToken();
+        report(app, trigger, loc, token, sendSms(app, loc, token, false));
+    }
+
+    private static void report(Context app, String trigger, Location loc, String shareToken, SmsResult sms) {
+        final int sent = sms.sent;
+        final List<String> smsNumbers = sms.numbers;
         // 2) Incident on the server → staged volunteer search + operators.
         try {
             JSONObject body = new JSONObject();

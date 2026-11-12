@@ -15,9 +15,10 @@
 //   • escalation adapter is SIMULATED until a real integration is approved
 //   • append-only, hash-chained audit log
 
-import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mwd43mfp';
-import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mwd43mfp';
-import { protectMethods } from './protect.js?v=mwd43mfp';
+import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mwd73rny';
+import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mwd73rny';
+import { protectMethods } from './protect.js?v=mwd73rny';
+import { toE164, dialInfo } from './dial.js?v=mwd73rny';
 
 export const S = Object.freeze({
   CREATED: 'CREATED',
@@ -227,7 +228,9 @@ export class Engine {
     if (this.db.users.some((u) => u.email === em)) fail(409, 'EMAIL_TAKEN', 'An account with this email exists');
     const name = String(displayName || '').trim().slice(0, 60);
     if (!name) fail(400, 'INVALID_NAME', 'Display name is required');
-    const ph = phone ? normPhone(phone) : null;
+    // A local number from an older app ("98765 43210") gets the account country's dial code.
+    const raw = phone && countryCode && dialInfo(countryCode) && !/^\s*(\+|00)/.test(String(phone)) ? toE164(countryCode, phone) : phone;
+    const ph = raw ? normPhone(raw) : null;
     if (phone && !ph) fail(400, 'INVALID_PHONE', 'Enter a valid mobile number');
     const u = { id: this.deps.uuid(), displayName: name, email: em, role, passwordHash, mfaSecret, status, countryCode, demo, phone: ph, contacts: [], prefs: { serverSms: true }, pins: null, createdAt: this.iso(), updatedAt: this.iso() };
     this.db.users.push(u);
@@ -857,14 +860,18 @@ export class Engine {
   etaFor(a, d, onScene) {
     if (onScene) return { approxEtaMin: 0, etaLabel: 'on scene' };
     const r = a.routeEta;
-    if (r && this.now() - Date.parse(r.at) < 180000 && Number.isFinite(r.min)) return { approxEtaMin: Math.max(1, Math.round(r.min)), etaLabel: 'road route estimate', roadKm: r.km };
-    return { approxEtaMin: approxEtaMinutes(d, this.cfg), etaLabel: 'approximate (straight-line estimate)' };
+    if (r && this.now() - Date.parse(r.at) < 180000 && Number.isFinite(r.min)) {
+      // The route was timed from where the volunteer was then; take off the time already driven since.
+      const done = r.fromKm && d != null && r.fromKm > d ? Math.min(0.8, (r.fromKm - d) / r.fromKm) : 0;
+      return { approxEtaMin: Math.max(1, Math.round(r.min * (1 - done))), etaLabel: r.traffic ? 'road route with live traffic' : 'road route estimate', etaBasis: r.traffic ? 'traffic' : 'road', roadKm: r.km, trafficDelayMin: r.delayMin ?? null };
+    }
+    return { approxEtaMin: approxEtaMinutes(d, this.cfg), etaLabel: 'approximate (straight-line estimate)', etaBasis: 'straight' };
   }
 
-  setRouteEta(assignmentId, { min, km, source }) {
+  setRouteEta(assignmentId, { min, km, source, traffic = false, delayMin = null, fromKm = null }) {
     const a = this.db.assignments.find((x) => x.id === assignmentId);
     if (!a || !ACTIVE_ASG.has(a.status)) return;
-    a.routeEta = { min, km, source, at: this.iso() };
+    a.routeEta = { min, km, source, traffic: !!traffic, delayMin, fromKm, at: this.iso() };
   }
 
   // Multi-target tracking data: bearing from her, ground speed, closing/opening, recent track.
@@ -931,7 +938,7 @@ export class Engine {
       const amAssigned = this.activeAssignments(inc.id).some((a) => a.volunteerId === u.id) && this.isOpen(inc);
       const team = this.activeAssignments(inc.id).map((a, i) => this.responderTrack(a, loc, i, { withPosition: amAssigned, selfId: u.id }));
       const others = team.filter((x) => !x.isYou);
-      const common = { ...base, role: mine ? 'assigned_responder' : 'alerted_volunteer', status: this.isOpen(inc) ? (inc.duress ? S.ESCALATION_REQUIRED : inc.status) : inc.status, open: this.isOpen(inc), color: this.colorOf(inc), distanceBand: distanceBand(d), approxEtaMin: approxEtaMinutes(d, this.cfg), otherResponders: others, team, radiusStagesKm: this.cfg.radiusStagesKm, alertResponse: alert?.response || null, escalationStatus: inc.escalationStatus };
+      const common = { ...base, role: mine ? 'assigned_responder' : 'alerted_volunteer', status: this.isOpen(inc) ? (inc.duress ? S.ESCALATION_REQUIRED : inc.status) : inc.status, open: this.isOpen(inc), color: this.colorOf(inc), distanceBand: distanceBand(d), ...(mine && ACTIVE_ASG.has(mine.status) ? this.etaFor(mine, d, ['ARRIVED', 'ASSISTING'].includes(mine.status)) : { approxEtaMin: approxEtaMinutes(d, this.cfg) }), otherResponders: others, team, radiusStagesKm: this.cfg.radiusStagesKm, alertResponse: alert?.response || null, escalationStatus: inc.escalationStatus };
       if (mine && this.isOpen(inc)) {
         this.auditPreciseAccess(u.id, inc);
         return { ...common, assignment: { id: mine.id, status: mine.status, role: mine.role }, location: this.locationView(loc, now), navigationUrl: loc ? `https://www.google.com/maps/dir/?api=1&destination=${loc.lat},${loc.lng}` : null, battery: inc.battery };
@@ -955,7 +962,7 @@ export class Engine {
         const v = this.vol(a.volunteerId);
         const d = loc && v?.lastLocation ? haversineKm(loc, v.lastLocation) : null;
         const active = ACTIVE_ASG.has(a.status);
-        return { ...a, volunteerName: this.user(a.volunteerId)?.displayName, position: active ? v?.lastLocation : null, distanceKm: d != null ? +d.toFixed(2) : null, approxEtaMin: approxEtaMinutes(d, this.cfg), ...(active ? this.motion(a, loc, true) : {}) };
+        return { ...a, volunteerName: this.user(a.volunteerId)?.displayName, position: active ? v?.lastLocation : null, distanceKm: d != null ? +d.toFixed(2) : null, ...(active ? this.etaFor(a, d, ['ARRIVED', 'ASSISTING'].includes(a.status)) : { approxEtaMin: approxEtaMinutes(d, this.cfg) }), ...(active ? this.motion(a, loc, true) : {}) };
       }),
       alertedPositions: this.db.notifications.filter((n) => n.incidentId === inc.id && n.kind === 'ALERT').map((n) => ({ response: n.response, distanceKm: n.meta?.distanceKm ?? null, position: this.vol(n.recipientId)?.lastLocation || null })),
       notifications: this.db.notifications.filter((n) => n.incidentId === inc.id).map((n) => ({ id: n.id, kind: n.kind, recipient: this.user(n.recipientId)?.displayName, status: n.status, channel: n.channel, attemptCount: n.attemptCount, response: n.response })),

@@ -2,10 +2,12 @@
 // places & location-based contacts, Track my travel, nearby help, dashboards,
 // police auto-connect status, operator acknowledgement, evidence, admin impact &
 // police-station import, blink trigger page, spoken guidance for blind users.
-import { sosWords, heardSosWord, lang as curLang } from './i18n.js?v=mwd43mfp';
-import { pickContacts } from '../core/protect.js?v=mwd43mfp';
-import { announce, speakStatus, listenOnce, a11y } from './a11y.js?v=mwd43mfp';
-import { blinkGuard } from './blink.js?v=mwd43mfp';
+import { sosWords, heardSosWord, lang as curLang } from './i18n.js?v=mwd73rny';
+import { pickContacts } from '../core/protect.js?v=mwd73rny';
+import { announce, speakStatus, listenOnce, a11y } from './a11y.js?v=mwd73rny';
+import { blinkGuard } from './blink.js?v=mwd73rny';
+import { phoneInput, readPhone, guessCountry } from './phone.js?v=mwd73rny';
+import { DIAL, flag, countryName } from '../core/dial.js?v=mwd73rny';
 
 export function initProtect(c) {
   const { st, esc, toast, modal, showErr, go, render, geo, contacts, prefs, store, native, platform, telHref, fmtTime, pretty, nativeShare, serverUrl, isNative } = c;
@@ -22,13 +24,15 @@ export function initProtect(c) {
   // ---------------- places & contacts ----------------
   const parseLatLng = (s) => {
     const txt = decodeURIComponent(String(s || ''));
+    const d = txt.match(/!3d(-?\d{1,2}\.\d+)!4d(-?\d{1,3}\.\d+)/); // exact pin in a Google place link
+    if (d) return { lat: Number(d[1]), lng: Number(d[2]) };
     const m = txt.match(/(-?\d{1,2}\.\d{3,})\s*,\s*(-?\d{1,3}\.\d{3,})/);
     return m ? { lat: Number(m[1]), lng: Number(m[2]) } : null;
   };
   // One editable contact row; the first `min` rows are required, extra rows can be removed.
   const contactRow = (c = {}, n = 1, required = true) => `<div class="contact-row" data-row>
       <label>Name ${n}<input name="cname" maxlength="40" value="${esc(c.name || '')}" ${required ? 'required' : ''} autocomplete="off"></label>
-      <label>Phone ${n}<input name="cphone" type="tel" inputmode="tel" value="${esc(c.phone || '')}" ${required ? 'required' : ''}></label>
+      <label>Phone ${n}${phoneInput('cphone', { value: c.phone || '', country: st.me?.countryCode, required, lang: curLang() })}</label>
       <button type="button" class="btn btn-ghost btn-sm row-del" data-act="row-del" aria-label="Remove contact ${n}" ${n === 1 ? 'hidden' : ''}>✕</button>
     </div>`;
   const rowsFor = (list, min) => { const xs = list.length ? list : Array.from({ length: min }, () => ({})); return xs.map((c, i) => contactRow(c, i + 1, true)).join(''); };
@@ -213,14 +217,61 @@ export function initProtect(c) {
           <table class="tbl small"><thead><tr><th>Trigger</th><th>SOS</th></tr></thead><tbody>${Object.entries(d.byTrigger).map(([k, v]) => `<tr><td>${esc(pretty(k))}</td><td>${v}</td></tr>`).join('')}</tbody></table></details>
         ${d.stations ? '' : '<div class="alert alert-warn">No police station list loaded — automatic police connection can only tell her to call 112. Load it in the "Police stations" tab.</div>'}</section>`;
   }
+  const IN_STATES = ['Andaman and Nicobar Islands', 'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chandigarh', 'Chhattisgarh', 'Dadra and Nagar Haveli and Daman and Diu', 'Delhi', 'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jammu and Kashmir', 'Jharkhand', 'Karnataka', 'Kerala', 'Ladakh', 'Lakshadweep', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Puducherry', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal'];
+  const stCountry = () => st.stCountry || st.cfg?.defaultCountry || guessCountry();
+  const countryOpts = (sel) => DIAL.map((r) => `<option value="${r[0]}" ${r[0] === sel ? 'selected' : ''}>${flag(r[0])} ${esc(countryName(r[0], curLang()))} (+${r[2]})</option>`).join('');
+  const statesFor = (iso, items) => [...new Set([...(iso === 'IN' ? IN_STATES : []), ...items.filter((s) => (s.country || 'IN') === iso && s.state).map((s) => s.state)])].sort();
+
   async function adminStationsTab() {
     const { items } = await api().stations();
+    const iso = stCountry();
+    const states = statesFor(iso, items);
+    const fState = st.stFilterState || '';
+    const q = (st.stQuery || '').toLowerCase();
+    const inCountry = items.filter((s) => (s.country || 'IN') === iso);
+    const shown = inCountry.filter((s) => (!fState || (s.state || '') === fState) && (!q || `${s.name} ${s.district} ${s.phone}`.toLowerCase().includes(q)));
+    const byState = inCountry.reduce((m, s) => { const k = s.state || '(no state)'; m[k] = (m[k] || 0) + 1; return m; }, {});
+    const countries = [...new Set(items.map((s) => s.country || 'IN'))];
+    const draft = st.stationDraft || {};
+    const ed = st.stationEdit ? items.find((s) => s.id === st.stationEdit) : null;
+    const v = (k) => esc(draft[k] ?? ed?.[k] ?? '');
     return `<section class="card form"><h2>🚓 Police stations</h2>
-        <p class="muted small">Used for <b>automatic police connection</b> (when no operator acknowledges an SOS in time, or she presses SOS again) and for "Nearby help". Paste the official list as CSV with a header row. Get the list from the district police / AP Police website — check each phone number before loading.</p>
-        <form data-form="stations"><label>CSV (name,district,lat,lng,phone,phone2)<textarea name="csv" rows="6" required placeholder="name,district,lat,lng,phone,phone2&#10;Kurnool I Town PS,Kurnool,15.8306,78.0451,+9108518000000,"></textarea></label>
-          <label class="switch"><input type="checkbox" name="replace"> Replace the whole list (otherwise add / update)</label><button class="btn btn-primary">Import</button></form></section>
-      <section class="card"><h2>${items.length} stations loaded</h2><table class="tbl small"><thead><tr><th>Name</th><th>District</th><th>Phone</th><th>Location</th><th></th></tr></thead><tbody>
-        ${items.slice(0, 500).map((s) => `<tr><td>${esc(s.name)}</td><td>${esc(s.district)}</td><td>${esc(s.phone)}${s.phone2 ? `<br>${esc(s.phone2)}` : ''}</td><td>${esc(s.lat.toFixed(4))}, ${esc(s.lng.toFixed(4))}</td><td><button class="btn btn-ghost btn-sm danger-text" data-act="station-del" data-id="${esc(s.id)}">Delete</button></td></tr>`).join('') || '<tr><td colspan="5" class="muted">None yet.</td></tr>'}</tbody></table></section>`;
+        <p class="muted small">Used for <b>automatic police connection</b> (when no operator acknowledges an SOS in time, or she presses SOS again) and for "Nearby help". Choose the country and state first — phone numbers are then typed the local way and the country code is added for you.</p>
+        <div class="grid2">
+          <label>Country<select data-change="st-country">${countryOpts(iso)}</select></label>
+          <label>State / province<input list="st-states" data-change="st-state" value="${esc(st.stState ?? fState)}" placeholder="${iso === 'IN' ? 'e.g. Andhra Pradesh' : 'State, province or region'}"><datalist id="st-states">${states.map((x) => `<option value="${esc(x)}">`).join('')}</datalist></label>
+        </div>
+        ${countries.length > 1 || countries[0] !== iso ? `<p class="small">Loaded: ${countries.map((c2) => `${flag(c2)} ${esc(countryName(c2, curLang()))} ${items.filter((s) => (s.country || 'IN') === c2).length}`).join(' · ')}</p>` : ''}
+      </section>
+
+      <section class="card form"><h2>${ed ? '✏️ Edit station' : '➕ Add one station'}</h2>
+        <form data-form="station-one" ${ed ? `data-id="${esc(ed.id)}"` : ''}><input type="hidden" name="state" value="${esc(st.stState || ed?.state || '')}">
+          <div class="grid2">
+            <label>Station name<input name="name" required maxlength="80" value="${v('name')}" placeholder="e.g. Kurnool I Town PS"></label>
+            <label>District / city<input name="district" maxlength="60" value="${v('district')}"></label>
+          </div>
+          <div class="grid2">
+            <label>Phone${phoneInput('phone', { value: draft.phone ?? ed?.phone ?? '', country: iso, required: true, lang: curLang(), placeholder: 'Station number' })}</label>
+            <label>Second phone (optional)${phoneInput('phone2', { value: draft.phone2 ?? ed?.phone2 ?? '', country: iso, lang: curLang(), placeholder: 'Optional' })}</label>
+          </div>
+          <label>Location — paste a Google Maps link or "lat, lng"<input name="where" value="${esc(draft.where ?? (ed ? `${ed.lat}, ${ed.lng}` : ''))}" placeholder="https://www.google.com/maps/place/...  or  15.8306, 78.0451"></label>
+          <p class="small muted">In Google Maps: open the station, tap <b>Share → Copy link</b> on a computer, or long-press the pin and copy the numbers shown. Short "maps.app.goo.gl" links don't contain the location — open them first and copy the full address-bar link.</p>
+          <div class="row"><button type="button" class="btn btn-secondary btn-sm" data-act="station-here">📍 I am at the station now</button>
+            <button class="btn btn-primary">${ed ? 'Save changes' : 'Add station'}</button>${ed ? '<button type="button" class="btn btn-ghost" data-act="station-cancel">Cancel</button>' : ''}</div>
+        </form></section>
+
+      <section class="card form"><details ${st.stCsvOpen ? 'open' : ''}><summary><b>📄 Bulk upload (CSV / spreadsheet)</b></summary>
+        <p class="small muted">Stations go into <b>${flag(iso)} ${esc(countryName(iso, curLang()))}${st.stState ? ` → ${esc(st.stState)}` : ''}</b> (change above). Only <code>name,lat,lng,phone</code> are required; <code>district</code>, <code>phone2</code>, <code>state</code> and <code>country</code> columns are optional. Paste straight from Excel / Google Sheets (save as CSV) — local numbers like <code>08518 220100</code> are fine.</p>
+        <form data-form="stations"><textarea name="csv" rows="6" required placeholder="name,district,lat,lng,phone,phone2&#10;Kurnool I Town PS,Kurnool,15.8306,78.0451,08518 220100,&#10;Kurnool II Town PS,Kurnool,15.8281,78.0373,08518 221200,9440795500"></textarea>
+          <label class="switch"><input type="checkbox" name="replace"> Replace all stations of ${esc(st.stState || countryName(iso, curLang()))} (other states are kept)</label>
+          <div class="row"><button class="btn btn-primary">Upload</button><button type="button" class="btn btn-ghost btn-sm" data-act="station-template">⬇ Download template</button></div></form></details></section>
+
+      <section class="card"><h2>${inCountry.length} stations in ${flag(iso)} ${esc(countryName(iso, curLang()))}</h2>
+        ${Object.keys(byState).length > 1 || fState ? `<div class="chip-row">${['', ...Object.keys(byState).sort()].map((k) => `<button type="button" class="chip ${k === fState ? 'chip-hl' : ''}" aria-pressed="${k === fState}" data-act="st-filter" data-state="${esc(k)}">${k ? esc(k) : 'All'} ${k ? byState[k] : inCountry.length}</button>`).join('')}</div>` : ''}
+        <label class="sr-only" for="st-q">Search stations</label><input id="st-q" type="search" data-change="st-query" value="${esc(st.stQuery || '')}" placeholder="Search name, district or phone">
+        <table class="tbl small"><thead><tr><th>Name</th><th>State · District</th><th>Phone</th><th>Location</th><th></th></tr></thead><tbody>
+        ${shown.slice(0, 500).map((s) => `<tr><td>${esc(s.name)}</td><td>${esc([s.state, s.district].filter(Boolean).join(' · '))}</td><td>${esc(s.phone)}${s.phone2 ? `<br>${esc(s.phone2)}` : ''}</td><td><a href="https://maps.google.com/?q=${s.lat},${s.lng}" target="_blank" rel="noopener">${esc(s.lat.toFixed(4))}, ${esc(s.lng.toFixed(4))}</a></td><td><button class="btn btn-ghost btn-sm" data-act="station-edit" data-id="${esc(s.id)}">Edit</button><button class="btn btn-ghost btn-sm danger-text" data-act="station-del" data-id="${esc(s.id)}">Delete</button></td></tr>`).join('') || '<tr><td colspan="5" class="muted">None yet.</td></tr>'}</tbody></table>
+        ${shown.length > 500 ? `<p class="small muted">Showing 500 of ${shown.length} — use search or the state filter.</p>` : ''}</section>`;
   }
 
   // ---------------- incident (her) & operations additions ----------------
@@ -380,19 +431,41 @@ export function initProtect(c) {
         if (box) box.innerHTML = el.dataset.kind === 'video' ? `<video controls autoplay src="${url}"></video>` : `<audio controls autoplay src="${url}"></audio>`;
       } catch (e) { showErr(e); }
     },
-    async 'station-del'(el) { try { await api().deleteStation(el.dataset.id); render(); } catch (e) { showErr(e); } },
+    async 'station-del'(el) {
+      const r = await modal({ title: 'Delete this police station?', body: '<p>It will no longer be contacted automatically.</p>', actions: [{ id: 'del', label: 'Delete', kind: 'danger' }, { id: 'no', label: 'Cancel' }] });
+      if (r.id !== 'del') return;
+      try { await api().deleteStation(el.dataset.id); render(); } catch (e) { showErr(e); }
+    },
+    'station-edit'(el) { st.stationEdit = el.dataset.id; st.stationDraft = null; render(); setTimeout(() => document.querySelector('[data-form="station-one"] [name="name"]')?.focus(), 50); },
+    'station-cancel'() { st.stationEdit = null; st.stationDraft = null; render(); },
+    'st-filter'(el) { st.stFilterState = el.dataset.state || ''; render(); },
+    async 'station-here'(el) {
+      const f = el.closest('form');
+      try { const l = await geo.once(10000); f.where.value = `${l.lat.toFixed(6)}, ${l.lng.toFixed(6)}`; toast(`Location set (±${Math.round(l.accuracy || 0)} m)`, 'ok'); } catch { toast('Could not get your location', 'error'); }
+    },
+    'station-template'() {
+      const csv = 'name,district,lat,lng,phone,phone2\nExample Town PS,Example District,15.8306,78.0451,08518 220100,\n';
+      const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = `police-stations-${stCountry()}${st.stState ? '-' + st.stState.replace(/\W+/g, '-') : ''}.csv`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    },
     'blink-stop'() { stopBlink(); go('#/home'); },
     'voice-command'() { voiceCommand(); },
     'speak-status'() { speakStatus(st.incident, { force: true }); },
   };
-  const readRows = (f) => [...f.querySelectorAll('[data-row]')].map((r) => ({ name: r.querySelector('[name="cname"]').value.trim(), phone: r.querySelector('[name="cphone"]').value.trim() })).filter((x) => x.name || x.phone);
+  // Each row → { name, phone: +E.164 }; rows with a bad number carry `problem` so the form can say which one.
+  const readRows = (f) => [...f.querySelectorAll('[data-row]')].map((r) => {
+    const name = r.querySelector('[name="cname"]').value.trim(); const raw = r.querySelector('[name="cphone"]').value.trim();
+    const ph = readPhone(r, 'cphone');
+    return { name, phone: raw ? ph.e164 : '', problem: raw ? ph.problem : null };
+  }).filter((x) => x.name || x.phone);
+  const rowProblem = (cs) => { const i = cs.findIndex((x) => !x.name || !x.phone || x.problem); return i < 0 ? null : `Contact ${i + 1}: ${!cs[i].name ? 'enter a name' : cs[i].problem || 'enter a phone number'}`; };
+  const clean = (cs) => cs.map(({ name, phone }) => ({ name, phone }));
   const forms = {
     async important(f) {
       const cs = readRows(f);
       if (cs.length < 1) return toast('Add at least 1 important contact', 'error');
       if (cs.length > 5) return toast('Up to 5 important contacts', 'error');
-      if (cs.some((x) => !x.name || x.phone.replace(/[^\d]/g, '').length < 6)) return toast('Each contact needs a name and a valid phone number', 'error');
-      try { const r = await api().saveContacts({ contacts: cs }); contacts.replace(r.contacts || cs); c.syncNative(); toast('Important contacts saved', 'ok'); render(); } catch (e) { showErr(e); }
+      { const pr = rowProblem(cs); if (pr) return toast(pr, 'error'); }
+      try { const r = await api().saveContacts({ contacts: clean(cs) }); contacts.replace(r.contacts || clean(cs)); c.syncNative(); toast('Important contacts saved', 'ok'); render(); } catch (e) { showErr(e); }
     },
     async place(f) {
       const list = [...places()];
@@ -402,7 +475,8 @@ export function initProtect(c) {
       const cs = readRows(f);
       if (cs.length < 1) return toast('Add at least 1 contact for this place', 'error');
       if (cs.length > 3) return toast('Up to 3 contacts per place', 'error');
-      const p = { id: i >= 0 ? list[i].id : undefined, label: f.label.value.trim(), lat: where.lat, lng: where.lng, radiusM: Number(f.radiusM.value), contacts: cs };
+      { const pr = rowProblem(cs); if (pr) return toast(pr, 'error'); }
+      const p = { id: i >= 0 ? list[i].id : undefined, label: f.label.value.trim(), lat: where.lat, lng: where.lng, radiusM: Number(f.radiusM.value), contacts: clean(cs) };
       if (i >= 0) list[i] = p; else list.push(p);
       try { const r = await api().savePlaces(list); store.set('places', r.places); st.placeEdit = null; st.placeDraft = null; c.syncNative(); toast('Saved — contacts will switch automatically with your location', 'ok'); render(); } catch (e) { showErr(e); }
     },
@@ -420,10 +494,25 @@ export function initProtect(c) {
         render();
       } catch (e) { showErr(e); }
     },
-    async stations(f) { try { const r = await api().importStations({ csv: f.csv.value, mode: f.replace.checked ? 'replace' : 'merge' }); toast(`Imported ${r.imported}, skipped ${r.skipped} — ${r.total} stations`, r.skipped ? 'warn' : 'ok', 7000); render(); } catch (e) { showErr(e); } },
+    async 'station-one'(f) {
+      const where = parseLatLng(f.where.value);
+      const keep = () => { st.stationDraft = { name: f.name.value, district: f.district.value, where: f.where.value, phone: readPhone(f, 'phone').e164, phone2: f.phone2.value ? readPhone(f, 'phone2').e164 : '' }; };
+      if (!where) return toast('Set the location: paste a Google Maps link / "lat, lng", or tap "I am at the station now"', 'error');
+      const p1 = readPhone(f, 'phone'); const p2 = f.phone2.value.trim() ? readPhone(f, 'phone2') : null;
+      if (p1.problem && p1.e164.replace(/\D/g, '').length < 8) return toast('Station phone: ' + p1.problem, 'error');
+      try {
+        const r = await api().addStation({ id: f.dataset.id || undefined, name: f.name.value, district: f.district.value, state: f.state.value, country: stCountry(), lat: where.lat, lng: where.lng, phone: p1.e164, phone2: p2?.e164 || null });
+        st.stationEdit = null; st.stationDraft = null;
+        toast(r.updated ? 'Station updated' : `Station added — ${r.total} in total`, 'ok'); render();
+      } catch (e) { keep(); showErr(e); }
+    },
+    async stations(f) { st.stCsvOpen = true; try { const r = await api().importStations({ csv: f.csv.value, mode: f.replace.checked ? 'replace' : 'merge', country: stCountry(), state: st.stState || '' }); toast(`Imported ${r.imported}, skipped ${r.skipped} — ${r.total} stations`, r.skipped ? 'warn' : 'ok', 7000); render(); } catch (e) { showErr(e); } },
   };
   const changes = {
     'impact-days'(el) { st.impactDays = Number(el.value); render(); },
+    'st-country'(el) { st.stCountry = el.value; st.stState = ''; st.stFilterState = ''; render(); },
+    'st-state'(el) { st.stState = el.value.trim(); st.stFilterState = st.stState; render(); },
+    'st-query'(el) { st.stQuery = el.value; render(); setTimeout(() => { const i = document.getElementById('st-q'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } }, 0); },
     autoEvidence(el) { prefs.set({ autoEvidence: el.checked }); c.syncNative(); },
     voiceGuide(el) { prefs.set({ voiceGuide: el.checked }); a11y.setGuide(el.checked); if (el.checked) announce('Spoken guidance is on.'); },
     async voiceNative(el) { prefs.set({ voiceNative: el.checked }); if (el.checked) await native.requestPermissions('microphone'); await c.syncNative(); toast(el.checked ? 'Listening for your SOS word in the background' : 'Voice SOS off', 'ok'); },

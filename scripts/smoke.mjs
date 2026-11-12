@@ -122,7 +122,8 @@ try {
   await nv.goto(base + '#/register?as=volunteer');
   await nv.fill('[name="displayName"]', 'Lata');
   await nv.fill('[name="email"]', 'lata@test.betibachao.app');
-  await nv.fill('[name="phone"]', '+919812345678');
+  await nv.selectOption('[name="phone_cc"]', 'IN');
+  await nv.fill('[name="phone"]', '98123 45678'); // local format; the picker adds +91
   await nv.fill('[name="password"]', 'a-good-password-1');
   await nv.check('[name="consent"]');
   await nv.click('[data-form="register"] button[type="submit"]');
@@ -156,9 +157,23 @@ try {
 
   // ---- autonomous protection screens ----
   await adm.click('[data-tab="stations"]');
-  await adm.fill('[name="csv"]', 'name,district,lat,lng,phone\nKurnool I Town PS,Kurnool,15.8306,78.0451,+918518000001');
-  await adm.click('[data-form="stations"] button');
-  await adm.waitForFunction(() => document.body.innerText.includes('1 stations loaded'));
+  await adm.waitForSelector('[data-change="st-country"]');
+  await adm.selectOption('[data-change="st-country"]', 'IN');
+  await adm.waitForTimeout(300);
+  await adm.fill('[data-change="st-state"]', 'Andhra Pradesh'); await adm.press('[data-change="st-state"]', 'Tab');
+  await adm.waitForTimeout(300);
+  await adm.fill('[data-form="station-one"] [name="name"]', 'Kurnool I Town PS');
+  await adm.fill('[data-form="station-one"] [name="district"]', 'Kurnool');
+  await adm.fill('[data-form="station-one"] [name="phone"]', '08518 000001');
+  await adm.fill('[data-form="station-one"] [name="where"]', 'https://www.google.com/maps/place/Police/@15.83,78.04,17z/data=!3d15.8306!4d78.0451');
+  await adm.click('[data-form="station-one"] button.btn-primary');
+  await adm.waitForFunction(() => document.body.innerText.includes('1 stations in'));
+  await adm.click('summary:has-text("Bulk upload")');
+  await adm.fill('[name="csv"]', 'name,district,lat,lng,phone\nKurnool II Town PS,Kurnool,15.8281,78.0373,08518 000002');
+  await adm.click('[data-form="stations"] button.btn-primary');
+  await adm.waitForFunction(() => document.body.innerText.includes('2 stations in'));
+  if (!(await adm.content()).includes('+918518000001')) throw new Error('station local number not converted to +91');
+  await shot(adm, '08a-admin-stations'); step('admin: add police station by country/state (local number → +91) + CSV upload');
   await adm.click('[data-tab="impact"]');
   await adm.waitForSelector('svg.chart');
   await shot(adm, '08-admin-impact'); step('admin: police station import + impact dashboard with chart');
@@ -236,7 +251,11 @@ try {
   await reg.goto(base + '#/register');
   await reg.fill('[name="displayName"]', 'New Person');
   await reg.fill('[name="email"]', 'new@test.betibachao.app');
-  await reg.fill('[name="phone"]', '+919876543210');
+  await reg.selectOption('[name="phone_cc"]', 'GB');
+  if (await reg.inputValue('[name="countryCode"]') !== 'GB') throw new Error('country select did not follow the phone country');
+  await reg.selectOption('[name="phone_cc"]', 'IN');
+  await reg.fill('[name="phone"]', '09876543210');
+  await shot(reg, '00-register-country-code');
   await reg.fill('[name="password"]', 'a-good-password-1');
   await reg.check('[name="consent"]');
   await reg.click('[data-form="register"] button[type="submit"]');
@@ -246,7 +265,7 @@ try {
   const nid = (await W.admin.call('GET', '/admin/users?q=new@test')).body.items[0].id;
   const temp = (await W.admin.call('POST', `/admin/users/${nid}/reset-password`)).body.temporaryPassword;
   const rp = await page('reset');
-  await signIn(rp, 'new@test.betibachao.app', temp);
+  await signIn(rp, 'new@test.betibachao.app', temp).catch(async (e) => { console.log('RP BODY:', (await rp.innerText('body')).slice(0, 800), rp.url()); throw e; });
   await rp.waitForSelector('[data-form="change-pw"]');
   if (await rp.$('[data-form="change-pw"] [name="cur"]')) throw new Error('temporary password asked again');
   await rp.fill('[name="pw"]', 'my-own-new-pass-1'); await rp.fill('[name="pw2"]', 'my-own-new-pass-2');
@@ -257,7 +276,8 @@ try {
   await rp.click('[data-form="change-pw"] button');
   await rp.waitForSelector('#sos-btn');
   await rp.click('[data-act="logout"]');
-  await signIn(rp, 'new@test.betibachao.app', 'my-own-new-pass-1');
+  await rp.waitForSelector('#sos-btn', { state: 'detached' });
+  await signIn(rp, 'new@test.betibachao.app', 'my-own-new-pass-1').catch(async (e) => { console.log('RP2 BODY:', (await rp.innerText('main').catch(() => '')).slice(0, 600), rp.url()); throw e; });
   await rp.waitForSelector('#sos-btn');
   step('admin reset → temporary password → own new password → log out → log in with new password');
 } catch (e) {
