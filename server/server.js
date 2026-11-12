@@ -6,6 +6,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { Engine, EngineError, SIMULATED_LABEL } from '../public/core/engine.js';
 import { COUNTRIES } from '../public/core/config.js';
@@ -262,9 +263,17 @@ export function createServer(opts = {}) {
   }
 
   // ---------- helpers ----------
+  // Responses over 1 KB are gzip-compressed when the phone/browser accepts it (≈ 75 % less data).
+  const gzipOk = (res) => /\bgzip\b/.test(String(res.req?.headers['accept-encoding'] || ''));
   const json = (res, status, body, extra = {}) => {
+    const text = JSON.stringify(body);
+    if (text.length > 1024 && gzipOk(res)) {
+      const z = zlib.gzipSync(text, { level: 6 });
+      res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding', 'Content-Length': z.length, 'Cache-Control': 'no-store', ...securityHeaders(SECURE), ...extra });
+      return res.end(z);
+    }
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...securityHeaders(SECURE), ...extra });
-    res.end(JSON.stringify(body));
+    res.end(text);
   };
   const err = (res, status, code, message) => json(res, status, { error: { code, message: message || code } });
 
@@ -629,7 +638,9 @@ export function createServer(opts = {}) {
     fs.stat(file, (e, st) => {
       if (e || !st.isFile()) { res.writeHead(404, { 'Content-Type': 'text/plain', ...securityHeaders(SECURE) }); return res.end('Not found'); }
       const ext = path.extname(file);
-      res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': ext === '.html' || file.endsWith('sw.js') ? 'no-cache' : file.includes(`${path.sep}vendor${path.sep}`) ? 'public, max-age=2592000, immutable' : 'public, max-age=300', ...(file.endsWith(`${path.sep}blink-frame.html`) ? blinkFrameHeaders(SECURE) : securityHeaders(SECURE)) });
+      const gz = /\.(js|css|html|json|svg|webmanifest|txt)$/.test(file) && gzipOk(res);
+      res.writeHead(200, { ...(gz ? { 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' } : {}), 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': ext === '.html' || file.endsWith('sw.js') ? 'no-cache' : file.includes(`${path.sep}vendor${path.sep}`) ? 'public, max-age=2592000, immutable' : 'public, max-age=300', ...(file.endsWith(`${path.sep}blink-frame.html`) ? blinkFrameHeaders(SECURE) : securityHeaders(SECURE)) });
+      if (gz) { fs.createReadStream(file).pipe(zlib.createGzip({ level: 6 })).pipe(res); return; }
       fs.createReadStream(file).pipe(res);
     });
   }

@@ -600,3 +600,19 @@ label { font-weight: 600; font-size: .92rem; color: var(--ink); }
 .toast { font-family: var(--font); font-weight: 500; font-size: .95rem; border-radius: 12px; box-shadow: 0 6px 18px rgba(30, 23, 38, .18); }
 .offline-banner { background: #FFF6DC; color: #4A3300; border-bottom: 1px solid #F2D48A; padding: 10px 16px; font-size: .92rem; line-height: 1.4; }
 .offline-banner b { font-weight: 600; }
+/* Latest update + Report danger: readable in light AND dark mode (fixed colours, not theme ink) */
+.latest-update { background: #FFF8E3; border: 2px solid var(--haldi); border-inline-start-width: 6px; color: #2B1E00; }
+.latest-update strong { color: #2B1E00; font-weight: 700; font-size: 1.22rem; }
+.latest-update .lu-label, .latest-update .lu-sub { color: #6B5310; }
+.btn-warn { background: #FFF1CC; color: #4A3200; border: 1.5px solid #E2B33C; font-weight: 600; }
+@media (prefers-color-scheme: dark) {
+  .latest-update { background: #2E2410; border-color: var(--haldi); color: #FFF3D6; }
+  .latest-update strong { color: #FFF3D6; }
+  .latest-update .lu-label, .latest-update .lu-sub { color: #E9D3A0; }
+  .btn-warn { background: #3A2C0A; color: #FFE7A8; border-color: #C8962A; }
+  .btn-secondary, .btn-ghost, .btn-cancel-sos { color: var(--ink); }
+}
+@media (prefers-color-scheme: dark) {
+  .btn-primary, .btn-safe { background: #0E7C76; color: #fff; }
+  .btn-primary:hover { background: #0B6964; }
+}

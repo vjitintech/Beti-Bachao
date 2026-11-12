@@ -1,12 +1,12 @@
-import { createApi, uuid } from './api.js?v=mwdob6or';
-import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang, ownSosWords, sosVoiceLang } from './i18n.js?v=mwdob6or';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwdob6or';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwdob6or';
-import { TRAINING_MODULES } from '../core/engine.js?v=mwdob6or';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwdob6or';
-import { initProtect } from './protect-ui.js?v=mwdob6or';
-import { a11y, announce, speakStatus } from './a11y.js?v=mwdob6or';
-import { phoneInput, readPhone, guessCountry, bindPhoneFields } from './phone.js?v=mwdob6or';
+import { createApi, uuid } from './api.js?v=mwdpd10v';
+import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang, ownSosWords, sosVoiceLang } from './i18n.js?v=mwdpd10v';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwdpd10v';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwdpd10v';
+import { TRAINING_MODULES } from '../core/engine.js?v=mwdpd10v';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwdpd10v';
+import { initProtect } from './protect-ui.js?v=mwdpd10v';
+import { a11y, announce, speakStatus } from './a11y.js?v=mwdpd10v';
+import { phoneInput, readPhone, guessCountry, bindPhoneFields } from './phone.js?v=mwdpd10v';
 let P = null; // autonomous-protection screens (protect-ui.js), set up in boot()
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'impact', volSel: null };
@@ -834,7 +834,7 @@ async function viewOps() {
   try { list = (await st.api.opIncidents(all)).items; } catch (e) { return failView(e); }
   const selId = st.opSel && list.some((i) => i.id === st.opSel) ? st.opSel : list[0]?.id;
   let d = null, tl = [], cfg = null;
-  if (selId) { try { d = await st.api.getIncident(selId); if (d.search?.deadline && d.search.secondsLeft != null) st.skew = (Date.parse(d.search.deadline) - d.search.secondsLeft * 1000) - Date.now(); tl = (await st.api.timeline(selId)).items; cfg = (await st.api.adminConfig()).config; } catch {} }
+  if (selId) { try { d = await st.api.getIncident(selId); if (d.search?.deadline && d.search.secondsLeft != null) st.skew = (Date.parse(d.search.deadline) - d.search.secondsLeft * 1000) - Date.now(); tl = (await st.api.timeline(selId)).items; if (!st.cfgCache || Date.now() - st.cfgCache.at > 300000) st.cfgCache = { at: Date.now(), cfg: (await st.api.adminConfig()).config }; cfg = st.cfgCache.cfg; } catch {} }
   return shell(`
     <div class="row space"><h1>Operations console</h1><label class="switch"><input type="checkbox" data-change="ops-all" ${all ? 'checked' : ''}> Show closed</label></div>
     <div class="ops-layout">
@@ -1060,12 +1060,12 @@ async function renderScreen() {
     case 'register': html = viewRegister(params); break;
     case 'setup': html = viewSetup(params); break;
     case 'home': if (!guard(['user'])) return; html = await viewHome(); break;
-    case 'incident': if (!guard(['user'])) return; html = await viewIncident(parts[1], params); if (!html) return; if (!st.incident?.closed) st.pollTimer = setInterval(refreshSoft, 3000); break;
+    case 'incident': if (!guard(['user'])) return; html = await viewIncident(parts[1], params); if (!html) return; if (!st.incident?.closed) st.pollTimer = setInterval(refreshSoft, 5000); break;
     case 'tools': if (!guard(['user'])) return; html = await viewTools(); break;
     case 'places': case 'trip': case 'help': case 'dashboard': case 'blink': if (!guard(['user'])) return; html = await P.views[parts[0]](); if (parts[0] === 'trip') st.pollTimer = setInterval(refreshSoft, 15000); break;
     case 'settings': if (!guard()) return; html = await viewSettings(); break;
-    case 'volunteer': if (!guard(['volunteer'])) return; html = await viewVolunteer(); st.pollTimer = setInterval(refreshSoft, 3000); break;
-    case 'ops': if (!guard(['operator', 'admin'])) return; html = await viewOps(); st.pollTimer = setInterval(refreshSoft, 3000); break;
+    case 'volunteer': if (!guard(['volunteer'])) return; html = await viewVolunteer(); st.pollTimer = setInterval(refreshSoft, 6000); break;
+    case 'ops': if (!guard(['operator', 'admin'])) return; html = await viewOps(); st.pollTimer = setInterval(refreshSoft, 6000); break;
     case 'admin': if (!guard(['admin'])) return; html = await viewAdmin(); break;
     default: html = shell('<p>Page not found.</p>');
   }
@@ -1119,7 +1119,12 @@ function morph(a, b) {
 }
 
 // Re-render without losing typing: skip if the user is in a form field.
+// Live refreshes are coalesced: at most one every 3 s, however many live events arrive
+// (each location ping from each phone used to trigger its own reload).
 function refreshSoft() {
+  const wait = 3000 - (Date.now() - (st.lastSoft || 0));
+  if (wait > 0) { if (!st.softPending) st.softPending = setTimeout(() => { st.softPending = null; refreshSoft(); }, wait); return; }
+  st.lastSoft = Date.now();
   const a = document.activeElement;
   if (a && ['INPUT', 'TEXTAREA', 'SELECT'].includes(a.tagName)) return; // typing or choosing
   if ($('.modal-backdrop')) return;

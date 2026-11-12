@@ -13,7 +13,9 @@ const step = (s) => { steps.push(s); console.log('✓', s); };
 const fail = (m) => { throw new Error(m); };
 
 const browser = await chromium.launch();
-const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true,
+const DARK = process.argv.includes('--dark');
+const snap = (n) => p.screenshot({ path: `screenshots/android${DARK ? '-dark' : ''}-${n}.png`, fullPage: true }).catch(() => {});
+const ctx = await browser.newContext({ colorScheme: DARK ? 'dark' : 'light', viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true,
   geolocation: { latitude: HER.lat, longitude: HER.lng, accuracy: 12 }, permissions: ['geolocation'] });
 await ctx.exposeFunction('__nativeCall', (m, a) => { nativeCalls.push({ m, a }); });
 await ctx.addInitScript(({ server }) => {
@@ -62,6 +64,7 @@ try {
   if (await p.locator('text=This browser can\'t receive SOS alerts').count()) fail('browser push warning shown inside the app');
   const idle = await redrawsIn(7000);
   if (idle > 1) fail(`home screen redraws by itself (${idle} in 7 s) — would flicker`);
+  await snap('home');
   step(`home screen is steady (${idle} full redraws in 7 s)`);
 
   // Police station 2 km away, police connect after the minimum wait.
@@ -87,9 +90,14 @@ try {
   const toasts = await p.locator('#toasts .toast').allInnerTexts();
   if (new Set(toasts).size !== toasts.length || toasts.length > 3) fail(`repeated messages: ${JSON.stringify(toasts)}`);
   if ((nativeCalls.filter((c) => c.m === 'placeCall')).length !== 1) fail('police called more than once');
+  await snap('sos');
   step(`SOS screen steady (${sosRedraws} full redraws in 9 s), no repeated messages, police called once`);
   if (!(await p.locator('.cancel-zone [data-act="cancel-sos"]').isVisible())) fail('Cancel SOS not visible');
   // She is safe → straight to Home, no "SOS ended" screen.
+  await p.goto(S.origin + '/#/settings'); await p.waitForSelector('[data-change="customSosWords"]'); await snap('settings');
+  await p.goto(S.origin + '/#/tools'); await p.waitForTimeout(800); await snap('tools');
+  await p.goto(S.origin + '/#/places'); await p.waitForTimeout(1200); await snap('places');
+  await p.evaluate(() => history.back()); await p.evaluate(() => history.back()); await p.evaluate(() => history.back()); await p.waitForSelector('[data-act="are-you-safe"]');
   await p.click('[data-act="are-you-safe"]');
   await p.waitForSelector('.modal button:has-text("I am safe")');
   await p.locator('.modal button:has-text("I am safe")').first().click();

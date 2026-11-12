@@ -5,9 +5,9 @@
 //  • "Track my travel" trips with auto-arrival and auto-SOS when overdue
 //  • SOS evidence (audio/video) metadata — bytes are stored encrypted by the server
 //  • dashboards: hers, admin impact, public impact counter
-import { haversineKm, isValidLatLng } from './geo.js?v=mwdob6or';
-import { COUNTRIES } from './config.js?v=mwdob6or';
-import { toE164, dialInfo } from './dial.js?v=mwdob6or';
+import { haversineKm, isValidLatLng } from './geo.js?v=mwdpd10v';
+import { COUNTRIES } from './config.js?v=mwdpd10v';
+import { toE164, dialInfo } from './dial.js?v=mwdpd10v';
 
 const SAFE_CLOSURES = new Set(['USER_CONFIRMED_SAFE', 'HANDED_TO_EMERGENCY_SERVICES_CONFIRMED_SAFE']);
 const median = (xs) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
@@ -35,6 +35,13 @@ export function pickContacts(places, defaults, loc) {
   const seen = new Set(); const out = [];
   for (const c of [...always, ...base]) { const k = phoneKey(c.phone); if (!seen.has(k)) { seen.add(k); out.push(c); } }
   return { place: place ? { id: place.id, label: place.label } : null, contacts: out };
+}
+
+// "kurnool i town ps" → "Kurnool I Town PS" (only when typed all in lowercase; PS / SHO / CP stay capitals).
+export function stationName(raw) {
+  const t = String(raw || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+  if (t !== t.toLowerCase()) return t;
+  return t.split(' ').map((w) => (/^(ps|sho|cp|dcp|acp|ii|iii|iv|vi|i)$/.test(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1))).join(' ');
 }
 
 export const protectMethods = {
@@ -105,7 +112,7 @@ export const protectMethods = {
     const a = this.requireRole(actor, 'admin');
     const country = dialInfo(b.country) ? String(b.country).toUpperCase() : (this.cfg.countryCode || 'IN');
     const lat = Number(b.lat), lng = Number(b.lng);
-    const name = String(b.name || '').trim().slice(0, 80);
+    const name = stationName(b.name);
     const phone = this.stationPhone(b.phone, country); const phone2 = this.stationPhone(b.phone2, country);
     if (!name) this.fail(400, 'STATION_NAME', 'Enter the station name');
     if (!isValidLatLng(lat, lng)) this.fail(400, 'STATION_LOCATION', 'Set the station location (paste a Google Maps link or lat,lng)');
@@ -136,7 +143,7 @@ export const protectMethods = {
       const lat = Number(get(f, 'lat')), lng = Number(get(f, 'lng'));
       const cc = dialInfo(get(f, 'country')) ? get(f, 'country').toUpperCase() : defC;
       const phone = this.stationPhone(get(f, 'phone'), cc); const phone2 = this.stationPhone(get(f, 'phone2'), cc);
-      const name = get(f, 'name').slice(0, 80);
+      const name = stationName(get(f, 'name'));
       if (!name || !isValidLatLng(lat, lng) || !phone) { errors.push(`row ${i + 2}`); continue; }
       rows.push({ id: this.deps.uuid(), name, country: cc, state: (get(f, 'state') || defS).slice(0, 60), district: get(f, 'district').slice(0, 60), lat, lng, phone, phone2 });
     }
