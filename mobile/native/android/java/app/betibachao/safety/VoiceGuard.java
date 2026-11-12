@@ -23,7 +23,8 @@ import java.util.Locale;
 /**
  * Voice SOS: keeps the phone's on-device speech recognizer listening while background
  * protection is on, and starts the SOS countdown when she says one of her SOS words
- * ("bachao", "help", "kapadandi"…). Runs inside the foreground SafetyService.
+ * (default "bachao", or the words she set). Runs inside the foreground SafetyService, silently:
+ * the recogniser's beeps are muted, and it only runs when she has turned Voice SOS on.
  */
 public final class VoiceGuard implements RecognitionListener {
     private static VoiceGuard instance;
@@ -46,7 +47,12 @@ public final class VoiceGuard implements RecognitionListener {
     public static void stop() { if (instance != null) instance.main.post(instance::end); }
 
     /** Frees the microphone for a while (evidence recording, voice commands in the app). */
-    public static void pause(Context ctx) { pausedUntil = System.currentTimeMillis() + 20000; if (instance != null) instance.main.post(instance::release); }
+    public static void pause(Context ctx) { pause(ctx, 20000); }
+    public static void pause(Context ctx, long ms) {
+        pausedUntil = Math.max(pausedUntil, System.currentTimeMillis() + ms);
+        if (instance == null) return;
+        if (Looper.myLooper() == Looper.getMainLooper()) instance.release(); else instance.main.post(instance::release);
+    }
 
     private void begin() { running = true; listen(); }
     private void end() { running = false; release(); }
@@ -61,10 +67,12 @@ public final class VoiceGuard implements RecognitionListener {
         rec.setRecognitionListener(this);
         Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
         i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, langTag(Store.get(app, "lang")));
+        String vl = Store.get(app, "voiceLang");
+        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, vl != null && !vl.isEmpty() ? vl : langTag(Store.get(app, "lang")));
         i.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true);
         i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
         i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
+        Silence.mute(app); // the recogniser's start/stop beeps must not be heard
         try { rec.startListening(i); } catch (Exception e) { retry(); }
     }
 
@@ -77,7 +85,7 @@ public final class VoiceGuard implements RecognitionListener {
         ArrayList<String> heard = b == null ? null : b.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
         if (heard == null) return false;
         List<String> words = new ArrayList<>();
-        try { JSONArray a = new JSONArray(Store.get(app, "keywords") == null ? "[\"bachao\",\"help\",\"kapadandi\"]" : Store.get(app, "keywords")); for (int k = 0; k < a.length(); k++) words.add(a.getString(k).toLowerCase(Locale.ROOT)); } catch (Exception ignored) {}
+        try { JSONArray a = new JSONArray(Store.get(app, "keywords") == null ? "[\"bachao\",\"बचाओ\"]" : Store.get(app, "keywords")); for (int k = 0; k < a.length(); k++) words.add(a.getString(k).toLowerCase(Locale.ROOT)); } catch (Exception ignored) {}
         for (String h : heard) {
             String s = " " + h.toLowerCase(Locale.ROOT).replaceAll("[.,!?।॥،؟\"]", " ").replaceAll("\\s+", " ") + " ";
             for (String w : words) {

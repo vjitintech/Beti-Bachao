@@ -79,7 +79,8 @@ public class SafetyService extends Service implements SensorEventListener {
         if (intent != null && intent.getStringExtra("mode") != null) mode = intent.getStringExtra("mode");
         boolean hasLoc = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
         boolean hasMic = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
-        boolean wantMic = hasMic && "user".equals(Store.get(this, "role")) && (Store.getBool(this, "voice", false) || Store.getBool(this, "autoEvidence", true));
+        // Microphone only when she turned Voice SOS on, or during an SOS for the 15 s evidence clip.
+        boolean wantMic = hasMic && "user".equals(Store.get(this, "role")) && (Store.getBool(this, "voice", false) || ("sos".equals(mode) && Store.getBool(this, "autoEvidence", true)));
         int type = 0;
         if (Build.VERSION.SDK_INT >= 29 && hasLoc) type = ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION;
         if (Build.VERSION.SDK_INT >= 30 && wantMic) type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;

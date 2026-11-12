@@ -15,10 +15,10 @@
 //   • escalation adapter is SIMULATED until a real integration is approved
 //   • append-only, hash-chained audit log
 
-import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mwd73rny';
-import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mwd73rny';
-import { protectMethods } from './protect.js?v=mwd73rny';
-import { toE164, dialInfo } from './dial.js?v=mwd73rny';
+import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mwddwn7p';
+import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mwddwn7p';
+import { protectMethods, duplicateIn, phoneKey } from './protect.js?v=mwddwn7p';
+import { toE164, dialInfo } from './dial.js?v=mwddwn7p';
 
 export const S = Object.freeze({
   CREATED: 'CREATED',
@@ -77,7 +77,7 @@ export const ESC = Object.freeze({ NONE: 'NONE', REQUIRED: 'REQUIRED', SIMULATED
 // Escalations go to Beti Bachao operators (push + console). If no operator acknowledges
 // within policeAutoConnectSec (or she presses SOS again first), the nearest police station
 // is connected automatically (SMS + call bridge via the gateway; her phone texts 112).
-export const ESCALATION_LABEL = 'Operators alerted. If no operator acknowledges in time, the nearest police station is connected automatically. In danger, call 112.';
+export const ESCALATION_LABEL = 'Operators alerted. If no operator acknowledges in time, her phone calls the nearest police station (or 1091 / 112) automatically. In danger, call 112.';
 export const SIMULATED_LABEL = ESCALATION_LABEL; // backwards-compatible name
 
 const ASG_ORDER = ['ACCEPTED', 'EN_ROUTE', 'ARRIVED', 'ASSISTING'];
@@ -140,6 +140,8 @@ export class Engine {
   constructor(db, deps) {
     this.db = db;
     this.deps = deps;
+    // Settings added in a newer version get their defaults on an existing database.
+    if (db && typeof db === 'object') db.config = { ...DEFAULT_CONFIG, ...(db.config || {}) };
   }
 
   // ---------- basics ----------
@@ -251,7 +253,15 @@ export class Engine {
     if (contacts !== undefined) {
       // Important contacts: told about every SOS, wherever she is (1–5; the app requires at least 1).
       if (!Array.isArray(contacts) || contacts.length > 5) fail(400, 'INVALID_CONTACTS', 'Up to 5 important contacts');
-      u.contacts = contacts.map((c) => ({ ...this.cleanContact(c), always: true }));
+      const next = contacts.map((c) => ({ ...this.cleanContact(c), always: true }));
+      const dup = duplicateIn(next);
+      if (dup) fail(400, 'DUPLICATE_CONTACT', `${dup.b.name} has the same number as ${dup.a.name}`);
+      const self = next.find((c) => u.phone && phoneKey(c.phone) === phoneKey(u.phone));
+      if (self) fail(400, 'DUPLICATE_CONTACT', `${self.phone} is your own number — add someone who can help you`);
+      u.contacts = next;
+      // A number that is now important no longer needs to be a place contact as well.
+      const keys = new Set(next.map((c) => phoneKey(c.phone)));
+      for (const p of u.places || []) { const left = p.contacts.filter((c) => !keys.has(phoneKey(c.phone))); if (left.length) p.contacts = left; }
     }
     if (prefs) u.prefs = { ...(u.prefs || {}), serverSms: prefs.serverSms !== false };
     if (phone !== undefined) { const ph = normPhone(phone); if (phone && !ph) fail(400, 'INVALID_PHONE'); u.phone = ph; }
@@ -365,7 +375,9 @@ export class Engine {
       const open = this.db.incidents.find((i) => i.requesterId === u.id && this.isOpen(i));
       if (!open) return { routed: trip ? 'trip' : 'none' };
       this.addLocation(actor, open.id, loc);
-      return { routed: 'incident', incidentId: open.id };
+      // The phone's background location loop also learns about police auto-connect (works without push).
+      const d = open.policeConnect?.dial;
+      return { routed: 'incident', incidentId: open.id, ...(d && d.result !== 'PLACED' && d.number ? { policeCall: { incidentId: open.id, number: d.number } } : {}) };
     }
     const asg = this.db.assignments.find((a) => a.volunteerId === u.id && ACTIVE_ASG.has(a.status));
     if (asg) { this.updateResponderLocation(actor, asg.id, loc); return { routed: 'assignment' }; }
@@ -493,6 +505,9 @@ export class Engine {
     if (n) this.emit('volunteer.alerted', inc.id);
     return n;
   }
+
+  // True once a volunteer has accepted (and not dropped out).
+  hasResponder(incidentId) { return this.db.assignments.some((a) => a.incidentId === incidentId && ACTIVE_ASG.has(a.status)); }
 
   notify(incidentId, recipientId, kind, meta = {}) {
     const n = { id: this.deps.uuid(), incidentId, recipientId, kind, channel: 'in_app', status: 'PENDING', attemptCount: 0, createdAt: this.iso(), acknowledgedAt: null, respondedAt: null, response: null, providerReference: null, meta };
@@ -920,7 +935,7 @@ export class Engine {
         radiusStagesKm: this.cfg.radiusStagesKm,
         escalations: this.db.escalations.filter((e) => e.incidentId === inc.id).map((e) => ({ type: e.type, status: e.status, label: e.label, attemptedAt: e.attemptedAt })),
         operatorAcknowledged: !!inc.opAckAt,
-        police: inc.policeConnect ? { at: inc.policeConnect.at, status: inc.policeConnect.status, station: inc.policeConnect.station ? { name: inc.policeConnect.station.name, phone: inc.policeConnect.station.phone, distanceKm: inc.policeConnect.station.distanceKm } : null, emergency: inc.policeConnect.emergency, call: inc.policeConnect.call, sms: inc.policeConnect.sms } : null,
+        police: inc.policeConnect ? { at: inc.policeConnect.at, status: inc.policeConnect.status, station: inc.policeConnect.station ? { name: inc.policeConnect.station.name, phone: inc.policeConnect.station.phone, distanceKm: inc.policeConnect.station.distanceKm } : null, emergency: inc.policeConnect.emergency, call: inc.policeConnect.call, sms: inc.policeConnect.sms, dial: inc.policeConnect.dial || null } : null,
         liveSharePath: inc.shareTokens?.[0] && !inc.duress ? `/s/${inc.shareTokens[0]}` : null,
         contactsPlace: inc.contactsPlace || null, evidenceCount: (this.db.evidence || []).filter((e) => e.incidentId === inc.id).length,
         rateable: this.isOpen(inc) ? [] : this.db.assignments.filter((a) => a.incidentId === inc.id && (a.arrivedAt || a.status === 'COMPLETED')).map((a, i) => ({ ref: a.id, label: `Verified volunteer ${String.fromCharCode(65 + i)}`, rated: !!a.rating, stars: a.rating?.stars || null })),
@@ -1099,12 +1114,49 @@ export class Engine {
     return { ok: true, verificationStatus: v.verificationStatus, suspended: !!v.suspendedReason };
   }
 
-  findUsers(actor, q) {
+  // Admin user search. Any mix of: text (name starting with… / email / phone digits), status, role,
+  // and location (users whose saved places, last SOS or volunteer position are within `km` of a point).
+  findUsers(actor, q, { status = '', role = '', near = null, km = 10 } = {}) {
     this.requireRole(actor, 'admin');
     const s = String(q || '').trim().toLowerCase();
-    if (s.length < 3) return [];
-    return this.db.users.filter((u) => u.status !== 'DELETED' && (u.email.includes(s) || (u.phone || '').includes(s) || u.displayName.toLowerCase().includes(s))).slice(0, 20)
-      .map((u) => ({ id: u.id, displayName: u.displayName, email: u.email, phone: u.phone, role: u.role, status: u.status }));
+    const digits = s.replace(/\D/g, '');
+    const hasNear = near && isValidLatLng(Number(near.lat), Number(near.lng));
+    if (s.length < 3 && !status && !role && !hasNear) return [];
+    const radius = Math.min(500, Math.max(1, Number(km) || 10));
+    const lastSos = new Map();
+    for (const i of this.db.incidents) { const l = this.latestLocation(i.id); if (l) lastSos.set(i.requesterId, l); }
+    const spots = (u) => {
+      const out = [];
+      for (const p of u.places || []) out.push({ lat: p.lat, lng: p.lng, label: p.label });
+      const v = this.vol(u.id); if (v?.lastLocation) out.push({ ...v.lastLocation, label: 'on-duty location' });
+      const l = lastSos.get(u.id); if (l) out.push({ lat: l.lat, lng: l.lng, label: 'last SOS' });
+      return out;
+    };
+    const textOk = (u) => {
+      if (s.length < 3) return true;
+      const name = u.displayName.toLowerCase();
+      if (name.startsWith(s) || name.split(/\s+/).some((w) => w.startsWith(s))) return true; // first letters of any name
+      if (u.email.toLowerCase().includes(s)) return true;
+      return digits.length >= 3 && String(u.phone || '').replace(/\D/g, '').includes(digits);
+    };
+    const rows = [];
+    for (const u of this.db.users) {
+      if (u.status === 'DELETED' || !textOk(u)) continue;
+      if (status === 'PENDING') { if (u.role !== 'volunteer' || this.vol(u.id)?.verificationStatus === 'VERIFIED') continue; }
+      else if (status && u.status !== status) continue;
+      if (role && u.role !== role) continue;
+      let where = null;
+      if (hasNear) {
+        const best = spots(u).map((p) => ({ ...p, d: haversineKm(near, p) })).sort((a, b) => a.d - b.d)[0];
+        if (!best || best.d > radius) continue;
+        where = { label: best.label, distanceKm: +best.d.toFixed(1) };
+      }
+      const v = this.vol(u.id);
+      rows.push({ id: u.id, displayName: u.displayName, email: u.email, phone: u.phone, role: u.role, status: u.status, countryCode: u.countryCode || null,
+        createdAt: u.createdAt || null, places: (u.places || []).map((p) => p.label).slice(0, 4), volunteer: v ? { approved: v.verificationStatus === 'VERIFIED' && !v.suspendedReason, onDuty: !!v.available, verification: v.verificationStatus } : null, where });
+    }
+    rows.sort((a, b) => (a.where && b.where ? a.where.distanceKm - b.where.distanceKm : a.displayName.localeCompare(b.displayName)));
+    return rows.slice(0, 100);
   }
 
   adminResetPassword(actor, userId, passwordHash) {

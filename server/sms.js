@@ -1,12 +1,13 @@
 // SMS gateway adapters. Used when the phone itself cannot send SMS (iPhone users,
 // alert fallback to volunteers, password-reset codes).
-//   SMS_PROVIDER=msg91   MSG91_AUTH_KEY, MSG91_TEMPLATE_SOS, _ALERT, _OTP, _VERIFY, _POLICE, _TRIP_START, _TRIP_SAFE
+//   SMS_PROVIDER=msg91   MSG91_AUTH_KEY, MSG91_TEMPLATE_SOS, _ALERT, _OTP, _VERIFY, _POLICE, _TRIP_START, _TRIP_SAFE, _WAITING
 //                        (India: each template must be registered on DLT and approved in MSG91)
 //   SMS_PROVIDER=twilio  TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM
 //   SMS_PROVIDER=log     prints messages to the server log (testing only)
 
 export const TEXT = {
   SOS: (v) => `SOS! ${v.name} is in danger and needs help. Live location: ${v.link} - Beti Bachao. Call her or 112.`,
+  WAITING: (v) => `Beti Bachao: ${v.name} is STILL WAITING for help - no responder yet. Live location: ${v.link} Please call her or 112 now.`,
   ALERT: (v) => `Beti Bachao: SOS ${v.distance} km from you. Open the app now to respond.`,
   OTP: (v) => `Your Beti Bachao code is ${v.otp}. It expires in 10 minutes. Do not share it.`,
   POLICE: (v) => `SOS - Beti Bachao: ${v.name} (${v.phone}) needs police help near your station. Live location: ${v.link} Ref ${v.ref}`,
@@ -23,7 +24,8 @@ export function createSms(env, { fetchImpl = fetch, log = console.log } = {}) {
     return {
       name: 'msg91',
       async send(to, template, vars) {
-        const templateId = env[`MSG91_TEMPLATE_${template}`];
+        // WAITING reuses the SOS template until its own DLT template is approved.
+        const templateId = env[`MSG91_TEMPLATE_${template}`] || (template === 'WAITING' ? env.MSG91_TEMPLATE_SOS : null);
         if (!templateId) return { ok: false, error: `MSG91_TEMPLATE_${template} not set` };
         const mobiles = String(to).replace(/\D/g, '').replace(/^(?!91)(\d{10})$/, '91$1');
         try {

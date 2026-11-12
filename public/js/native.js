@@ -22,7 +22,8 @@ export const native = {
   // Background location + shake/power-button triggers: mode = armed | duty | assigned | sos
   startSafety(mode) { return call('startSafety', { mode }); },
   stopSafety() { return call('stopSafety'); },
-  requestPermissions(which) { return call('requestPermissions', { which }); },
+  // which: 'all' | 'microphone' | 'safety', or { aliases: ['location', 'sms', 'phone', ...] }
+  requestPermissions(which) { return call('requestPermissions', typeof which === 'object' && which ? which : { which }); },
   permissionStatus() { return call('permissionStatus'); },
   getPushToken() { return platform === 'ios' ? iosPushToken() : call('getPushToken'); },
   // What opened the app: { action: 'sos', trigger: 'tile' | 'widget' | 'siri' | 'notification' | 'power' } or null
@@ -34,6 +35,10 @@ export const native = {
   announce({ text }) { return call('announce', { text }); },
   screenReader() { return call('screenReader'); },
   listenOnce({ lang = 'en-IN', timeoutMs = 7000 } = {}) { return call('listenOnce', { lang, timeoutMs }); },
+  // Android: silent 15 s evidence clip after the SOS is active (kept only if a voice is heard).
+  recordEvidence({ incidentId, seconds = 15 }) { return call('recordEvidence', { incidentId, seconds }); },
+  // Android: places a phone call straight away (no dialler tap). Once per incident+number.
+  placeCall({ number, key }) { return call('placeCall', { number, key }); },
 };
 
 // iPhone/iPad: the APNs device token comes from @capacitor/push-notifications.

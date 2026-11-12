@@ -86,7 +86,8 @@ try {
   await user.waitForSelector('.status-hero');
   const hero = await user.textContent('.status-hero');
   if (!/10 km/.test(hero)) throw new Error('expected 10 km stage: ' + hero);
-  await shot(user, '03-incident'); step('hold-to-SOS with real device GPS → 10 km search');
+  if (!(await user.locator('.cancel-zone [data-act="cancel-sos"]').isVisible())) throw new Error('Cancel SOS must be visible on an active SOS');
+  await shot(user, '03-incident'); step('hold-to-SOS with real device GPS → 10 km search; Cancel SOS visible');
 
   const vol = await page('volunteer');
   await signIn(vol, 'asha@test.betibachao.app');
@@ -111,6 +112,7 @@ try {
   await user.click('[data-modal="YES"]');
   await user.click('[data-modal="confirm"]');
   await user.waitForFunction(() => document.querySelector('.status-hero')?.className.includes('GREEN'), null, { timeout: 10000 });
+  if (await user.$('.cancel-zone')) throw new Error('Cancel SOS must not show after the SOS ended');
   await shot(user, '06-safe'); step('explicit YES → confirm closes incident GREEN');
   await user.waitForSelector('.rate-form');
   await user.check('.rate-form input[name="stars"][value="5"]');
@@ -154,6 +156,15 @@ try {
   await adm.click('[data-tab="audit"]');
   await adm.waitForFunction(() => document.body.innerText.includes('intact'));
   await shot(adm, '07-admin'); step('admin: staff list + intact audit chain');
+  await adm.click('[data-tab="users"]');
+  await adm.waitForSelector('[data-form="find-users"]');
+  await adm.selectOption('[data-form="find-users"] [name="role"]', 'volunteer');
+  await adm.click('[data-form="find-users"] button.btn-primary');
+  await adm.waitForFunction(() => /\d+ users?/.test(document.body.innerText) && document.querySelectorAll('.tbl tbody tr td b').length > 0);
+  await adm.fill('[data-form="find-users"] [name="q"]', 'Pri'); await adm.selectOption('[data-form="find-users"] [name="role"]', '');
+  await adm.click('[data-form="find-users"] button.btn-primary');
+  await adm.waitForTimeout(400);
+  await shot(adm, '07c-admin-users'); step('admin: find users by role / first 3 letters / phone / status / location');
 
   // ---- autonomous protection screens ----
   await adm.click('[data-tab="stations"]');
@@ -196,6 +207,23 @@ try {
   await user.click('[data-form="important"] button.btn-primary');
   await user.waitForFunction(() => document.body.innerText.includes('Maa, Papa'));
   await shot(user, '09-places'); step('places: 3–5 contacts per place, active place detected from location');
+  // Duplicate number is refused in the form.
+  await user.click('[data-form="important"] [data-act="row-add"]');
+  await user.locator('[data-form="important"] [name="cname"]').nth(2).fill('Copy'); await user.locator('[data-form="important"] [name="cphone"]').nth(2).fill('9000000999');
+  await user.click('[data-form="important"] button.btn-primary');
+  await user.waitForFunction(() => document.body.innerText.includes('same number'));
+  await user.click('[data-form="important"] [data-row]:nth-of-type(3) [data-act="row-del"]').catch(() => {});
+  await user.goto(base + '#/places'); await user.waitForSelector('[data-act="pc-edit"]');
+  // Edit ONE contact of a place, then delete ONE contact.
+  await user.locator('[data-act="pc-edit"]').nth(2).click();
+  await user.waitForSelector('.modal [name="cname"]');
+  await user.fill('.modal [name="cname"]', 'Neighbour Aunty');
+  await user.click('.modal [data-modal="save"]');
+  await user.waitForFunction(() => document.body.innerText.includes('Neighbour Aunty'));
+  await user.locator('[data-act="pc-del"]').nth(1).click();
+  await user.click('.modal [data-modal="del"]');
+  await user.waitForFunction(() => document.body.innerText.includes('2/3 contacts'));
+  await shot(user, '09b-place-contacts'); step('places: duplicate number refused; edit and delete a single contact');
   await user.goto(base + '#/home');
   await user.waitForFunction(() => document.body.innerText.includes('SOS goes to your Home contacts'));
   step('home shows who the SOS goes to here');
@@ -221,6 +249,21 @@ try {
   await user.waitForSelector('svg.meter');
   await user.waitForFunction(() => document.body.innerText.includes('Hostel') || document.body.innerText.includes('reached safely'));
   await shot(user, '13-dashboard'); step('her safety dashboard');
+  // Only one fake call at a time.
+  await user.goto(base + '#/tools'); await user.waitForSelector('[data-form="fakecall"]');
+  await user.fill('[data-form="fakecall"] [name="delay"]', '1');
+  await user.click('[data-form="fakecall"] button'); await user.click('[data-form="fakecall"] button');
+  await user.waitForFunction(() => document.body.innerText.includes('already scheduled or in progress'));
+  await user.waitForSelector('.fake-call');
+  if ((await user.locator('.fake-call').count()) !== 1) throw new Error('two fake calls');
+  await user.click('.fake-call [data-fc="end"]');
+  step('fake call: only one at a time');
+  // Settings: SOS words default "bachao", no old voice/record toggles.
+  await user.goto(base + '#/settings'); await user.waitForSelector('[data-change="customSosWords"]');
+  if (await user.inputValue('[data-change="customSosWords"]') !== 'bachao') throw new Error('default SOS word should be bachao');
+  if (await user.$('[data-change="autoRecord"]')) throw new Error('"Record audio when SOS starts" should be gone');
+  if ((await user.content()).includes('Voice keyword (e.g.')) throw new Error('old voice keyword toggle still shown');
+  await shot(user, '16-settings'); step('settings: SOS words default "bachao", old voice/record toggles removed, info tips');
 
   const cam = await chromium.launch({ args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] });
   const bctx = await cam.newContext({ ...mobile, permissions: ['camera'] });

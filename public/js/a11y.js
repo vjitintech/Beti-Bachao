@@ -3,7 +3,7 @@
 //  • "Spoken guidance" speaks it aloud for people not using a screen reader
 //  • status read-out of the SOS (who is coming, how far, how long) — repeats every minute
 //  • one-tap voice commands ("help", "status", "call police", "I am safe")
-import { native } from './native.js?v=mwd73rny';
+import { native } from './native.js?v=mwddwn7p';
 
 let guide = false, screenReader = false, lang = 'en-IN';
 export const a11y = {
@@ -76,7 +76,12 @@ export function speakStatus(v, { force = false } = {}) {
 
 // One spoken phrase → text. Native recognizer in the phone apps, Web Speech in browsers.
 export async function listenOnce({ lang: l = lang, timeoutMs = 7000 } = {}) {
-  if (native.available()) { const r = await native.listenOnce({ lang: l, timeoutMs }); return r?.text || ''; }
+  if (native.available()) {
+    const r = await native.listenOnce({ lang: l, timeoutMs });
+    if (r?.error === 'busy' || r?.error === 'audio') announce('The microphone is busy for a moment. Please try again.');
+    else if (r?.error === 'permission') announce('Allow the microphone for Beti Bachao to use voice commands.');
+    return r?.text || '';
+  }
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) { announce('Voice commands are not supported in this browser.'); return ''; }
   return new Promise((resolve) => {

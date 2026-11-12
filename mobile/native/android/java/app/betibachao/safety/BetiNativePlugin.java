@@ -35,7 +35,8 @@ import java.util.List;
                 @Permission(alias = "location", strings = { Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION }),
                 @Permission(alias = "sms", strings = { Manifest.permission.SEND_SMS }),
                 @Permission(alias = "notifications", strings = { "android.permission.POST_NOTIFICATIONS" }),
-                @Permission(alias = "microphone", strings = { Manifest.permission.RECORD_AUDIO })
+                @Permission(alias = "microphone", strings = { Manifest.permission.RECORD_AUDIO }),
+                @Permission(alias = "phone", strings = { Manifest.permission.CALL_PHONE })
         }
 )
 public class BetiNativePlugin extends Plugin {
@@ -63,6 +64,7 @@ public class BetiNativePlugin extends Plugin {
         if (call.hasOption("places")) { JSArray a = call.getArray("places"); Store.put(c, "places", a == null ? "[]" : a.toString()); }
         if (call.hasOption("keywords")) { JSArray a = call.getArray("keywords"); Store.put(c, "keywords", a == null ? "[]" : a.toString()); }
         if (call.hasOption("lang")) Store.put(c, "lang", call.getString("lang"));
+        if (call.hasOption("voiceLang")) Store.put(c, "voiceLang", call.getString("voiceLang"));
         for (String k : new String[]{ "sms112", "autoSms", "shake", "powerButton", "armed", "voice", "autoEvidence" }) {
             if (call.hasOption(k)) Store.putBool(c, k, Boolean.TRUE.equals(call.getBoolean(k)));
         }
@@ -120,6 +122,13 @@ public class BetiNativePlugin extends Plugin {
 
     @PluginMethod
     public void requestPermissions(PluginCall call) {
+        JSArray list = call.getArray("aliases");
+        if (list != null && list.length() > 0) {
+            List<String> a = new ArrayList<>();
+            for (int k = 0; k < list.length(); k++) { String v = list.optString(k); if (v != null && !v.isEmpty()) a.add(v); }
+            requestPermissionForAliases(a.toArray(new String[0]), call, "allPermissionsDone");
+            return;
+        }
         if ("microphone".equals(call.getString("which"))) { requestPermissionForAlias("microphone", call, "allPermissionsDone"); return; }
         requestAllPermissions(call, "allPermissionsDone");
     }
@@ -144,6 +153,7 @@ public class BetiNativePlugin extends Plugin {
         r.put("sms", getPermissionState("sms").toString());
         r.put("microphone (voice SOS, evidence)", getPermissionState("microphone").toString());
         r.put("notifications", Build.VERSION.SDK_INT < 33 ? "granted" : getPermissionState("notifications").toString());
+        r.put("phone calls (police auto-call)", getPermissionState("phone").toString());
         NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
         r.put("fullScreenAlerts", Build.VERSION.SDK_INT < 34 || nm.canUseFullScreenIntent() ? "allowed" : "not allowed");
         PowerManager pm = (PowerManager) c.getSystemService(Context.POWER_SERVICE);
@@ -238,6 +248,23 @@ public class BetiNativePlugin extends Plugin {
         call.resolve(r);
     }
 
+    /** Silent 15 s evidence clip after the SOS is active. */
+    @PluginMethod
+    public void recordEvidence(PluginCall call) {
+        String id = call.getString("incidentId");
+        int secs = call.getInt("seconds", 15);
+        getActivity().runOnUiThread(() -> EvidenceRecorder.record(getContext(), id, secs));
+        call.resolve();
+    }
+
+    /** Police auto-connect from the app: places the call straight away. */
+    @PluginMethod
+    public void placeCall(PluginCall call) {
+        JSObject r = new JSObject();
+        r.put("placed", PoliceCaller.call(getContext(), call.getString("number"), call.getString("key")));
+        call.resolve(r);
+    }
+
     /** One spoken phrase (voice commands in the app). */
     @PluginMethod
     public void listenOnce(PluginCall call) {
@@ -252,14 +279,17 @@ public class BetiNativePlugin extends Plugin {
     }
 
     private void doListen(PluginCall call) {
-        VoiceGuard.pause(getContext());
-        getActivity().runOnUiThread(() -> {
+        // Free the microphone first: two recognisers at once is what makes Google say it "can't record now".
+        getActivity().runOnUiThread(() -> VoiceGuard.pause(getContext(), (call.getInt("timeoutMs", 7000)) + 8000));
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+            if (!android.speech.SpeechRecognizer.isRecognitionAvailable(getContext())) { JSObject r = new JSObject(); r.put("text", ""); r.put("error", "unavailable"); call.resolve(r); return; }
             final android.speech.SpeechRecognizer sr = android.speech.SpeechRecognizer.createSpeechRecognizer(getContext());
             final boolean[] done = { false };
-            final java.util.function.Consumer<String> finish = (t) -> { if (done[0]) return; done[0] = true; try { sr.destroy(); } catch (Exception ignored) {} JSObject r = new JSObject(); r.put("text", t == null ? "" : t); call.resolve(r); };
+            final int[] err = { 0 };
+            final java.util.function.Consumer<String> finish = (t) -> { if (done[0]) return; done[0] = true; try { sr.destroy(); } catch (Exception ignored) {} JSObject r = new JSObject(); r.put("text", t == null ? "" : t); if (err[0] != 0) r.put("error", err[0] == 8 ? "busy" : err[0] == 9 ? "permission" : err[0] == 3 ? "audio" : "nomatch"); call.resolve(r); };
             sr.setRecognitionListener(new android.speech.RecognitionListener() {
                 @Override public void onResults(android.os.Bundle b) { java.util.ArrayList<String> l = b.getStringArrayList(android.speech.SpeechRecognizer.RESULTS_RECOGNITION); finish.accept(l == null || l.isEmpty() ? "" : l.get(0)); }
-                @Override public void onError(int e) { finish.accept(""); }
+                @Override public void onError(int e) { err[0] = e; finish.accept(""); }
                 @Override public void onReadyForSpeech(android.os.Bundle p) {}
                 @Override public void onBeginningOfSpeech() {}
                 @Override public void onRmsChanged(float v) {}
@@ -271,8 +301,9 @@ public class BetiNativePlugin extends Plugin {
             Intent i = new Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
             i.putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL, android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
             i.putExtra(android.speech.RecognizerIntent.EXTRA_LANGUAGE, call.getString("lang", "en-IN"));
-            sr.startListening(i);
+            i.putExtra(android.speech.RecognizerIntent.EXTRA_PREFER_OFFLINE, true);
+            try { sr.startListening(i); } catch (Exception e) { finish.accept(""); }
             new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> finish.accept(""), call.getInt("timeoutMs", 7000) + 3000);
-        });
+        }, 450);
     }
 }

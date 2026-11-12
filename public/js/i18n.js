@@ -41,12 +41,23 @@ export const VOICE_KEYWORDS = {
   pt: ['socorro', 'ajuda', 'me ajuda', 'me ajudem', 'acudam'],
 };
 
-// The words that start a Voice SOS for this user: her language + English + Hindi
-// (widely mixed in India) + her own secret code words.
+// Voice SOS listens ONLY for the words she sets herself (default "bachao").
+// "bachao" is matched in every script a speech recogniser may write it in.
+export const DEFAULT_SOS_WORD = 'bachao';
+const BACHAO_FORMS = ['bachao', 'bachaao', 'bachav', 'bachavo', 'bacha o', 'बचाओ', 'बचाव', 'బచావో', 'బచావ్', 'బచావు', 'பச்சாவ்', 'பசாவ்', 'பச்சாவோ', 'ಬಚಾವ್', 'ಬಚಾವೋ', 'বাঁচাও', 'বাচাও', 'બચાવો', 'બચાઓ', 'بچاؤ', 'بچاو', 'ബചാവോ', 'ബചാവ്'];
+// Her own words as she typed them (default "bachao").
+export function ownSosWords(custom = []) {
+  const own = (Array.isArray(custom) ? custom : String(custom || '').split(',')).map((w) => String(w).trim()).filter((w) => w.length >= 3);
+  return own.length ? [...new Set(own)] : [DEFAULT_SOS_WORD];
+}
+// Every spelling we listen for (used by the matcher).
 export function sosWords(code, custom = []) {
-  const l = String(code || 'en');
-  return [...new Set([...(VOICE_KEYWORDS[l] || []), ...VOICE_KEYWORDS.en, ...VOICE_KEYWORDS.hi, 'beti bachao',
-    ...custom.map((w) => String(w).trim()).filter((w) => w.length >= 3)])].map((w) => w.toLocaleLowerCase());
+  return [...new Set(ownSosWords(custom).flatMap((w) => (w.toLocaleLowerCase() === DEFAULT_SOS_WORD ? BACHAO_FORMS : [w])).map((w) => w.toLocaleLowerCase()))];
+}
+// Recogniser language for Voice SOS: Indian English when her words are in Latin letters
+// (it writes "bachao" / "pineapple" back in Latin letters), otherwise her app language.
+export function sosVoiceLang(custom = []) {
+  return ownSosWords(custom).every((w) => /^[\x00-\x7f]+$/.test(w)) ? 'en-IN' : speechLang();
 }
 // True when a recognised phrase contains one of the SOS words.
 export function heardSosWord(text, words) {

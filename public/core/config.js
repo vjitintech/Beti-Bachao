@@ -25,6 +25,8 @@ export const DEFAULT_CONFIG = Object.freeze({
   operatorAckSec: 60, // no operator acknowledgement → second alert to every operator
   policeAutoConnectSec: 120, // still none → nearest police station connected automatically
   autoPoliceOnNoResponder: true, // all search stages exhausted and no operator → police
+  contactsWaitingSec: 180, // no volunteer accepted and no operator acknowledged by then → "still waiting for help" SMS to her contacts
+  policeMaxKm: 30, // her phone calls the nearest admin-loaded station within this distance; none → 1091 (India) / emergency number
   tripGraceMin: 10, // Track my travel: minutes after the expected arrival before we check on her
   tripCheckSec: 120, // she has this long to answer "Are you OK?" before SOS starts automatically
   evidenceRetentionDays: 30, // SOS audio/video recordings are deleted after this (unless held)
@@ -70,7 +72,7 @@ export function validateConfig(patch, current = DEFAULT_CONFIG) {
   for (const k of ['stageTimeoutsSec', 'highSeverityStageTimeoutsSec']) {
     if (!isIntArr(next[k], 3) || next[k].some((n) => n < 5 || n > 900)) errors.push(`${k} must be 3 integers between 5 and 900`);
   }
-  for (const k of ['targetResponders', 'maxResponders', 'acceptToEnRouteStallSec', 'enRouteStallMinSec', 'locationStaleSec', 'lowAccuracyM', 'volunteerLocationMaxAgeMin', 'sosPerHourLimit', 'operatorAckSec', 'policeAutoConnectSec', 'tripGraceMin', 'tripCheckSec', 'evidenceRetentionDays']) {
+  for (const k of ['targetResponders', 'maxResponders', 'acceptToEnRouteStallSec', 'enRouteStallMinSec', 'locationStaleSec', 'lowAccuracyM', 'volunteerLocationMaxAgeMin', 'sosPerHourLimit', 'operatorAckSec', 'policeAutoConnectSec', 'policeMaxKm', 'contactsWaitingSec', 'tripGraceMin', 'tripCheckSec', 'evidenceRetentionDays']) {
     if (!Number.isInteger(next[k]) || next[k] < 1) errors.push(`${k} must be a positive integer`);
   }
   if (typeof next.autoPoliceOnNoResponder !== 'boolean') errors.push('autoPoliceOnNoResponder must be true or false');

@@ -43,14 +43,14 @@ test('face lost (no landmarks) resets a half-finished blink', () => {
 });
 
 // Voice SOS words (shared by Android, iPhone, browser and voice commands)
-import { sosWords, heardSosWord, VOICE_KEYWORDS } from '../public/js/i18n.js';
-test('voice SOS words: every language has words; whole-word match for Latin, script match for Indic/Arabic; secret words', () => {
-  for (const l of ['en', 'hi', 'te', 'ta', 'kn', 'ml', 'bn', 'mr', 'gu', 'ur', 'ar', 'es', 'fr', 'pt']) assert.ok(VOICE_KEYWORDS[l].length >= 3, l);
-  const te = sosWords('te', ['Pineapple']);
-  for (const said of ['kapadandi', 'దయచేసి కాపాడండి', 'help!', 'Help me please', 'బచావో'.replace('బచావో', 'bachao'), 'pineapple', 'madad karo']) assert.ok(heardSosWord(said, te), said);
-  for (const said of ['this is helpful', 'the pineapples are fresh'.replace('pineapples', 'apples'), 'hello there']) assert.ok(!heardSosWord(said, te), said);
-  assert.ok(heardSosWord('அய்யோ உதவி', sosWords('ta')));
-  assert.ok(heardSosWord('au secours !', sosWords('fr')));
-  assert.ok(heardSosWord('النجدة', sosWords('ar')));
-  assert.ok(heardSosWord('বাঁচাও', sosWords('bn')));
+import { sosWords, heardSosWord, ownSosWords } from '../public/js/i18n.js';
+test('voice SOS words: only her own words (default "bachao", in every script); whole-word match for Latin', () => {
+  const def = sosWords('te', []);
+  for (const said of ['bachao', 'please bachao me', 'బచావో', 'बचाओ', 'বাঁচাও', 'بچاؤ']) assert.ok(heardSosWord(said, def), said);
+  for (const said of ['help', 'help me', 'beti bachao app is open'.replace('bachao', 'b'), 'kapadandi', 'hello there']) assert.ok(!heardSosWord(said, def), said);
+  const own = sosWords('te', ['Pineapple', 'blue umbrella']);
+  for (const said of ['pineapple', 'I see a blue umbrella']) assert.ok(heardSosWord(said, own), said);
+  for (const said of ['bachao', 'the apples are fresh', 'help']) assert.ok(!heardSosWord(said, own), said);
+  assert.deepEqual(ownSosWords([]), ['bachao']);
+  assert.deepEqual(ownSosWords(['ab', ' mango ']), ['mango']);
 });

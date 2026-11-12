@@ -45,7 +45,7 @@ export class Fcm {
   // alarm notification (loud channel, lock-screen, full-screen when allowed).
   // iOS gets a visible alert (time-sensitive for urgent alerts).
   message(device, p) {
-    const data = Object.fromEntries(Object.entries({ kind: p.kind, title: p.title, body: p.body, url: p.url, tag: p.tag, urgent: p.urgent ? '1' : '0', incidentId: p.incidentId || '' }).map(([k, v]) => [k, String(v ?? '')]));
+    const data = Object.fromEntries(Object.entries({ kind: p.kind, title: p.title, body: p.body, url: p.url, tag: p.tag, urgent: p.urgent ? '1' : '0', incidentId: p.incidentId || '', callNumber: p.callNumber || '' }).map(([k, v]) => [k, String(v ?? '')]));
     if (device.platform === 'android') return { token: device.token, data, android: { priority: 'HIGH', ttl: p.urgent ? '120s' : '3600s' } };
     return { token: device.token, data, apns: { headers: { 'apns-priority': '10', 'apns-push-type': 'alert' }, payload: { aps: { alert: { title: p.title, body: p.body }, sound: 'default', 'interruption-level': p.urgent ? 'time-sensitive' : 'active', 'thread-id': p.tag || 'beti' } } } };
   }

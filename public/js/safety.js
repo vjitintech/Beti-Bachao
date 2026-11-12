@@ -1,7 +1,7 @@
 // On-device safety capabilities. Everything degrades gracefully: if a browser
 // lacks a sensor or permission is denied, the UI says so and offers the next
 // best option (call / SMS). Nothing here pretends to work when it doesn't.
-import { lang, speechLang, sosWords, heardSosWord } from './i18n.js?v=mwd73rny';
+import { lang, speechLang, sosWords, heardSosWord, sosVoiceLang } from './i18n.js?v=mwddwn7p';
 
 const store = {
   get(k, d) { try { const v = localStorage.getItem('bb.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
@@ -142,7 +142,7 @@ export const voice = {
     this.onTrigger = onTrigger;
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     const rec = new SR();
-    rec.lang = speechLang(); rec.continuous = true; rec.interimResults = true;
+    rec.lang = sosVoiceLang(prefs.get().customSosWords || []); rec.continuous = true; rec.interimResults = true;
     rec.onresult = (ev) => {
       const words = this.keywords();
       for (let i = ev.resultIndex; i < ev.results.length; i++) {
@@ -195,6 +195,8 @@ export const recorder = {
       this.mr.stop();
     });
   },
+  // Keep a copy of an automatic SOS clip on this device as well.
+  async saveClip(clip) { try { await tx('readwrite', (s) => s.put(clip)); return true; } catch { return false; } },
   async list() { try { return (await tx('readonly', (s) => s.getAll())) || []; } catch { return []; } },
   async remove(id) { try { await tx('readwrite', (s) => s.delete(id)); } catch {} },
 };

@@ -62,7 +62,7 @@ test('server: SOS → only approved nearby volunteers alerted → privacy → ac
   assert.equal((await W.pending.call('GET', `/incidents/${id}`)).status, 403, 'unapproved volunteer never alerted');
   assert.equal((await W.meena.call('GET', `/incidents/${id}`)).status, 403, '14 km volunteer not alerted in 10 km stage');
   const esc = (await W.op.call('GET', `/incidents/${id}`)).body.escalations;
-  assert.ok(esc.some((e) => e.status === 'REQUIRED' && /police station is connected automatically/.test(e.label)), 'immediate-danger escalation goes to operators');
+  assert.ok(esc.some((e) => e.status === 'REQUIRED' && /calls the nearest police station/.test(e.label)), 'immediate-danger escalation goes to operators');
 
   const acc = await W.asha.call('POST', `/incidents/${id}/accept`);
   assert.equal(acc.status, 200);

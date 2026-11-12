@@ -5,7 +5,7 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xx
 export class ApiError extends Error { constructor(status, code, message) { super(message || code); this.status = status; this.code = code; } }
 
 // ------------------------------------------------------------------ server
-import { isNative, native, serverUrl } from './native.js?v=mwd73rny';
+import { isNative, native, serverUrl } from './native.js?v=mwddwn7p';
 
 class ServerApi {
   constructor() { this.mode = isNative ? 'app' : 'server'; this.listeners = new Set(); this.es = null; this.token = null; }
@@ -15,9 +15,22 @@ class ServerApi {
   async req(method, path, body) {
     let res;
     const headers = { 'Content-Type': 'application/json', 'X-BB-CSRF': '1', ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}) };
-    try {
-      res = await fetch(this.base() + path, { method, credentials: isNative ? 'omit' : 'same-origin', headers, body: body ? JSON.stringify(body) : undefined });
-    } catch { throw new ApiError(0, 'NETWORK', 'No connection'); }
+    // Mobile data drops for a second or two all the time: reads and the (idempotent) SOS itself are retried.
+    const retryable = method === 'GET' || (method === 'POST' && path === '/incidents');
+    for (let attempt = 0; ; attempt++) {
+      const ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timer = ac ? setTimeout(() => ac.abort(), method === 'GET' ? 15000 : 25000) : null;
+      try {
+        res = await fetch(this.base() + path, { method, credentials: isNative ? 'omit' : 'same-origin', headers, body: body ? JSON.stringify(body) : undefined, signal: ac?.signal });
+        clearTimeout(timer);
+        if (retryable && [502, 503, 504].includes(res.status) && attempt < 2) { await new Promise((r) => setTimeout(r, 1200 * (attempt + 1))); continue; }
+        break;
+      } catch {
+        clearTimeout(timer);
+        if (retryable && attempt < 2) { await new Promise((r) => setTimeout(r, 1200 * (attempt + 1))); continue; }
+        throw new ApiError(0, 'NETWORK', 'No connection');
+      }
+    }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       // Only a dead session logs her out — not a wrong password or code typed into a form.
@@ -49,7 +62,7 @@ class ServerApi {
   registerDevice(b) { return this.req('POST', '/me/devices', b); }
   rate(id, b) { return this.req('POST', `/incidents/${id}/rate`, b); }
   scheduleCall(id, scheduledAt) { return this.req('POST', `/admin/volunteers/${id}/schedule-call`, { scheduledAt }); }
-  findUsers(q) { return this.req('GET', `/admin/users?q=${encodeURIComponent(q)}`); }
+  findUsers(q, f = {}) { const p = new URLSearchParams({ q: q || '' }); for (const [k, v] of Object.entries(f)) if (v !== '' && v != null) p.set(k, v); return this.req('GET', `/admin/users?${p}`); }
   resetUserPassword(id) { return this.req('POST', `/admin/users/${id}/reset-password`); }
   aiSummary(id) { return this.req('POST', `/operator/incidents/${id}/ai-summary`); }
   translate(text, target) { return this.req('POST', '/ai/translate', { text, target }); }
@@ -70,6 +83,8 @@ class ServerApi {
   extendTrip(b) { return this.req('POST', '/me/trip/extend', b); }
   postLocation(loc) { return this.req('POST', '/me/location', loc); }
   uploadEvidence(id, b) { return this.req('POST', `/incidents/${id}/evidence`, b); }
+  evidenceLog(id, b) { return this.req('POST', `/incidents/${id}/evidence-log`, b); }
+  policeCall(id, b) { return this.req('POST', `/incidents/${id}/police-call`, b); }
   async evidenceBlob(id, eid) {
     const res = await fetch(`${this.base()}/incidents/${id}/evidence/${eid}`, { credentials: isNative ? 'omit' : 'same-origin', headers: this.token ? { Authorization: `Bearer ${this.token}` } : {} });
     if (!res.ok) throw new ApiError(res.status, 'EVIDENCE', 'Could not load recording');

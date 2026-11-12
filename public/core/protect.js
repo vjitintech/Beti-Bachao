@@ -5,9 +5,9 @@
 //  • "Track my travel" trips with auto-arrival and auto-SOS when overdue
 //  • SOS evidence (audio/video) metadata — bytes are stored encrypted by the server
 //  • dashboards: hers, admin impact, public impact counter
-import { haversineKm, isValidLatLng } from './geo.js?v=mwd73rny';
-import { COUNTRIES } from './config.js?v=mwd73rny';
-import { toE164, dialInfo } from './dial.js?v=mwd73rny';
+import { haversineKm, isValidLatLng } from './geo.js?v=mwddwn7p';
+import { COUNTRIES } from './config.js?v=mwddwn7p';
+import { toE164, dialInfo } from './dial.js?v=mwddwn7p';
 
 const SAFE_CLOSURES = new Set(['USER_CONFIRMED_SAFE', 'HANDED_TO_EMERGENCY_SERVICES_CONFIRMED_SAFE']);
 const median = (xs) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
@@ -15,6 +15,14 @@ const round1 = (x) => (x == null ? null : Math.round(x * 10) / 10);
 const day = (iso) => iso.slice(0, 10);
 
 // Shared by the server and the phone app (so the phone texts the same people the server would).
+// Same person whatever the format: "+91 98765 43210", "098765 43210" and "9876543210".
+export const phoneKey = (p) => String(p || '').replace(/\D/g, '').slice(-10);
+// First duplicate number in a list of contacts, or null.
+export function duplicateIn(list) {
+  const seen = new Map();
+  for (const c of list || []) { const k = phoneKey(c.phone); if (!k) continue; if (seen.has(k)) return { a: seen.get(k), b: c }; seen.set(k, c); }
+  return null;
+}
 export function pickContacts(places, defaults, loc) {
   const always = defaults || []; // important contacts: told about every SOS
   let place = null;
@@ -25,7 +33,7 @@ export function pickContacts(places, defaults, loc) {
   }
   const base = place ? place.contacts : [];
   const seen = new Set(); const out = [];
-  for (const c of [...always, ...base]) if (!seen.has(c.phone)) { seen.add(c.phone); out.push(c); }
+  for (const c of [...always, ...base]) { const k = phoneKey(c.phone); if (!seen.has(k)) { seen.add(k); out.push(c); } }
   return { place: place ? { id: place.id, label: place.label } : null, contacts: out };
 }
 
@@ -52,6 +60,12 @@ export const protectMethods = {
       if (!isValidLatLng(Number(p.lat), Number(p.lng))) this.fail(400, 'INVALID_PLACE', `Set the location of "${label}"`);
       const contacts = Array.isArray(p.contacts) ? p.contacts.map((c) => this.cleanContact(c)) : [];
       if (contacts.length < 1 || contacts.length > 3) this.fail(400, 'PLACE_CONTACTS', `"${label}" needs 1 to 3 contacts`);
+      const dup = duplicateIn(contacts);
+      if (dup) this.fail(400, 'DUPLICATE_CONTACT', `"${label}": ${dup.b.name} has the same number as ${dup.a.name}`);
+      const imp = contacts.find((c) => (u.contacts || []).some((x) => phoneKey(x.phone) === phoneKey(c.phone)));
+      if (imp) this.fail(400, 'DUPLICATE_CONTACT', `"${label}": ${imp.name} (${imp.phone}) is already an important contact — important contacts are told at every place`);
+      const self = contacts.find((c) => u.phone && phoneKey(c.phone) === phoneKey(u.phone));
+      if (self) this.fail(400, 'DUPLICATE_CONTACT', `"${label}": ${self.phone} is your own number`);
       const radiusM = Math.min(50000, Math.max(200, Math.round(Number(p.radiusM) || 2000)));
       return { id: p.id && /^[\w-]{4,40}$/.test(p.id) ? p.id : this.deps.uuid(), label, lat: +Number(p.lat).toFixed(5), lng: +Number(p.lng).toFixed(5), radiusM, contacts };
     });
@@ -170,23 +184,64 @@ export const protectMethods = {
     };
   },
 
-  // Connects the nearest police station: the server sends the SMS and places the
-  // call (station ↔ her phone) through the configured gateway; her phone is told too.
+  // Who her phone calls automatically: nearest admin-loaded station within policeMaxKm,
+  // otherwise the women police helpline 1091 (India), otherwise the country emergency number.
+  policeTarget(inc, loc) {
+    const max = Number(this.cfg.policeMaxKm) || 30;
+    const near = this.nearestStations(loc, 1)[0] || null;
+    const st = near && near.distanceKm <= max ? near : null;
+    const emergency = COUNTRIES[inc.countryCode]?.emergency || '112';
+    if (st) return { st, dial: { number: st.phone, target: 'station', label: `${st.name} (${st.distanceKm} km)` } };
+    if ((inc.countryCode || 'IN') === 'IN') return { st: null, dial: { number: '1091', target: 'women_helpline', label: `Women police helpline 1091 (no station within ${max} km)`, fallback: emergency } };
+    return { st: null, dial: { number: emergency, target: 'emergency', label: `Emergency ${emergency} (no station within ${max} km)` } };
+  },
+
+  // Connects the police: her phone calls the station / 1091 / 112 straight away, the server
+  // sends the station an SMS with her live location (and bridges a call if a voice gateway is set).
   autoPolice(inc, reason) {
     if (inc.policeConnect || !this.isOpen(inc)) return null;
     const loc = this.latestLocation(inc.id);
-    const st = this.nearestStations(loc, 1)[0] || null;
+    const { st, dial } = this.policeTarget(inc, loc);
     const emergency = COUNTRIES[inc.countryCode]?.emergency || '112';
-    inc.policeConnect = { at: this.iso(), reason, status: 'PENDING', station: st ? { id: st.id, name: st.name, phone: st.phone, phone2: st.phone2 || null, distanceKm: st.distanceKm } : null, emergency, sms: null, call: null };
-    const label = st ? `Nearest police station contacted automatically: ${st.name} (${st.distanceKm} km)` : `No police station list loaded — her phone sends SMS to ${emergency}; operators must call ${emergency}`;
-    this.db.escalations.push({ id: this.deps.uuid(), incidentId: inc.id, type: 'POLICE_AUTO_CONNECT', status: 'ATTEMPTED', label, reason, attemptedAt: this.iso(), acknowledgedAt: null, recordedBy: 'system', metadata: { stationId: st?.id || null } });
+    inc.policeConnect = { at: this.iso(), reason, status: 'PENDING', station: st ? { id: st.id, name: st.name, phone: st.phone, phone2: st.phone2 || null, distanceKm: st.distanceKm } : null, emergency, sms: null, call: null, dial: { ...dial, placedAt: null, result: null } };
+    const label = `Her phone is calling ${dial.label}`;
+    this.db.escalations.push({ id: this.deps.uuid(), incidentId: inc.id, type: 'POLICE_AUTO_CONNECT', status: 'ATTEMPTED', label, reason, attemptedAt: this.iso(), acknowledgedAt: null, recordedBy: 'system', metadata: { stationId: st?.id || null, number: dial.number } });
     inc.escalationStatus = 'ATTEMPTED';
     if (inc.status !== 'ESCALATION_REQUIRED' && inc.status !== 'EMERGENCY_HANDOFF') { try { this.transition(inc, 'ESCALATION_REQUIRED', 'system', `Police auto-connect: ${reason}`, 'scheduler'); } catch { /* keep current state */ } }
-    this.notify(inc.id, inc.requesterId, 'POLICE_CONNECTED', { station: st?.name || null, phone: st?.phone || emergency });
+    this.notify(inc.id, inc.requesterId, 'POLICE_CONNECTED', { station: st?.name || null, phone: dial.number, callNumber: dial.number, target: dial.target });
     for (const op of this.db.users.filter((u) => ['operator', 'admin'].includes(u.role) && u.status === 'ACTIVE')) this.notify(inc.id, op.id, 'ESCALATION', { type: 'POLICE_AUTO_CONNECT' });
-    this.audit('system', 'POLICE_AUTO_CONNECT', 'incident', inc.id, reason, { station: st?.name || null });
+    this.audit('system', 'POLICE_AUTO_CONNECT', 'incident', inc.id, reason, { station: st?.name || null, number: dial.number, target: dial.target });
     this.emit('police.connect_needed', inc.id);
     return inc.policeConnect;
+  },
+
+  // Her phone reports the automatic call: placed (the call went out) or failed (no permission / no SIM).
+  recordPoliceCall(actor, incidentId, { number, result } = {}) {
+    const u = this.requireRole(actor, 'user');
+    const inc = this.incident(incidentId);
+    if (inc.requesterId !== u.id) this.fail(403, 'FORBIDDEN');
+    const pc = inc.policeConnect;
+    if (!pc) this.fail(409, 'NO_POLICE_CONNECT', 'Police auto-connect has not started for this SOS');
+    const ok = result === 'placed';
+    pc.dial = { ...(pc.dial || {}), number: String(number || pc.dial?.number || '').slice(0, 20), result: ok ? 'PLACED' : 'FAILED', placedAt: ok ? (pc.dial?.placedAt || this.iso()) : pc.dial?.placedAt || null };
+    if (ok) pc.status = 'CONTACTED';
+    this.audit(u.id, ok ? 'POLICE_CALL_PLACED' : 'POLICE_CALL_FAILED', 'incident', inc.id, null, { number: pc.dial.number, target: pc.dial.target || null });
+    this.emit('police.updated', inc.id);
+    return { ok: true, dial: pc.dial };
+  },
+
+  // A police connection counts as made only when a call actually went out (her phone or the voice gateway).
+  policeCallMade(inc) { return !!(inc.policeConnect && (inc.policeConnect.dial?.result === 'PLACED' || inc.policeConnect.call === 'PLACED')); },
+
+  // Automatic evidence: every step is audited (started, no voice → discarded, upload failed…).
+  evidenceLog(actor, incidentId, { event, seconds } = {}) {
+    const u = this.requireRole(actor, 'user');
+    const inc = this.incident(incidentId);
+    if (inc.requesterId !== u.id) this.fail(403, 'FORBIDDEN');
+    const ev = { started: 'EVIDENCE_RECORDING_STARTED', no_voice: 'EVIDENCE_DISCARDED_NO_VOICE', upload_failed: 'EVIDENCE_UPLOAD_FAILED', mic_denied: 'EVIDENCE_MIC_DENIED', unsupported: 'EVIDENCE_UNSUPPORTED' }[event];
+    if (!ev) this.fail(400, 'BAD_EVENT', 'Unknown evidence event');
+    this.audit(u.id, ev, 'incident', inc.id, null, seconds ? { seconds: Number(seconds) || null } : null);
+    return { ok: true };
   },
 
   setPoliceResult(incId, patch) {
@@ -353,7 +408,8 @@ export const protectMethods = {
     if (this.db.evidence.filter((e) => e.incidentId === inc.id).length >= 10) this.fail(409, 'EVIDENCE_LIMIT', 'Up to 10 recordings per SOS');
     const e = { id: this.deps.uuid(), incidentId: inc.id, kind: kind === 'video' ? 'video' : 'audio', mime: String(mime).slice(0, 60), durationSec: Math.round(Number(durationSec) || 0), bytes, storageKey, createdAt: this.iso(), hold: false };
     this.db.evidence.push(e);
-    this.audit(u.id, 'EVIDENCE_UPLOADED', 'incident', inc.id, null, { kind: e.kind, bytes });
+    this.audit(u.id, 'EVIDENCE_UPLOADED', 'incident', inc.id, null, { kind: e.kind, bytes, durationSec: e.durationSec });
+    for (const op of this.db.users.filter((x) => ['operator', 'admin'].includes(x.role) && x.status === 'ACTIVE')) this.notify(inc.id, op.id, 'EVIDENCE', { kind: e.kind, durationSec: e.durationSec });
     this.emit('evidence.added', inc.id);
     return { id: e.id, kind: e.kind, createdAt: e.createdAt };
   },
@@ -435,7 +491,7 @@ export const protectMethods = {
     const times = incs.map((i) => this.incidentTimes(i));
     const series = {};
     for (let k = d - 1; k >= 0; k--) series[day(this.iso(this.now() - k * 864e5))] = { sos: 0, protected: 0, police: 0 };
-    for (const i of incs) { const s = series[day(i.createdAt)]; if (!s) continue; s.sos++; if (this.isProtected(i)) s.protected++; if (i.policeConnect) s.police++; }
+    for (const i of incs) { const s = series[day(i.createdAt)]; if (!s) continue; s.sos++; if (this.isProtected(i)) s.protected++; if (this.policeCallMade(i)) s.police++; }
     const byTrigger = {}; for (const i of incs) byTrigger[i.trigger] = (byTrigger[i.trigger] || 0) + 1;
     const closed = incs.filter((i) => !this.isOpen(i));
     const outcome = { protected: closed.filter((i) => this.isProtected(i)).length, cancelled: closed.filter((i) => i.status === 'USER_CANCELLED' || i.closureReason === 'USER_CANCELLED').length, falseAlarm: closed.filter((i) => i.closureReason === 'VERIFIED_FALSE_ALARM').length, other: 0 };
@@ -445,7 +501,7 @@ export const protectMethods = {
       days: d, impact: this.publicImpact(),
       period: {
         sos: incs.length, open: incs.filter((i) => this.isOpen(i)).length, protected: outcome.protected, newWomen,
-        policeAutoConnects: incs.filter((i) => i.policeConnect).length, tripsAutoSos: (this.db.trips || []).filter((t) => t.status === 'SOS' && Date.parse(t.startedAt) > since).length,
+        policeAutoConnects: incs.filter((i) => this.policeCallMade(i)).length, policeAttempts: incs.filter((i) => i.policeConnect).length, tripsAutoSos: (this.db.trips || []).filter((t) => t.status === 'SOS' && Date.parse(t.startedAt) > since).length,
         medianAckSec: round1(median(times.map((t) => t.ackSec).filter((x) => x != null))), unacknowledged: incs.filter((i) => !i.opAckAt).length,
         medianAcceptMin: round1(median(times.map((t) => t.acceptMin).filter((x) => x != null))), medianArriveMin: round1(median(times.map((t) => t.arriveMin).filter((x) => x != null))),
       },

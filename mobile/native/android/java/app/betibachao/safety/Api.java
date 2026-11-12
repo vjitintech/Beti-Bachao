@@ -70,7 +70,17 @@ public final class Api {
         return j;
     }
 
-    public static void postLocation(Context ctx, Location l) { post(ctx, "/me/location", locationJson(l), null); }
+    public static void postLocation(Context ctx, Location l) {
+        final Context app = ctx.getApplicationContext();
+        post(app, "/me/location", locationJson(l), (status, body) -> {
+            // Police auto-connect started on the server: call now (also works when push is not configured).
+            JSONObject pc = body == null ? null : body.optJSONObject("policeCall");
+            if (pc != null && "user".equals(Store.get(app, "role"))) {
+                final String number = pc.optString("number"), id = pc.optString("incidentId");
+                new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> PoliceCaller.call(app, number, id));
+            }
+        });
+    }
 
     public static void registerDevice(Context ctx, String fcmToken) {
         try {

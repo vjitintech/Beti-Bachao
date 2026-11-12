@@ -2,21 +2,22 @@
 // places & location-based contacts, Track my travel, nearby help, dashboards,
 // police auto-connect status, operator acknowledgement, evidence, admin impact &
 // police-station import, blink trigger page, spoken guidance for blind users.
-import { sosWords, heardSosWord, lang as curLang } from './i18n.js?v=mwd73rny';
-import { pickContacts } from '../core/protect.js?v=mwd73rny';
-import { announce, speakStatus, listenOnce, a11y } from './a11y.js?v=mwd73rny';
-import { blinkGuard } from './blink.js?v=mwd73rny';
-import { phoneInput, readPhone, guessCountry } from './phone.js?v=mwd73rny';
-import { DIAL, flag, countryName } from '../core/dial.js?v=mwd73rny';
+import { sosWords, heardSosWord, lang as curLang } from './i18n.js?v=mwddwn7p';
+import { pickContacts, duplicateIn, phoneKey } from '../core/protect.js?v=mwddwn7p';
+import { announce, speakStatus, listenOnce, a11y } from './a11y.js?v=mwddwn7p';
+import { blinkGuard } from './blink.js?v=mwddwn7p';
+import { phoneInput, readPhone, guessCountry } from './phone.js?v=mwddwn7p';
+import { DIAL, flag, countryName } from '../core/dial.js?v=mwddwn7p';
 
 export function initProtect(c) {
-  const { st, esc, toast, modal, showErr, go, render, geo, contacts, prefs, store, native, platform, telHref, fmtTime, pretty, nativeShare, serverUrl, isNative } = c;
+  const { st, esc, toast, modal, showErr, go, render, geo, contacts, prefs, store, native, platform, telHref, fmtTime, pretty, nativeShare, serverUrl, isNative, recorder } = c;
   const api = () => st.api;
   const places = () => store.get('places', []);
   const fmtMin = (m) => (m == null ? '—' : m < 1 ? '<1 min' : `${Math.round(m * 10) / 10} min`);
   const origin = () => (isNative ? serverUrl() : location.origin + location.pathname.replace(/[^/]*$/, '').replace(/\/$/, ''));
 
   // Who gets the SOS message right now (same rule as the server).
+  const infoTip = (label, html) => `<details class="info-tip"><summary aria-label="${esc(label)}">ⓘ <span>${esc(label)}</span></summary><div class="small">${html}</div></details>`;
   const activeContacts = (loc = geo.last) => pickContacts(places(), contacts.list(), loc);
 
   async function pullPlaces() { try { const r = await api().getPlaces(); store.set('places', r.places || []); } catch {} }
@@ -61,7 +62,7 @@ export function initProtect(c) {
     const cs = contacts.list();
     return `<form class="card form" data-form="important" id="important">
       <h2>⭐ Important contacts</h2>
-      <p class="muted small">Told about <b>every</b> SOS, wherever you are — for example your mother, father or husband. At least 1, up to 5. You can change names and numbers any time.</p>
+      ${infoTip('More info', `Told about <b>every</b> SOS, wherever you are — for example your mother, father or husband. At least 1, up to 5. You can change names and numbers any time.`)}
       <fieldset class="fs" data-rows><legend class="sr-only">Important contacts</legend>
         ${rowsFor(cs, 1)}
         ${addBtn(Math.max(1, cs.length), 5, 'Add important contact')}
@@ -69,6 +70,23 @@ export function initProtect(c) {
       <button class="btn btn-primary">Save important contacts</button>
     </form>`;
   }
+  async function editPlaceContact(i, j) {
+    const list = places(); const p = list[i];
+    if (!p) return;
+    const x = j >= 0 ? p.contacts[j] : {};
+    const r = await modal({ title: j >= 0 ? `Edit contact — ${p.label}` : `Add a contact — ${p.label}`, body: `<label>Name<input name="cname" maxlength="40" value="${esc(x.name || '')}" required></label><label>Phone${phoneInput('cphone', { value: x.phone || '', country: st.me?.countryCode, required: true, lang: curLang() })}</label>`, actions: [{ id: 'save', label: 'Save', kind: 'primary' }, { id: 'no', label: 'Cancel' }] });
+    if (r.id !== 'save') return;
+    const name = String(r.data.cname || '').trim(); const ph = readPhone(r.data, 'cphone');
+    if (!name) return toast('Enter a name', 'error');
+    if (ph.problem) return toast(ph.problem, 'error');
+    const others = p.contacts.filter((_, k) => k !== j);
+    const pr = rowProblem([...others, { name, phone: ph.e164 }], { notIn: contacts.list(), what: 'important contact (they are told at every place)' });
+    if (pr) return toast(pr, 'error');
+    const updated = j >= 0 ? p.contacts.map((q, k) => (k === j ? { name, phone: ph.e164 } : q)) : [...p.contacts, { name, phone: ph.e164 }];
+    const next = list.map((q, k) => (k === i ? { ...q, contacts: updated } : q));
+    try { const res = await api().savePlaces(next); store.set('places', res.places); c.syncNative(); toast(j >= 0 ? `${name} updated` : `${name} added to ${p.label}`, 'ok'); render(); } catch (e) { showErr(e); }
+  }
+
   async function viewPlaces() {
     await pullPlaces();
     const list = places();
@@ -76,13 +94,13 @@ export function initProtect(c) {
     if (st.placeEdit != null) return c.shell(`<h1>📍 Places & contacts</h1>${placeForm(st.placeEdit === 'new' ? null : list[Number(st.placeEdit)])}`);
     return c.shell(`
       <h1>📍 Places & contacts</h1>
-      <div class="alert alert-info"><strong>Automatic:</strong> when you raise an SOS, your ⭐ important contacts and the contacts of the place you are at get your live location. Move to another place and its contacts are added automatically — you never have to change contacts by hand.</div>
+      ${infoTip('How contacts are chosen', 'When you raise an SOS, your ⭐ important contacts and the contacts of the place you are at get your live location. Move to another place and its contacts are added automatically — you never have to change contacts by hand. A number can be used only once per list.')}
       ${contacts.list().length ? '' : '<div class="alert alert-warn" role="alert"><b>Add at least 1 important contact</b> below — otherwise nobody you know gets your SOS message.</div>'}
       <section class="card"><h2>Right now</h2><p>${now.place ? `You are at <b>${esc(now.place.label)}</b>` : geo.last ? 'You are not near any saved place — your default contacts will be used' : 'Location is off — your default contacts will be used'}: ${now.contacts.map((x) => esc(x.name)).join(', ') || '<span class="danger-text">nobody yet</span>'}</p></section>
       ${list.map((p, i) => `<section class="card place-card"><div class="row space"><h2>${esc(p.label)}</h2><span class="badge badge-ok">${p.contacts.length}/3 contacts</span></div>
         <p class="small muted">Within ${p.radiusM >= 1000 ? `${p.radiusM / 1000} km` : `${p.radiusM} m`} of ${esc(p.lat.toFixed(4))}, ${esc(p.lng.toFixed(4))}</p>
-        <ul class="contact-list">${p.contacts.map((x) => `<li><span>${esc(x.name)} · ${esc(x.phone)}</span><a class="btn btn-ghost btn-sm" href="${telHref(x.phone)}" aria-label="Call ${esc(x.name)}">📞</a></li>`).join('')}</ul>
-        <div class="row"><button class="btn btn-secondary btn-sm" data-act="place-edit" data-i="${i}">Edit</button><button class="btn btn-ghost btn-sm danger-text" data-act="place-del" data-i="${i}">Delete</button></div></section>`).join('')}
+        <ul class="contact-list">${p.contacts.map((x, j) => `<li><span>${esc(x.name)} · ${esc(x.phone)}</span><span class="row-tight"><a class="btn btn-ghost btn-sm" href="${telHref(x.phone)}" aria-label="Call ${esc(x.name)}">📞</a><button class="btn btn-ghost btn-sm" data-act="pc-edit" data-i="${i}" data-j="${j}" aria-label="Edit ${esc(x.name)}">✏️</button><button class="btn btn-ghost btn-sm danger-text" data-act="pc-del" data-i="${i}" data-j="${j}" aria-label="Delete ${esc(x.name)}">🗑</button></span></li>`).join('')}</ul>
+        <div class="row">${p.contacts.length < 3 ? `<button class="btn btn-secondary btn-sm" data-act="pc-add" data-i="${i}">＋ Add contact</button>` : ''}<button class="btn btn-ghost btn-sm" data-act="place-edit" data-i="${i}">Edit place</button><button class="btn btn-ghost btn-sm danger-text" data-act="place-del" data-i="${i}">Delete place</button></div></section>`).join('')}
       ${list.length < 10 ? '<button class="btn btn-primary btn-lg" data-act="place-new">＋ Add a place (home, college, office…)</button>' : ''}
       ${importantForm()}`);
   }
@@ -101,7 +119,7 @@ export function initProtect(c) {
         <section class="card"><h2>On the way to ${esc(trip.destination.label)}</h2>
           ${trip.vehicle ? `<p>Vehicle: <b>${esc(trip.vehicle)}</b></p>` : ''}
           <p>Expected by <b>${esc(fmtTime(trip.dueAt))}</b> · <span data-live="due" data-at="${esc(trip.dueAt)}"></span></p>
-          <p class="small muted">Your phone shares your location while you travel. You arrive → the trip ends by itself and your contacts are told you reached safely. If you are late and don't answer "Are you OK?", an SOS starts for you.</p>
+          ${infoTip('More info', `Your phone shares your location while you travel. You arrive → the trip ends by itself and your contacts are told you reached safely. If you are late and don't answer "Are you OK?", an SOS starts for you.`)}
           <div class="row"><button class="btn btn-safe" data-act="trip-safe">✅ I've reached safely</button><button class="btn btn-secondary" data-act="trip-extend">＋15 min</button><button class="btn btn-ghost" data-act="trip-end">Stop sharing</button></div>
         </section>
         <section class="card"><h2>Live link for your contacts</h2><p class="small">${st.cfg?.features?.sms ? 'Your contacts got this link by SMS automatically.' : 'Send this link to your contacts:'}</p>
@@ -170,7 +188,7 @@ export function initProtect(c) {
         ${tile(d.area.volunteersOnDutyNow, 'Verified volunteers on duty now')}${tile(d.area.sos30d, 'SOS raised')}${tile(d.area.protected30d, 'Women protected')}${tile(fmtMin(d.area.medianArriveMin), 'Typical arrival time')}</div></section>` : '<a class="alert alert-info alert-link" href="#/places">Save your home in Places & contacts to see how many volunteers protect your area.</a>'}
       <section class="card impact-card"><h2>💚 Beti Bachao community</h2><div class="stat-row">
         ${tile(d.community.womenProtected, 'Women helped to safety')}${tile(d.community.safeTrips, 'Trips completed safely')}${tile(d.community.volunteersVerified, 'Verified volunteers')}${tile(d.community.volunteersOnDutyNow, 'On duty right now')}</div>
-        <p class="small muted">Every SOS that ends with "I'm safe" is counted here. Thank you for being part of it.</p></section>
+        ${infoTip('More info', `Every SOS that ends with "I'm safe" is counted here. Thank you for being part of it.`)}</section>
       <section class="card"><h2>History</h2><ul class="history">${d.history.map((h) => `<li><a href="#/incident/${esc(h.id)}">${esc(new Date(h.createdAt).toLocaleString())}</a> — ${h.protected ? '💚 safe' : esc(pretty(h.status))}${h.arriveMin != null ? ` · help arrived in ${esc(fmtMin(h.arriveMin))}` : ''}</li>`).join('') || '<li class="muted">No SOS yet — stay safe.</li>'}</ul></section>`);
   }
 
@@ -210,10 +228,10 @@ export function initProtect(c) {
         <div class="stat-row">${tile(d.impact.womenProtected, 'Women helped to safety (all time)')}${tile(d.impact.womenRegistered, 'Women registered')}${tile(d.impact.volunteersVerified, 'Verified volunteers')}${tile(d.impact.volunteersOnDutyNow, 'On duty now')}${tile(d.impact.safeTrips, 'Safe trips')}</div></section>
       <section class="card"><h2>Last ${d.days} days</h2><div class="stat-row">
         ${tile(P.sos, 'SOS raised')}${tile(P.protected, 'Ended safely')}${tile(P.newWomen, 'New women')}${tile(P.medianAckSec == null ? '—' : `${P.medianAckSec}s`, 'Typical operator acknowledgement')}
-        ${tile(P.unacknowledged, 'Never acknowledged by an operator')}${tile(P.policeAutoConnects, 'Police connected automatically')}${tile(fmtMin(P.medianAcceptMin), 'Typical time to volunteer accept')}${tile(fmtMin(P.medianArriveMin), 'Typical time to arrival')}</div>
+        ${tile(P.unacknowledged, 'Never acknowledged by an operator')}${tile(P.policeAutoConnects, 'Police called automatically (call placed)')}${tile(fmtMin(P.medianAcceptMin), 'Typical time to volunteer accept')}${tile(fmtMin(P.medianArriveMin), 'Typical time to arrival')}</div>
         <h3>SOS raised per day</h3>${columnChart(d.series, 'sos', 'SOS raised')}
         <h3>How SOS ended</h3>${outcomeBar(d.outcome)}
-        <details><summary>Table view</summary><table class="tbl small"><thead><tr><th>Date</th><th>SOS</th><th>Ended safely</th><th>Police auto-connect</th></tr></thead><tbody>${d.series.filter((s) => s.sos).map((s) => `<tr><td>${esc(s.date)}</td><td>${s.sos}</td><td>${s.protected}</td><td>${s.police}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">No SOS in this period.</td></tr>'}</tbody></table>
+        <details><summary>Table view</summary><table class="tbl small"><thead><tr><th>Date</th><th>SOS</th><th>Ended safely</th><th>Police called</th></tr></thead><tbody>${d.series.filter((s) => s.sos).map((s) => `<tr><td>${esc(s.date)}</td><td>${s.sos}</td><td>${s.protected}</td><td>${s.police}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">No SOS in this period.</td></tr>'}</tbody></table>
           <table class="tbl small"><thead><tr><th>Trigger</th><th>SOS</th></tr></thead><tbody>${Object.entries(d.byTrigger).map(([k, v]) => `<tr><td>${esc(pretty(k))}</td><td>${v}</td></tr>`).join('')}</tbody></table></details>
         ${d.stations ? '' : '<div class="alert alert-warn">No police station list loaded — automatic police connection can only tell her to call 112. Load it in the "Police stations" tab.</div>'}</section>`;
   }
@@ -236,7 +254,7 @@ export function initProtect(c) {
     const ed = st.stationEdit ? items.find((s) => s.id === st.stationEdit) : null;
     const v = (k) => esc(draft[k] ?? ed?.[k] ?? '');
     return `<section class="card form"><h2>🚓 Police stations</h2>
-        <p class="muted small">Used for <b>automatic police connection</b> (when no operator acknowledges an SOS in time, or she presses SOS again) and for "Nearby help". Choose the country and state first — phone numbers are then typed the local way and the country code is added for you.</p>
+        ${infoTip('More info', `Used for <b>automatic police connection</b> (when no operator acknowledges an SOS in time, or she presses SOS again) and for "Nearby help". Choose the country and state first — phone numbers are then typed the local way and the country code is added for you.`)}
         <div class="grid2">
           <label>Country<select data-change="st-country">${countryOpts(iso)}</select></label>
           <label>State / province<input list="st-states" data-change="st-state" value="${esc(st.stState ?? fState)}" placeholder="${iso === 'IN' ? 'e.g. Andhra Pradesh' : 'State, province or region'}"><datalist id="st-states">${states.map((x) => `<option value="${esc(x)}">`).join('')}</datalist></label>
@@ -255,13 +273,13 @@ export function initProtect(c) {
             <label>Second phone (optional)${phoneInput('phone2', { value: draft.phone2 ?? ed?.phone2 ?? '', country: iso, lang: curLang(), placeholder: 'Optional' })}</label>
           </div>
           <label>Location — paste a Google Maps link or "lat, lng"<input name="where" value="${esc(draft.where ?? (ed ? `${ed.lat}, ${ed.lng}` : ''))}" placeholder="https://www.google.com/maps/place/...  or  15.8306, 78.0451"></label>
-          <p class="small muted">In Google Maps: open the station, tap <b>Share → Copy link</b> on a computer, or long-press the pin and copy the numbers shown. Short "maps.app.goo.gl" links don't contain the location — open them first and copy the full address-bar link.</p>
+          ${infoTip('More info', `In Google Maps: open the station, tap <b>Share → Copy link</b> on a computer, or long-press the pin and copy the numbers shown. Short "maps.app.goo.gl" links don't contain the location — open them first and copy the full address-bar link.`)}
           <div class="row"><button type="button" class="btn btn-secondary btn-sm" data-act="station-here">📍 I am at the station now</button>
             <button class="btn btn-primary">${ed ? 'Save changes' : 'Add station'}</button>${ed ? '<button type="button" class="btn btn-ghost" data-act="station-cancel">Cancel</button>' : ''}</div>
         </form></section>
 
       <section class="card form"><details ${st.stCsvOpen ? 'open' : ''}><summary><b>📄 Bulk upload (CSV / spreadsheet)</b></summary>
-        <p class="small muted">Stations go into <b>${flag(iso)} ${esc(countryName(iso, curLang()))}${st.stState ? ` → ${esc(st.stState)}` : ''}</b> (change above). Only <code>name,lat,lng,phone</code> are required; <code>district</code>, <code>phone2</code>, <code>state</code> and <code>country</code> columns are optional. Paste straight from Excel / Google Sheets (save as CSV) — local numbers like <code>08518 220100</code> are fine.</p>
+        ${infoTip('More info', `Stations go into <b>${flag(iso)} ${esc(countryName(iso, curLang()))}${st.stState ? ` → ${esc(st.stState)}` : ''}</b> (change above). Only <code>name,lat,lng,phone</code> are required; <code>district</code>, <code>phone2</code>, <code>state</code> and <code>country</code> columns are optional. Paste straight from Excel / Google Sheets (save as CSV) — local numbers like <code>08518 220100</code> are fine.`)}
         <form data-form="stations"><textarea name="csv" rows="6" required placeholder="name,district,lat,lng,phone,phone2&#10;Kurnool I Town PS,Kurnool,15.8306,78.0451,08518 220100,&#10;Kurnool II Town PS,Kurnool,15.8281,78.0373,08518 221200,9440795500"></textarea>
           <label class="switch"><input type="checkbox" name="replace"> Replace all stations of ${esc(st.stState || countryName(iso, curLang()))} (other states are kept)</label>
           <div class="row"><button class="btn btn-primary">Upload</button><button type="button" class="btn btn-ghost btn-sm" data-act="station-template">⬇ Download template</button></div></form></details></section>
@@ -279,47 +297,66 @@ export function initProtect(c) {
     if (!v || v.closed) return '';
     const pc = v.police;
     if (pc) {
-      const st2 = { PENDING: 'Contacting…', CONTACTED: 'Contacted ✓', NO_GATEWAY: 'Your phone is sending them your location', NO_STATION: 'Call 112 now', FAILED: 'Could not reach them automatically — call now' }[pc.status] || pretty(pc.status);
-      return `<section class="alert alert-danger police-card" role="alert"><h2>🚓 Police ${pc.station ? `— ${esc(pc.station.name)}` : ''}</h2>
-        <p>${esc(st2)}${pc.station ? ` · ${esc(pc.station.distanceKm)} km away` : ''}${pc.call === 'PLACED' ? ' · they are being connected to your phone — answer the call' : ''}</p>
-        <div class="row">${pc.station ? `<a class="btn btn-call" href="${telHref(pc.station.phone)}">📞 Call the station</a>` : ''}<a class="btn btn-call" href="${telHref(pc.emergency || '112')}">📞 ${esc(pc.emergency || '112')}</a></div></section>`;
+      const d = pc.dial || {};
+      const who = pc.station ? `${esc(pc.station.name)} · ${esc(pc.station.distanceKm)} km` : d.target === 'women_helpline' ? 'Women police helpline 1091' : `Emergency ${esc(d.number || pc.emergency || '112')}`;
+      const state = d.result === 'PLACED' ? `📞 Your phone called ${esc(d.number)} at ${esc(fmtTime(d.placedAt))}` : d.result === 'FAILED' ? '⚠️ Your phone could not place the call — tap a number below now' : `📞 Calling ${esc(d.number || pc.emergency || '112')} now…`;
+      return `<section class="alert alert-danger police-card" role="alert"><h2>🚓 Police — ${who}</h2>
+        <p>${state}${pc.sms === 'SENT' ? ' · they also got your live location by SMS' : ''}</p>
+        <div class="row">${d.number ? `<a class="btn btn-call" href="${telHref(d.number)}">📞 Call ${esc(d.number)}</a>` : ''}${d.fallback && d.fallback !== d.number ? `<a class="btn btn-call-alt" href="${telHref(d.fallback)}">📞 ${esc(d.fallback)}</a>` : (pc.emergency && pc.emergency !== d.number ? `<a class="btn btn-call-alt" href="${telHref(pc.emergency)}">📞 ${esc(pc.emergency)}</a>` : '')}</div></section>`;
     }
     return v.operatorAcknowledged
       ? '<p class="alert alert-info">👩‍💼 A Beti Bachao operator is handling your SOS.</p>'
-      : '<p class="alert alert-warn">👩‍💼 Waiting for an operator. If none responds within 2 minutes — or you press SOS again — the nearest police station is contacted automatically.</p>';
+      : `<p class="alert alert-warn">👩‍💼 Waiting for an operator. If none responds within ${Math.round((st.cfg?.policeAutoConnectSec || 120) / 60)} minutes — or you press SOS again — your phone calls the nearest police station automatically.</p>`;
   }
   function opsAck(d) {
     if (d.closed) return '';
     const pc = d.policeConnect;
-    return `${!d.opAckAt && !pc ? `<div class="alert alert-danger ack-box" role="alert"><strong>Acknowledge this SOS</strong> — otherwise the nearest police station is contacted automatically in <b data-live="ack-countdown" data-deadline="${esc(d.ackDeadline)}"></b>.<button class="btn btn-danger btn-lg" data-act="op-ack" data-id="${esc(d.id)}">✋ I'm handling this</button></div>` : ''}
+    return `${!d.opAckAt && !pc ? `<div class="alert alert-danger ack-box" role="alert"><strong>Acknowledge this SOS</strong> — otherwise her phone calls the nearest police station automatically in <b data-live="ack-countdown" data-deadline="${esc(d.ackDeadline)}"></b>.<button class="btn btn-danger btn-lg" data-act="op-ack" data-id="${esc(d.id)}">✋ I'm handling this</button></div>` : ''}
       ${d.opAckAt ? `<p class="small">✋ Acknowledged by ${esc(d.opAckBy || 'operator')} at ${esc(fmtTime(d.opAckAt))}</p>` : ''}
-      ${pc ? `<div class="alert alert-warn"><strong>🚓 Police auto-connect:</strong> ${pc.station ? `${esc(pc.station.name)} (${esc(pc.station.distanceKm)} km, ${esc(pc.station.phone)})` : 'no station list — her phone texts 112'} · ${esc(pretty(pc.status))}${pc.sms ? ` · SMS ${esc(pretty(pc.sms))}` : ''}${pc.call ? ` · call ${esc(pretty(pc.call))}` : ''}<br><small>${esc(pc.reason)} · ${esc(fmtTime(pc.at))}</small></div>` : ''}
+      ${pc ? `<div class="alert alert-warn"><strong>🚓 Police auto-connect:</strong> ${pc.station ? `${esc(pc.station.name)} (${esc(pc.station.distanceKm)} km, ${esc(pc.station.phone)})` : `no station within ${esc(st.cfg?.policeMaxKm || 30)} km`} · her phone ${pc.dial?.result === 'PLACED' ? `called <b>${esc(pc.dial.number)}</b> at ${esc(fmtTime(pc.dial.placedAt))}` : pc.dial?.result === 'FAILED' ? `<b>could not call ${esc(pc.dial.number)}</b> — phone her and call police` : `is calling <b>${esc(pc.dial?.number || pc.emergency)}</b>`}${pc.sms ? ` · SMS ${esc(pretty(pc.sms))}` : ''}${pc.call ? ` · call ${esc(pretty(pc.call))}` : ''}<br><small>${esc(pc.reason)} · ${esc(fmtTime(pc.at))}</small></div>` : ''}
       ${d.sosPresses > 1 ? `<p class="badge badge-danger">She pressed SOS ${esc(d.sosPresses)} times</p>` : ''}
       ${d.contactsPlace ? `<p class="small">Contacts notified for place: <b>${esc(d.contactsPlace)}</b></p>` : ''}
       ${(d.nearestStations || []).length ? `<p class="small">Nearest stations: ${d.nearestStations.map((s) => `<a href="${telHref(s.phone)}">${esc(s.name)} (${esc(s.distanceKm)} km)</a>`).join(' · ')}</p>` : ''}
       ${(d.evidence || []).length ? `<h3>🎙️ Evidence recordings</h3><ul class="clip-list">${d.evidence.map((e) => `<li><span>${e.kind === 'video' ? '🎥' : '🎙️'} ${esc(fmtTime(e.createdAt))} · ${esc(e.durationSec)}s</span><button class="btn btn-ghost btn-sm" data-act="evidence-play" data-id="${esc(d.id)}" data-eid="${esc(e.id)}" data-kind="${esc(e.kind)}">▶ Play</button></li>`).join('')}</ul><div id="evidence-player"></div>` : ''}`;
   }
 
-  // ---------------- automatic evidence (15 s audio after an in-app SOS) ----------------
+  // ---------------- automatic evidence: 15 s of audio once the SOS is active ----------------
+  // Silent (no beep, no prompt). Kept only if a voice is heard; then saved on this device and
+  // sent to operators/admin without asking. Every step is written to the audit log.
+  const evLog = (id, event, extra = {}) => api().evidenceLog(id, { event, ...extra }).catch(() => {});
   async function captureEvidence(incidentId, seconds = 15) {
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') return;
-    let stream;
-    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { return; }
-    const type = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'].find((t) => MediaRecorder.isTypeSupported?.(t)) || '';
-    const rec = new MediaRecorder(stream, type ? { mimeType: type, audioBitsPerSecond: 32000 } : undefined);
-    const chunks = [];
-    rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-    st.evidenceRecording = true;
-    const done = new Promise((r) => { rec.onstop = r; });
-    rec.start();
-    setTimeout(() => rec.state !== 'inactive' && rec.stop(), seconds * 1000);
-    await done;
-    stream.getTracks().forEach((t) => t.stop());
-    st.evidenceRecording = false;
-    const blob = new Blob(chunks, { type: rec.mimeType || type || 'audio/webm' });
-    if (blob.size < 200) return;
-    const b64 = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.readAsDataURL(blob); });
-    try { await api().uploadEvidence(incidentId, { mime: blob.type, data: b64, durationSec: seconds, kind: 'audio' }); } catch { store.set('evidenceRetry', { incidentId, at: Date.now() }); }
+    if (st.evidenceBusy === incidentId) return;
+    st.evidenceBusy = incidentId;
+    try {
+      if (native.available() && platform === 'android') { await native.recordEvidence({ incidentId, seconds }); return; } // native recorder: works with the screen off too
+      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') return evLog(incidentId, 'unsupported');
+      let stream;
+      try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false } }); } catch { return evLog(incidentId, 'mic_denied'); }
+      evLog(incidentId, 'started', { seconds });
+      // Voice detection: loudness of speech frequencies, sampled 10× a second.
+      let voiced = 0, ac = null, an = null;
+      try { ac = new (window.AudioContext || window.webkitAudioContext)(); an = ac.createAnalyser(); an.fftSize = 1024; ac.createMediaStreamSource(stream).connect(an); } catch { /* no analyser → keep the clip */ voiced = 99; }
+      const buf = an ? new Uint8Array(an.fftSize) : null;
+      const vad = an ? setInterval(() => { an.getByteTimeDomainData(buf); let sum = 0; for (const v of buf) sum += (v - 128) * (v - 128); if (Math.sqrt(sum / buf.length) > 6) voiced++; }, 100) : null;
+      const type = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'].find((t) => MediaRecorder.isTypeSupported?.(t)) || '';
+      const rec = new MediaRecorder(stream, type ? { mimeType: type, audioBitsPerSecond: 32000 } : undefined);
+      const chunks = [];
+      rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+      st.evidenceRecording = true;
+      const done = new Promise((r) => { rec.onstop = r; });
+      rec.start(1000);
+      setTimeout(() => rec.state !== 'inactive' && rec.stop(), seconds * 1000);
+      await done;
+      clearInterval(vad); try { ac?.close(); } catch {}
+      stream.getTracks().forEach((t) => t.stop());
+      st.evidenceRecording = false;
+      const blob = new Blob(chunks, { type: rec.mimeType || type || 'audio/webm' });
+      if (blob.size < 200 || voiced < 5) return evLog(incidentId, 'no_voice', { seconds }); // ≈0.5 s of speech needed — silence is discarded
+      await recorder.saveClip({ id: crypto.randomUUID?.() || String(Date.now()), kind: 'audio', createdAt: new Date().toISOString(), durationSec: seconds, type: blob.type, blob, incidentId, auto: true });
+      const b64 = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(',')[1]); fr.readAsDataURL(blob); });
+      try { await api().uploadEvidence(incidentId, { mime: blob.type, data: b64, durationSec: seconds, kind: 'audio', auto: true }); }
+      catch { store.set('evidenceRetry', { incidentId, at: Date.now() }); evLog(incidentId, 'upload_failed'); }
+    } finally { if (st.evidenceBusy === incidentId) st.evidenceBusy = null; }
   }
 
   // ---------------- landing impact counter ----------------
@@ -334,7 +371,7 @@ export function initProtect(c) {
     return c.shell(`<h1>👁️ Blink SOS</h1>
       <p class="lead">Hold the phone in front of your face. <b>Blink slowly three times</b> (close your eyes for about half a second each time) to start an SOS. Nobody watching will see you press anything.</p>
       <section class="card blink-card"><iframe id="blink-frame" src="blink-frame.html" allow="camera" title="Front camera for Blink SOS"></iframe><p id="blink-status" class="blink-status" aria-live="assertive">Starting camera…</p>
-        <p class="small muted">Everything runs on your phone — no video is sent anywhere. Works while this screen is open. After the third blink you get 5 seconds to cancel.</p>
+        ${infoTip('More info', `Everything runs on your phone — no video is sent anywhere. Works while this screen is open. After the third blink you get 5 seconds to cancel.`)}
         <button class="btn btn-ghost" data-act="blink-stop">Stop</button></section>`);
   }
   // Messages from the isolated camera frame.
@@ -393,6 +430,18 @@ export function initProtect(c) {
       if (r.id !== 'del') return;
       const list = places().filter((_, i) => i !== Number(el.dataset.i));
       try { const res = await api().savePlaces(list); store.set('places', res.places); c.syncNative(); render(); } catch (e) { showErr(e); }
+    },
+    // One contact of a place: add / edit / delete without touching the rest of the place.
+    async 'pc-add'(el) { await editPlaceContact(Number(el.dataset.i), -1); },
+    async 'pc-edit'(el) { await editPlaceContact(Number(el.dataset.i), Number(el.dataset.j)); },
+    async 'pc-del'(el) {
+      const list = places(); const i = Number(el.dataset.i), j = Number(el.dataset.j); const p = list[i]; const x = p?.contacts[j];
+      if (!x) return;
+      if (p.contacts.length <= 1) return toast(`"${p.label}" needs at least 1 contact — add another first, or delete the place`, 'error');
+      const r = await modal({ title: `Remove ${x.name}?`, body: `<p>${esc(x.name)} (${esc(x.phone)}) will no longer be told when you raise an SOS at ${esc(p.label)}.</p>`, actions: [{ id: 'del', label: 'Remove', kind: 'danger' }, { id: 'no', label: 'Cancel' }] });
+      if (r.id !== 'del') return;
+      const next = list.map((q, k) => (k === i ? { ...q, contacts: q.contacts.filter((_, m) => m !== j) } : q));
+      try { const res = await api().savePlaces(next); store.set('places', res.places); c.syncNative(); toast(`${x.name} removed`, 'ok'); render(); } catch (e) { showErr(e); }
     },
     'row-add'(el) {
       const box = el.closest('[data-rows]'); const max = Number(el.dataset.max);
@@ -457,7 +506,16 @@ export function initProtect(c) {
     const ph = readPhone(r, 'cphone');
     return { name, phone: raw ? ph.e164 : '', problem: raw ? ph.problem : null };
   }).filter((x) => x.name || x.phone);
-  const rowProblem = (cs) => { const i = cs.findIndex((x) => !x.name || !x.phone || x.problem); return i < 0 ? null : `Contact ${i + 1}: ${!cs[i].name ? 'enter a name' : cs[i].problem || 'enter a phone number'}`; };
+  const rowProblem = (cs, { notIn = [], what = 'important contact' } = {}) => {
+    const i = cs.findIndex((x) => !x.name || !x.phone || x.problem);
+    if (i >= 0) return `Contact ${i + 1}: ${!cs[i].name ? 'enter a name' : cs[i].problem || 'enter a phone number'}`;
+    const dup = duplicateIn(cs);
+    if (dup) return `${dup.b.name} has the same number as ${dup.a.name} — each contact needs a different number`;
+    const clash = cs.find((x) => notIn.some((y) => phoneKey(y.phone) === phoneKey(x.phone)));
+    if (clash) return `${clash.name} (${clash.phone}) is already an ${what}`;
+    if (st.me?.phone && cs.some((x) => phoneKey(x.phone) === phoneKey(st.me.phone))) return 'That is your own number — add someone who can help you';
+    return null;
+  };
   const clean = (cs) => cs.map(({ name, phone }) => ({ name, phone }));
   const forms = {
     async important(f) {
@@ -475,7 +533,7 @@ export function initProtect(c) {
       const cs = readRows(f);
       if (cs.length < 1) return toast('Add at least 1 contact for this place', 'error');
       if (cs.length > 3) return toast('Up to 3 contacts per place', 'error');
-      { const pr = rowProblem(cs); if (pr) return toast(pr, 'error'); }
+      { const pr = rowProblem(cs, { notIn: contacts.list(), what: 'important contact (they are told at every place)' }); if (pr) return toast(pr, 'error'); }
       const p = { id: i >= 0 ? list[i].id : undefined, label: f.label.value.trim(), lat: where.lat, lng: where.lng, radiusM: Number(f.radiusM.value), contacts: clean(cs) };
       if (i >= 0) list[i] = p; else list.push(p);
       try { const r = await api().savePlaces(list); store.set('places', r.places); st.placeEdit = null; st.placeDraft = null; c.syncNative(); toast('Saved — contacts will switch automatically with your location', 'ok'); render(); } catch (e) { showErr(e); }
@@ -553,7 +611,7 @@ export function initProtect(c) {
 
   return {
     views: { places: viewPlaces, trip: viewTrip, help: viewHelp, dashboard: viewDashboard, blink: viewBlink },
-    adminImpactTab, adminStationsTab, incidentPolice, opsAck, landingImpact, captureEvidence, activeContacts, pullPlaces,
+    adminImpactTab, adminStationsTab, incidentPolice, opsAck, landingImpact, captureEvidence, activeContacts, pullPlaces, parseLatLng,
     afterRender(route) { if (route === 'blink') afterRenderBlink(); },
     actions, forms, changes, tick,
   };

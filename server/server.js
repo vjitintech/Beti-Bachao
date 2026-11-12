@@ -85,7 +85,8 @@ export function createServer(opts = {}) {
     UNASSIGNED_BY_OPERATOR: () => ({ title: 'You were stood down by an operator', body: 'Another responder has been assigned.', url: '#/volunteer', tag: 'stand-down' }),
     VERIFICATION_CALL: (n) => ({ title: '📹 Verification video call booked', body: `Join from the app at ${new Date(n.meta?.scheduledAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}. Keep your Aadhaar card ready.`, url: '#/volunteer', tag: 'verify' }),
     VERIFICATION_RESULT: (n) => ({ title: n.meta?.decision === 'APPROVE' ? '✅ You are an approved Beti Bachao volunteer' : 'Volunteer verification update', body: n.meta?.decision === 'APPROVE' ? 'Go on duty in the app to start receiving SOS alerts nearby.' : 'Open the app for details.', url: '#/volunteer', tag: 'verify' }),
-    POLICE_CONNECTED: (n) => ({ title: '🚓 Police contacted for you', body: n.meta?.station ? `${n.meta.station} has your live location. Tap to call them: ${n.meta.phone}.` : `Call ${n.meta?.phone || '112'} now. Your phone is sending them your location.`, url: '#/home', tag: 'police', urgent: true }),
+    POLICE_CONNECTED: (n) => ({ title: '🚓 Calling the police for you', body: n.meta?.station ? `Your phone is calling ${n.meta.station} (${n.meta.phone}). They also got your live location.` : `Your phone is calling ${n.meta?.phone || '112'} now.`, url: n.incidentId ? `#/incident/${n.incidentId}` : '#/home', tag: 'police-' + n.incidentId, urgent: true, callNumber: n.meta?.callNumber || '' }),
+    EVIDENCE: (n) => ({ title: '🎙️ SOS evidence received', body: `A ${n.meta?.durationSec || 15}-second ${n.meta?.kind || 'audio'} recording was added to an SOS. Open the operations console.`, url: '#/ops', tag: 'evidence-' + n.incidentId }),
     TRIP_OVERDUE: (n) => ({ title: '⏰ Have you reached safely?', body: `Tap "I'm safe" — otherwise SOS starts automatically in ${Math.round((n.meta?.seconds || 120) / 60)} minutes.`, url: '#/trip', tag: 'trip', urgent: true }),
     TRIP_ENDED: (n) => ({ title: n.meta?.status === 'ARRIVED' ? '💚 Reached safely' : 'Trip ended', body: n.meta?.status === 'ARRIVED' ? 'Your contacts have been told you arrived.' : 'Live sharing has stopped.', url: '#/trip', tag: 'trip' }),
     ESCALATION: (n) => ({ title: '🚩 SOS needs an operator', body: `Escalation: ${String(n.meta?.type || '').replace(/_/g, ' ').toLowerCase()}. Open the operations console.`, url: '#/ops', tag: 'ops-' + n.incidentId, urgent: true }),
@@ -167,7 +168,19 @@ export function createServer(opts = {}) {
       if (!loc && !tok0 && now - Date.parse(inc.createdAt) < 8000) continue;
       const { place, contacts } = engine.contactsFor(u.id, loc);
       inc.smsSentTo ||= [];
-      const todo = contacts.filter((c) => !inc.smsSentTo.includes(c.phone));
+      const key = (ph) => String(ph).replace(/\D/g, '').slice(-10); // +91 98… and 98… are the same person
+      const sent = new Set(inc.smsSentTo.map(key));
+      const todo = contacts.filter((c) => { const k = key(c.phone); if (sent.has(k)) return false; sent.add(k); return true; });
+      // Second message: nobody has responded yet → tell the same people she is still waiting.
+      if (!inc.waitingSmsAt && inc.smsSentTo.length && now - Date.parse(inc.createdAt) > engine.cfg.contactsWaitingSec * 1000 && !inc.opAckAt && !engine.hasResponder(inc.id)) {
+        inc.waitingSmsAt = new Date().toISOString(); store.markDirty();
+        const tokW = engine.shareTokenFor(inc.id);
+        const linkW = publicOrigin && tokW ? `${publicOrigin}/s/${tokW}` : loc ? mapsLink(loc) : '(location pending — call her)';
+        const toW = [...new Map(inc.smsSentTo.map((ph) => [key(ph), ph])).values()];
+        for (const ph of toW) sms.send(ph, 'WAITING', { name: u.displayName, link: linkW })
+          .then((r) => engine.audit('system', r.ok ? 'CONTACT_WAITING_SMS_SENT' : 'CONTACT_WAITING_SMS_FAILED', 'incident', inc.id, r.ok ? null : String(r.error || r.status)));
+        store.db.escalations.push({ id: crypto.randomUUID(), incidentId: inc.id, type: 'CONTACTS_STILL_WAITING', status: 'ATTEMPTED', label: 'No responder yet — your contacts were sent a second SMS: still waiting for help', reason: 'no volunteer or operator response', attemptedAt: new Date().toISOString(), acknowledgedAt: null, recordedBy: 'system', metadata: { contacts: toW.length } });
+      }
       if (!todo.length) continue;
       inc.contactsSmsAt ||= new Date().toISOString();
       if (place && inc.contactsPlace !== place.label) inc.contactsPlace = place.label;
@@ -310,7 +323,11 @@ export function createServer(opts = {}) {
     routes.push({ method, re, keys, handler, auth, limit, maxBody });
   };
 
-  route('GET', '/health', () => ({ ok: true, time: new Date(deps.now()).toISOString(), auditChain: engine.verifyAuditChain().ok }), { auth: false });
+  let chainCheck = { at: 0, ok: true }; // the audit-chain check walks every entry — monitors probe often, so cache it a minute
+  route('GET', '/health', () => {
+    if (deps.now() - chainCheck.at > 60000) chainCheck = { at: deps.now(), ok: engine.verifyAuditChain().ok };
+    return { ok: true, time: new Date(deps.now()).toISOString(), auditChain: chainCheck.ok };
+  }, { auth: false });
   route('POST', '/setup', ({ body }) => {
     if (store.db.users.some((u) => u.role === 'admin')) throw new EngineError(409, 'ALREADY_SET_UP', 'Setup is already complete. Please log in.');
     const tok = String(body.code || '');
@@ -323,7 +340,7 @@ export function createServer(opts = {}) {
     engine.audit(u.id, 'ADMIN_SETUP', 'user', u.id);
     return { ok: true };
   }, { auth: false, limit: [10, 3600e3] });
-  route('GET', '/public-config', () => ({ setupNeeded: !store.db.users.some((u) => u.role === 'admin'), demo: false, mfaRequired: MFA_REQUIRED, countries: COUNTRIES, defaultCountry: engine.cfg.countryCode, simulatedLabel: SIMULATED_LABEL, radiusStagesKm: engine.cfg.radiusStagesKm, vapidPublicKey: store.db.vapid.publicKey, features: { appPush: !!(fcm || apns), iosPush: !!(apns || fcm), policeCall: !!voice, sms: !!sms, smsReset: !!sms, roadEta: !!routing, ai: !!ai } }), { auth: false });
+  route('GET', '/public-config', () => ({ setupNeeded: !store.db.users.some((u) => u.role === 'admin'), demo: false, mfaRequired: MFA_REQUIRED, countries: COUNTRIES, defaultCountry: engine.cfg.countryCode, simulatedLabel: SIMULATED_LABEL, radiusStagesKm: engine.cfg.radiusStagesKm, policeAutoConnectSec: engine.cfg.policeAutoConnectSec, policeMaxKm: engine.cfg.policeMaxKm, contactsWaitingSec: engine.cfg.contactsWaitingSec, vapidPublicKey: store.db.vapid.publicKey, features: { appPush: !!(fcm || apns), iosPush: !!(apns || fcm), policeCall: !!voice, sms: !!sms, smsReset: !!sms, roadEta: !!routing, ai: !!ai } }), { auth: false });
 
   route('POST', '/auth/register', async ({ body, res }) => {
     if (!['user', 'volunteer'].includes(body.role)) throw new EngineError(400, 'INVALID_ROLE', 'Only user or volunteer accounts can self-register');
@@ -425,6 +442,8 @@ export function createServer(opts = {}) {
     const storageKey = media.put(buf);
     try { return engine.addEvidence(actor, p.id, { kind: body.kind || mime.split('/')[0], mime, durationSec: body.durationSec, bytes: buf.length, storageKey }); } catch (e) { media.del(storageKey); throw e; }
   }, { maxBody: 6 * 1024 * 1024, limit: [30, 3600e3] });
+  route('POST', '/incidents/:id/evidence-log', ({ actor, p, body }) => engine.evidenceLog(actor, p.id, body), { limit: [120, 3600e3] });
+  route('POST', '/incidents/:id/police-call', ({ actor, p, body }) => engine.recordPoliceCall(actor, p.id, body), { limit: [60, 3600e3] });
   route('GET', '/incidents/:id/evidence/:eid', ({ actor, p }) => { const e = engine.evidenceFor(actor, p.id, p.eid); return { __raw: true, type: e.mime.split(';')[0], body: media.get(e.storageKey) }; });
   route('POST', '/operator/incidents/:id/ack', ({ actor, p }) => engine.operatorAck(actor, p.id));
   route('GET', '/admin/dashboard', ({ actor, q }) => engine.adminDashboard(actor, { days: q.get('days') }));
@@ -440,7 +459,7 @@ export function createServer(opts = {}) {
     if (sms && vu?.phone) sms.send(vu.phone, 'VERIFY', { time: new Date(call.scheduledAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) });
     return call;
   });
-  route('GET', '/admin/users', ({ actor, q }) => ({ items: engine.findUsers(actor, q.get('q')) }));
+  route('GET', '/admin/users', ({ actor, q }) => ({ items: engine.findUsers(actor, q.get('q'), { status: q.get('status') || '', role: q.get('role') || '', km: q.get('km'), near: q.get('lat') && q.get('lng') ? { lat: Number(q.get('lat')), lng: Number(q.get('lng')) } : null }) }));
   route('POST', '/admin/users/:id/reset-password', ({ actor, p }) => {
     const temp = crypto.randomBytes(6).toString('base64url') + '-' + crypto.randomInt(100, 999);
     engine.adminResetPassword(actor, p.id, hashPassword(temp));
@@ -571,7 +590,7 @@ export function createServer(opts = {}) {
     { name: 'App push (Firebase, Android + iPhone)', status: fcm ? 'ACTIVE' : 'NOT CONFIGURED', note: fcm ? `${store.db.devices.length} app device(s) registered.` : 'Set FCM_SERVICE_ACCOUNT to send alarm alerts to the phone apps.' },
     { name: 'iPhone push (Apple APNs)', status: apns ? 'ACTIVE' : 'NOT CONFIGURED', note: apns ? `${store.db.devices.filter((d) => d.platform === 'ios').length} iPhone/iPad device(s) registered.` : 'Set APNS_KEY, APNS_KEY_ID and APNS_TEAM_ID to send alerts to the iPhone app.' },
     { name: 'SMS gateway', status: sms ? sms.name.toUpperCase() : 'NOT CONFIGURED', note: sms ? 'Sends SOS SMS for iPhone users, alert fallback to volunteers, reset codes.' : 'Set SMS_PROVIDER (msg91/twilio). Android phones still send SOS SMS themselves.' },
-    { name: 'Police auto-connect', status: (store.db.policeStations || []).length ? `${store.db.policeStations.length} STATIONS` : 'NO STATION LIST', note: `If no operator acknowledges an SOS within ${engine.cfg.policeAutoConnectSec} s (or she presses SOS again), the nearest station gets an SMS${voice ? ' and an automatic call that connects them to her' : ''}. ${voice ? `Calls via ${voice.name}.` : 'Set VOICE_PROVIDER (exotel/twilio) for the automatic call.'} Import stations in Admin → Police stations.` },
+    { name: 'Police auto-connect', status: (store.db.policeStations || []).length ? `${store.db.policeStations.length} STATIONS` : 'NO STATION LIST', note: `If no operator acknowledges an SOS within ${engine.cfg.policeAutoConnectSec} s (or she presses SOS again), her phone automatically calls the nearest station within ${engine.cfg.policeMaxKm} km (else 1091, else 112) and the station gets an SMS${voice ? ' plus a bridged call' : ''}. ${voice ? `Calls via ${voice.name}.` : 'Set VOICE_PROVIDER (exotel/twilio) for the automatic call.'} Import stations in Admin → Police stations.` },
     { name: 'Road-route ETA', status: routing ? 'ACTIVE' : 'ESTIMATE', note: routing ? routing.describe + '. Set GOOGLE_MAPS_API_KEY (Routes API) for live traffic.' : 'Routing is off (ROUTING_URL=off). Straight-line estimate.' },
     { name: 'Local AI (Colibri)', status: ai ? 'ACTIVE' : 'OFF', note: ai ? `Model ${ai.model}. Advisory only.` : 'Set AI_BASE_URL to enable operator summaries, translation and risk flags.' },
     { name: 'Automatic backups', status: backups ? 'ACTIVE' : 'OFF', note: backups ? `Daily, kept ${Number(env.BACKUP_KEEP) || 14}${env.BACKUP_KEY ? ', encrypted' : ''}.` : 'Disabled.' },
@@ -600,6 +619,8 @@ export function createServer(opts = {}) {
     const url = new URL(req.url, 'http://local');
     if (/^\/[ts]\/[a-f0-9]{32}$/.test(url.pathname)) return serveStatic(req, res, '/track.html');
     if (url.pathname === '/privacy' || url.pathname === '/delete-account') return serveStatic(req, res, url.pathname + '.html');
+    // Uptime monitors (UptimeRobot etc.) often probe /health with HEAD — answer like the API health check.
+    if (url.pathname === '/health' || url.pathname === '/healthz') url.pathname = '/api/v1/health';
     if (!url.pathname.startsWith('/api/')) return serveStatic(req, res, url.pathname);
 
     // CORS only for the native apps' WebView origins (bearer tokens, no cookies).
@@ -626,20 +647,21 @@ export function createServer(opts = {}) {
       return;
     }
 
-    const r = routes.find((x) => x.method === req.method && x.re.test(url.pathname));
+    const method = req.method === 'HEAD' ? 'GET' : req.method; // HEAD = GET without a body (Node drops the body)
+    const r = routes.find((x) => x.method === method && x.re.test(url.pathname));
     if (!r) return err(res, 404, 'NOT_FOUND', 'Unknown endpoint');
     try {
       // CSRF: state-changing requests need a custom header (not sendable cross-site
       // without CORS preflight, which we never grant) plus SameSite=Strict cookies.
       const isBearer = !!bearer(req);
-      if (req.method !== 'GET' && !isBearer && req.headers['x-bb-csrf'] !== '1') throw new EngineError(403, 'CSRF', 'Missing CSRF header');
+      if (method !== 'GET' && !isBearer && req.headers['x-bb-csrf'] !== '1') throw new EngineError(403, 'CSRF', 'Missing CSRF header');
       const actor = sessionUser(req);
       if (r.auth && !actor) throw new EngineError(401, 'UNAUTHENTICATED', 'Please log in');
       if (actor?.mustChangePassword && !/\/(me|auth\/change-password|auth\/logout|public-config|health)$/.test(url.pathname)) throw new EngineError(403, 'PASSWORD_CHANGE_REQUIRED', 'Please choose a new password first');
       if (r.limit && !limiter.check(`${r.re}:${actor?.id || ip(req)}`, r.limit[0] * RATE_MULT, r.limit[1])) throw new EngineError(429, 'RATE_LIMITED', 'Too many requests. In an emergency call your local emergency number.');
       const m = url.pathname.match(r.re);
       const p = Object.fromEntries(r.keys.map((k, i) => [k, m[i + 1]]));
-      const body = req.method === 'GET' ? {} : await readBody(req, r.maxBody);
+      const body = method === 'GET' ? {} : await readBody(req, r.maxBody);
       if (!env.PUBLIC_URL && req.headers.host) publicOrigin = `${env.TRUST_PROXY === 'true' ? String(req.headers['x-forwarded-proto'] || 'https').split(',')[0] : (SECURE ? 'https' : 'http')}://${req.headers.host}`;
       const result = await r.handler({ req, res, actor, body, p, q: url.searchParams });
       if (result && result.__raw) {
