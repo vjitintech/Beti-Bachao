@@ -84,6 +84,15 @@ dependencies {
 android {
     buildFeatures { buildConfig true }
     signingConfigs {
+        // One fixed TEST key (mobile/test-debug.keystore, not secret) so every test APK installs
+        // over the previous one. GitHub's default debug key changes per build, and Android then
+        // refuses the update and silently keeps the old app.
+        testDebug {
+            storeFile file('${path.join(mobile, 'test-debug.keystore').split(path.sep).join('/')}')
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
         release {
             if (System.getenv('BB_KEYSTORE_FILE')) {
                 storeFile file(System.getenv('BB_KEYSTORE_FILE'))
@@ -94,6 +103,7 @@ android {
         }
     }
     buildTypes {
+        debug { signingConfig signingConfigs.testDebug }
         release {
             if (System.getenv('BB_KEYSTORE_FILE')) signingConfig signingConfigs.release
         }

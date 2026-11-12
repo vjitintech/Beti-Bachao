@@ -470,3 +470,4 @@ label small, .switch small { font-weight: 400; }
 /* Switch rows: checkbox on the start side, the whole text flows as one paragraph (no split columns) */
 label.switch { display: block; position: relative; padding-inline-start: 34px; min-height: 26px; line-height: 1.4; margin: 10px 0; }
 label.switch input { position: absolute; inset-inline-start: 0; top: 0; margin: 0; }
+.esc-list { margin: 0; padding-inline-start: 18px; } .esc-compact .info-tip { margin-top: 6px; }

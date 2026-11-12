@@ -1,12 +1,12 @@
-import { createApi, uuid } from './api.js?v=mwddwn7p';
-import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang, ownSosWords, sosVoiceLang } from './i18n.js?v=mwddwn7p';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwddwn7p';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwddwn7p';
-import { TRAINING_MODULES } from '../core/engine.js?v=mwddwn7p';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwddwn7p';
-import { initProtect } from './protect-ui.js?v=mwddwn7p';
-import { a11y, announce, speakStatus } from './a11y.js?v=mwddwn7p';
-import { phoneInput, readPhone, guessCountry, bindPhoneFields } from './phone.js?v=mwddwn7p';
+import { createApi, uuid } from './api.js?v=mwdjqued';
+import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang, ownSosWords, sosVoiceLang } from './i18n.js?v=mwdjqued';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwdjqued';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwdjqued';
+import { TRAINING_MODULES } from '../core/engine.js?v=mwdjqued';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwdjqued';
+import { initProtect } from './protect-ui.js?v=mwdjqued';
+import { a11y, announce, speakStatus } from './a11y.js?v=mwdjqued';
+import { phoneInput, readPhone, guessCountry, bindPhoneFields } from './phone.js?v=mwdjqued';
 let P = null; // autonomous-protection screens (protect-ui.js), set up in boot()
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'impact', volSel: null };
@@ -34,6 +34,8 @@ const statusText = (v) => {
 };
 // Opens sms:/tel: links in the phone's app without leaving this page.
 function openExternal(href) { const a = document.createElement('a'); a.href = href; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove(); }
+// A timeline entry as a readable sentence (escalations keep their own capitalised label).
+const tlText = (it) => (it?.kind === 'escalation' && String(it.text).includes(': ') ? String(it.text).split(': ').slice(1).join(': ') : pretty(it?.text));
 const pretty = (s) => String(s || '').replace(/_/g, ' ').toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
 
 // Google Maps embedded inside the app (no API key, nothing opens externally).
@@ -54,10 +56,16 @@ function googleDirections(from, to, title, key = 'route') {
 function ppiRange(key, autoKm) { const steps = (st.ppiZoom ||= {})[key] || 0; return stepRange(autoKm, -steps); }
 
 // A change worth telling someone about: vibrate, speak it and show it (skipped on first load).
+// Announces a NEW update once. Each distinct message is shown at most once per incident,
+// however often the screen refreshes (distances and ETAs change every few seconds).
 function notifyChange(key, sig, message, kind = 'ok') {
   const seen = (st.lastSig ||= {});
+  const shown = (st.shownMsgs ||= {});
   const before = seen[key]; seen[key] = sig;
   if (before == null || before === sig || !message) return;
+  const done = (shown[key] ||= new Set(store.get('shown:' + key, [])));
+  if (done.has(message)) return;
+  done.add(message); store.set('shown:' + key, [...done].slice(-50));
   vibrate([250, 120, 250]);
   toast(message, kind, 8000);
   try { announce(message); } catch {}
@@ -482,13 +490,8 @@ async function viewIncident(id, params) {
   const silent = params.get('silent') === '1';
   if (v.role !== 'requester') return shell('<p>Not your incident.</p>');
   speakStatus(v);
-  // Police auto-connect: her phone calls the station (≤30 km) / 1091 / 112 at once — no dialler tap.
-  const dial = v.police?.dial;
-  if (dial?.number && dial.result !== 'PLACED' && !v.closed && !store.get('policeDial:' + v.id, false)) {
-    store.set('policeDial:' + v.id, true);
-    if (native.available() && platform === 'android') native.placeCall({ number: dial.number, key: v.id }); // the phone reports the result to the server
-    else { toast(`Calling ${dial.label}…`, 'warn', 8000); setTimeout(() => openExternal(telHref(dial.number)), 300); }
-  }
+  // Police auto-connect: her phone calls the station (≤30 km), then 1091, then 112 — no dialler tap.
+  if (v.police?.dial?.number && !v.closed && !store.get('policeChain:' + v.id, null)) startPoliceChain(v);
   const open = !v.closed;
   // Nobody has responded yet → her phone tells her contacts she is still waiting (when the server can't text them).
   if (open && !st.cfg?.features?.sms && native.available() && platform === 'android' && !v.operatorAcknowledged && !(v.responders || []).length
@@ -497,7 +500,7 @@ async function viewIncident(id, params) {
     const nums = P.activeContacts(v.location || geo.last).contacts.map((c) => c.phone);
     if (nums.length) native.sendSos({ numbers: nums, message: `STILL WAITING for help - no responder yet (Beti Bachao).${v.liveSharePath ? ` Live: ${liveLink(v.liveSharePath)}` : ''} Please call me or 112.`, sms112: false });
   }
-  { const last = tl[tl.length - 1]; notifyChange('her:' + v.id, (v.responders || []).map((r) => r.label + r.status).join('|') + '#' + tl.length, last ? pretty(last.text) : '', 'ok'); }
+  { const last = tl[tl.length - 1]; notifyChange('her:' + v.id, last ? `${last.at}|${last.text}` : '', last ? tlText(last) : '', 'ok'); }
   const radii = st.cfg?.radiusStagesKm || [10, 20, 30];
   const stages = [0, 1, 2].map((i) => `<li class="${v.search?.stage === i ? 'on' : v.search?.stage > i ? 'done' : ''}">${esc(radii[i])} km</li>`).join('');
   return shell(`
@@ -508,7 +511,7 @@ async function viewIncident(id, params) {
       ${open && v.search?.secondsLeft != null && (v.responders?.length || 0) < 2 ? `<p class="small"><span data-live="stage-countdown" data-deadline="${esc(v.search.deadline)}"></span></p>` : ''}
       <ol class="stage-bar" aria-label="Search stages">${stages}</ol>
     </section>
-    ${open ? (() => { const last = tl[tl.length - 1]; return last ? `<section class="latest-update" aria-live="assertive"><span class="lu-label">Latest update · ${esc(fmtTime(last.at))}</span><strong>${esc(pretty(last.text))}</strong>${(v.responders || []).length ? `<span class="lu-sub">${(v.responders || []).map((r) => `${esc(r.label)}: ${esc(pretty(r.status))}${r.approxEtaMin && r.status === 'EN_ROUTE' ? ` (≈${esc(r.approxEtaMin)} min)` : ''}`).join(' · ')}</span>` : ''}</section>` : ''; })() : ''}
+    ${open ? (() => { const last = tl[tl.length - 1]; return last ? `<section class="latest-update" aria-live="assertive"><span class="lu-label">Latest update · ${esc(fmtTime(last.at))}</span><strong>${esc(tlText(last))}</strong>${(v.responders || []).length ? `<span class="lu-sub">${(v.responders || []).map((r) => `${esc(r.label)}: ${esc(pretty(r.status))}${r.approxEtaMin && r.status === 'EN_ROUTE' ? ` (≈${esc(r.approxEtaMin)} min)` : ''}`).join(' · ')}</span>` : ''}</section>` : ''; })() : ''}
     ${open ? `<section class="action-grid">
       <button class="btn btn-safe btn-lg" data-act="are-you-safe">✅ ${esc(t('are_you_safe'))}</button>
       <button class="btn btn-danger" data-act="more-help">🆘 ${esc(t('need_help'))}</button>
@@ -518,7 +521,8 @@ async function viewIncident(id, params) {
     ${open && v.status === 'LOCATION_UNAVAILABLE' ? `<div class="alert alert-danger" role="alert"><strong>📍 We don't have your location yet, so volunteers can't be matched.</strong> Call a number below now, and allow location for this site.<div class="row"><button class="btn btn-secondary" data-act="share-location">${esc(t('allow_location'))}</button></div></div>` : ''}
     ${open ? emergencyBar() : ''}
     ${open ? pushCard('Get updates on your phone when a volunteer accepts or arrives') : ''}
-    ${v.escalations?.length ? `<div class="alert alert-warn"><strong>Escalation:</strong> ${v.escalations.map((e) => `${esc(pretty(e.type))} — <em>${esc(e.label)}</em>`).join('<br>')}<p class="small">${v.police ? 'The police have been contacted (see above).' : 'Operators are alerted. In danger, call 112 yourself too.'}</p></div>` : ''}
+    ${v.escalations?.length ? `<div class="alert alert-warn esc-compact"><strong>⚠️ Escalated</strong> — ${v.police ? 'operators alerted and police contacted' : 'all operators alerted'}. In danger, call 112 yourself too.
+      ${infoTip('What happened', `<ul class="esc-list">${[...new Map(v.escalations.map((e) => [e.type, e])).values()].map((e) => `<li><b>${esc(pretty(e.type))}</b> · ${esc(fmtTime(e.attemptedAt))}</li>`).join('')}</ul>`)}</div>` : ''}
     ${open ? `
     ${trackingCard(v.responders, v.location, v.radiusStagesKm, { title: t('responders') })}
     <section class="action-grid">
@@ -669,7 +673,7 @@ async function viewSettings() {
     </section>
     <section class="card"><h2>📜 ${esc(t('history'))}</h2><ul class="history">${history.map((h) => `<li><a href="#/incident/${esc(h.id)}">${esc(new Date(h.createdAt).toLocaleString())}</a> — ${esc(pretty(h.status))}</li>`).join('') || '<li class="muted">No SOS yet.</li>'}</ul></section>` : ''}
     <section class="card"><h2>🛡️ ${esc(t('privacy'))}</h2>
-      <p class="muted">Signed in as ${esc(me.displayName)} (${esc(me.role)}).</p>
+      <p class="muted">Signed in as ${esc(me.displayName)} (${esc(me.role)}).${window.BB_APP_BUILD ? ` · App ${esc(String(window.BB_APP_BUILD).replace(/\((\w{7})\w*\)/, '($1)'))}` : ''}</p>
       <div class="row">${['user', 'volunteer'].includes(me.role) ? '<button class="btn btn-ghost" data-act="export">Download my data</button><button class="btn btn-ghost danger-text" data-act="delete-account">Delete my account</button>' : ''}<button class="btn btn-ghost" data-act="report-abuse">Report a concern</button></div>
     </section>
   `);
@@ -1442,6 +1446,40 @@ function afterLogin() {
   go(permsDone() ? roleHome(st.me.role) : '#/permissions');
 }
 
+// ------------------------------------------------------------------ police call chain
+// Station → 1091 → 112. After each call, when she is back in the app, she is asked
+// "Did they answer?" — no answer (or no tap within 10 s) calls the next number.
+function policeChainNumbers(v) {
+  const d = v.police.dial; const cc = v.countryCode || st.me?.countryCode || 'IN';
+  return [...new Set([d.number, cc === 'IN' ? '1091' : null, v.police.emergency || country().emergency || '112'].filter(Boolean))];
+}
+async function placePoliceCall(id, number) {
+  if (native.available() && platform === 'android') await native.placeCall({ number, key: id }); // the phone reports each call to the server
+  else openExternal(telHref(number));
+}
+function startPoliceChain(v) {
+  const nums = policeChainNumbers(v);
+  const chain = { id: v.id, nums, i: 0, at: Date.now(), done: false };
+  store.set('policeChain:' + v.id, chain);
+  toast(`📞 Calling ${v.police.dial.label || nums[0]}…`, 'warn', 6000);
+  setTimeout(() => placePoliceCall(v.id, nums[0]), 400);
+}
+async function policeChainResume() {
+  const id = st.incident?.id || incId?.();
+  const chain = id && store.get('policeChain:' + id, null);
+  if (!chain || chain.done || st.policeAsk || Date.now() - chain.at < 6000) return; // back too soon = the call screen hasn't really happened yet
+  const next = chain.nums[chain.i + 1];
+  if (!next) { chain.done = true; store.set('policeChain:' + id, chain); return; }
+  st.policeAsk = true;
+  let left = 10;
+  const p = modal({ title: `Did ${chain.nums[chain.i]} answer?`, body: `<p>If nobody answered, your phone calls <b>${esc(next)}</b> in <b data-ask-left>${left}</b> s.</p>`, actions: [{ id: 'yes', label: 'Yes, they answered', kind: 'primary' }, { id: 'next', label: `No — call ${next} now`, kind: 'danger' }], dismissable: false });
+  const iv = setInterval(() => { left -= 1; const b = document.querySelector('[data-ask-left]'); if (b) b.textContent = left; if (left <= 0) { clearInterval(iv); document.querySelector('[data-modal="next"]')?.click(); } }, 1000);
+  const r = await p; clearInterval(iv); st.policeAsk = false;
+  if (r.id === 'yes') { chain.done = true; store.set('policeChain:' + id, chain); toast('Good — stay on the line with them if you can', 'ok'); return; }
+  chain.i += 1; chain.at = Date.now(); store.set('policeChain:' + id, chain);
+  placePoliceCall(id, next);
+}
+
 // ------------------------------------------------------------------ phone permissions (first run in the app)
 // Everything is ON by default; she can switch off what she doesn't want. A feature that needs
 // a permission is switched off with it (e.g. no microphone → no Voice SOS / evidence).
@@ -1510,6 +1548,7 @@ async function boot() {
   bindPhoneFields(document, (iso, sel) => { const c = sel.form?.countryCode; if (c && [...c.options].some((o) => o.value === iso)) c.value = iso; });
   document.addEventListener('change', (e) => { const c = e.target; if (c.name !== 'countryCode' || !c.form) return; const p = c.form.querySelector('[name="phone_cc"]'); if (p && !c.form.phone?.value) p.value = c.value; });
   window.addEventListener('hashchange', () => { render(); $('#main')?.focus({ preventScroll: true }); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && st.me?.role === 'user') setTimeout(policeChainResume, 800); });
   window.addEventListener('online', () => { if (store.get('pendingSos', null)) triggerSOS(store.get('pendingSos')); });
 
   st.api.subscribe((ev) => {

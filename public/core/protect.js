@@ -5,9 +5,9 @@
 //  • "Track my travel" trips with auto-arrival and auto-SOS when overdue
 //  • SOS evidence (audio/video) metadata — bytes are stored encrypted by the server
 //  • dashboards: hers, admin impact, public impact counter
-import { haversineKm, isValidLatLng } from './geo.js?v=mwddwn7p';
-import { COUNTRIES } from './config.js?v=mwddwn7p';
-import { toE164, dialInfo } from './dial.js?v=mwddwn7p';
+import { haversineKm, isValidLatLng } from './geo.js?v=mwdjqued';
+import { COUNTRIES } from './config.js?v=mwdjqued';
+import { toE164, dialInfo } from './dial.js?v=mwdjqued';
 
 const SAFE_CLOSURES = new Set(['USER_CONFIRMED_SAFE', 'HANDED_TO_EMERGENCY_SERVICES_CONFIRMED_SAFE']);
 const median = (xs) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };

@@ -257,11 +257,25 @@ public class BetiNativePlugin extends Plugin {
         call.resolve();
     }
 
-    /** Police auto-connect from the app: places the call straight away. */
+    /** Police auto-connect from the app: places the call straight away (asks for the permission first if needed). */
     @PluginMethod
     public void placeCall(PluginCall call) {
+        if (getPermissionState("phone") != PermissionState.GRANTED) { requestPermissionForAlias("phone", call, "phoneForCallDone"); return; }
+        doPlaceCall(call);
+    }
+
+    @PermissionCallback
+    private void phoneForCallDone(PluginCall call) { doPlaceCall(call); }
+
+    private void doPlaceCall(PluginCall call) {
+        String number = call.getString("number");
+        boolean placed = PoliceCaller.call(getContext(), number, call.getString("key"));
+        if (!placed && number != null && getActivity() != null) {
+            // No permission: open the dialler with the number ready — one tap to call.
+            try { getActivity().startActivity(new Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", number.replaceAll("[^0-9+]", ""), null))); } catch (Exception ignored) {}
+        }
         JSObject r = new JSObject();
-        r.put("placed", PoliceCaller.call(getContext(), call.getString("number"), call.getString("key")));
+        r.put("placed", placed);
         call.resolve(r);
     }
 

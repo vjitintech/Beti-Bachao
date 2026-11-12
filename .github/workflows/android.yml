@@ -23,6 +23,7 @@ jobs:
     env:
       BB_SERVER_URL: ${{ vars.BB_SERVER_URL }}
       BB_VERSION_CODE: ${{ github.run_number }}
+      BB_APP_VERSION: 1.0.${{ github.run_number }} (${{ github.sha }})
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

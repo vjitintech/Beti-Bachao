@@ -7,10 +7,15 @@ export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
 export function toast(msg, kind = 'info', ms = 3500) {
   const host = $('#toasts');
+  if (!host) return;
+  // The same message already on screen is not shown again; at most 3 toasts at a time.
+  if ([...host.children].some((t) => t.textContent === String(msg))) return;
+  while (host.children.length >= 3) host.firstElementChild.remove();
   const el = document.createElement('div');
   el.className = `toast toast-${kind}`;
   el.setAttribute('role', kind === 'error' ? 'alert' : 'status');
   el.textContent = msg;
+  el.addEventListener('click', () => el.remove()); // tap to dismiss
   host.appendChild(el);
   setTimeout(() => el.remove(), ms);
 }
