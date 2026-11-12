@@ -1,11 +1,11 @@
-import { createApi, uuid } from './api.js?v=mwcw5b39';
-import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang } from './i18n.js?v=mwcw5b39';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwcw5b39';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwcw5b39';
-import { TRAINING_MODULES } from '../core/engine.js?v=mwcw5b39';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwcw5b39';
-import { initProtect } from './protect-ui.js?v=mwcw5b39';
-import { a11y, announce, speakStatus } from './a11y.js?v=mwcw5b39';
+import { createApi, uuid } from './api.js?v=mwcy6y57';
+import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang } from './i18n.js?v=mwcy6y57';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwcy6y57';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwcy6y57';
+import { TRAINING_MODULES } from '../core/engine.js?v=mwcy6y57';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwcy6y57';
+import { initProtect } from './protect-ui.js?v=mwcy6y57';
+import { a11y, announce, speakStatus } from './a11y.js?v=mwcy6y57';
 let P = null; // autonomous-protection screens (protect-ui.js), set up in boot()
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'impact', volSel: null };
@@ -52,6 +52,17 @@ function googleDirections(from, to, title, key = 'route') {
 // Radar range with user zoom (each step = next "nice" range).
 function ppiRange(key, autoKm) { const steps = (st.ppiZoom ||= {})[key] || 0; return stepRange(autoKm, -steps); }
 
+// A change worth telling someone about: vibrate, speak it and show it (skipped on first load).
+function notifyChange(key, sig, message, kind = 'ok') {
+  const seen = (st.lastSig ||= {});
+  const before = seen[key]; seen[key] = sig;
+  if (before == null || before === sig || !message) return;
+  vibrate([250, 120, 250]);
+  toast(message, kind, 8000);
+  try { announce(message); } catch {}
+}
+const infoTip = (label, html) => `<details class="info-tip"><summary aria-label="${esc(label)}">ⓘ <span>${esc(label)}</span></summary><div class="small">${html}</div></details>`;
+
 // Live tracking of every accepted responder on a PPI radar scope + multi-target readout.
 const distText = (km) => (km == null ? '' : km < 1 ? `${Math.round(km * 1000)} m` : `${km} km`);
 const etaText = (status, eta) => (status === 'ARRIVED' || status === 'ASSISTING' ? 'on scene' : eta == null ? '' : eta <= 1 ? '<1 min' : `${eta} min`);
@@ -64,13 +75,13 @@ function trackingCard(list, center, radii, { title = 'Live tracking', map = true
   return `<section class="card track-card"><h2>🛰️ ${esc(title)}</h2>
     ${list.length ? `<div class="ppi-wrap">${map && center && targets.length ? `<div class="ppi-box">${ppiSvg({ center, rangeKm: range, targets, title: 'PPI · LIVE' })}${zoomBar('ppi-zoom', key, 'Radar')}</div>
       <div class="ppi-legend"><span><i class="l-her"></i>HER</span><span><i class="l-vol"></i>VOLUNTEER</span>${viewer === 'volunteer' ? '<span><i class="l-you"></i>YOU</span>' : ''}<span><i class="l-trk"></i>TRACK</span></div>
-      <p class="ppi-explain">Each box shows that volunteer's distance and ETA; it counts down as they get closer. A blinking dot is on the move towards her.<br>${viewer === 'volunteer'
-        ? 'She is the red dot in the centre. Blue dots are the volunteers who accepted (you are the light-blue dot); green lines show the path each one has travelled. Distance from the centre = how far from her; the angle = which direction (000° = north). The rotating line only shows the scope is live.'
-        : 'You are the red dot in the centre. Blue dots are verified volunteers who accepted your SOS; green lines show the path each one has travelled. Distance from the centre = how far away they are; the angle = which direction they are coming from (000° = north). The rotating line only shows the scope is live.'}</p>` : ''}
-      ${ppiTable(rows)}</div>
+      ${infoTip('What do the radar and table show?', `<p>Each box shows that volunteer's distance and ETA; it counts down as they get closer. A blinking dot is on the move towards her.</p><p>${viewer === 'volunteer'
+        ? 'She is the red dot in the centre. Blue dots are the volunteers who accepted (you are the light-blue dot); green lines show the path each one has travelled.'
+        : 'You are the red dot in the centre. Blue dots are verified volunteers who accepted your SOS; green lines show the path each one has travelled.'} Distance from the centre = how far away; the angle = direction (000° = north). The rotating line only shows the scope is live.</p><p>RNG range · BRG bearing · SPD speed · ETA straight-line estimate. ACPT accepted · ENRT en route · ONSC on scene · ▼CLS closing in · ▲OPN moving away.</p><p>Live from each responder's phone GPS. ${esc(note)}</p>`)}` : ''}
+      ${ppiTable(rows).replace(/<p class="ppi-key">[\s\S]*?<\/p>/, '')}</div>
       <ul class="track-list">${list.map((r) => `<li class="track-row ${r.isYou ? 'is-you' : ''}"><span class="track-who"><strong>${esc(r.label)}</strong> ${r.verified ? '<span class="badge badge-ok">Verified</span>' : ''}<br><small>${esc(pretty(r.status))}${r.locationUpdatedAt ? ` · GPS <span data-live="age" data-fmt="short" data-at="${esc(r.locationUpdatedAt)}"></span> ago` : ''}</small></span></li>`).join('')}</ul>`
       : `<p class="muted">${esc(t('status_red'))}</p>`}
-    <p class="muted small">Range = distance from her, bearing = direction from her (000° = north). Live from each responder's phone GPS; ETA is a straight-line estimate. ${esc(note)}</p></section>`;
+    </section>`;
 }
 
 // Phone push notifications (Web Push). Volunteers need this to hear about an SOS
@@ -449,6 +460,7 @@ async function viewIncident(id, params) {
     native.sendSos({ numbers: [], sms112: true, message: sosMessage(v.location || geo.last, v.liveSharePath?.slice(3)) });
   }
   const open = !v.closed;
+  { const last = tl[tl.length - 1]; notifyChange('her:' + v.id, (v.responders || []).map((r) => r.label + r.status).join('|') + '#' + tl.length, last ? pretty(last.text) : '', 'ok'); }
   const radii = st.cfg?.radiusStagesKm || [10, 20, 30];
   const stages = [0, 1, 2].map((i) => `<li class="${v.search?.stage === i ? 'on' : v.search?.stage > i ? 'done' : ''}">${esc(radii[i])} km</li>`).join('');
   return shell(`
@@ -459,6 +471,12 @@ async function viewIncident(id, params) {
       ${open && v.search?.secondsLeft != null && (v.responders?.length || 0) < 2 ? `<p class="small"><span data-live="stage-countdown" data-deadline="${esc(v.search.deadline)}"></span></p>` : ''}
       <ol class="stage-bar" aria-label="Search stages">${stages}</ol>
     </section>
+    ${open ? (() => { const last = tl[tl.length - 1]; return last ? `<section class="latest-update" aria-live="assertive"><span class="lu-label">Latest update · ${esc(fmtTime(last.at))}</span><strong>${esc(pretty(last.text))}</strong>${(v.responders || []).length ? `<span class="lu-sub">${(v.responders || []).map((r) => `${esc(r.label)}: ${esc(pretty(r.status))}${r.approxEtaMin && r.status === 'EN_ROUTE' ? ` (≈${esc(r.approxEtaMin)} min)` : ''}`).join(' · ')}</span>` : ''}</section>` : ''; })() : ''}
+    ${open ? `<section class="action-grid">
+      <button class="btn btn-safe btn-lg" data-act="are-you-safe">✅ ${esc(t('are_you_safe'))}</button>
+      <button class="btn btn-danger" data-act="more-help">🆘 ${esc(t('need_help'))}</button>
+      <button class="btn btn-warn" data-act="report-danger">⚠️ ${esc(t('report_danger'))}</button>
+    </section>` : ''}
     ${P.incidentPolice(v)}
     ${open && v.status === 'LOCATION_UNAVAILABLE' ? `<div class="alert alert-danger" role="alert"><strong>📍 We don't have your location yet, so volunteers can't be matched.</strong> Call a number below now, and allow location for this site.<div class="row"><button class="btn btn-secondary" data-act="share-location">${esc(t('allow_location'))}</button></div></div>` : ''}
     ${open ? emergencyBar() : ''}
@@ -467,9 +485,6 @@ async function viewIncident(id, params) {
     ${open ? `
     ${trackingCard(v.responders, v.location, v.radiusStagesKm, { title: t('responders') })}
     <section class="action-grid">
-      <button class="btn btn-safe btn-lg" data-act="are-you-safe">✅ ${esc(t('are_you_safe'))}</button>
-      <button class="btn btn-danger" data-act="more-help">🆘 ${esc(t('need_help'))}</button>
-      <button class="btn btn-warn" data-act="report-danger">⚠️ ${esc(t('report_danger'))}</button>
       <button class="btn btn-secondary" data-act="siren">📢 ${esc(t('siren'))}</button>
       <button class="btn btn-secondary" data-act="record-toggle">🎙️ ${esc(recorder.recording ? t('stop') : t('record'))}</button>
       <button class="btn btn-secondary" data-act="speak-status">🔊 Read status aloud</button>
@@ -520,8 +535,12 @@ async function streamLocation() {
   try { await st.api.addLocation(v.id, loc); } catch {}
 }
 
+// The SOS currently on screen — from state, or from the address if a refresh is mid-way.
+const incId = () => st.incident?.id || (location.hash.match(/^#\/incident\/([^/?]+)/) || [])[1] || null;
+
 async function askSafe() {
-  const v = st.incident;
+  const v = { id: incId() };
+  if (!v.id) return;
   const r = await modal({ title: t('are_you_safe'), cls: 'safe-modal', body: '<p class="muted">Responders stay with you until you say you are safe.</p>', actions: [{ id: 'YES', label: t('yes_safe'), kind: 'safe' }, { id: 'NO', label: t('not_safe'), kind: 'danger' }, { id: 'NEED_MORE_HELP', label: t('need_help'), kind: 'warn' }] });
   if (r.id === 'dismiss') return;
   try {
@@ -670,6 +689,7 @@ async function viewVolunteer() {
   return shell(`
     ${fresh.length ? `<button class="alert alert-danger alert-link sos-incoming" data-act="vol-select" data-id="${esc(fresh[0].id)}">🚨 New SOS nearby (${esc(fresh[0].distanceBand)}) — tap to respond</button>` : ''}
     <h1>Volunteer</h1>
+    ${sel?.assignment && sel.open ? volunteerDetail(sel) : ''}
     ${native.available() ? '' : pushCard('Get SOS alerts even when the app is closed')}
     ${native.available() && platform === 'android' ? '<button class="alert alert-info alert-link" data-act="native-alert-setup">🔔 Make SOS alerts ring loudly on the lock screen — tap to check settings</button>' : ''}
     <section class="card">
@@ -694,7 +714,7 @@ async function viewVolunteer() {
     <section class="card"><h2>Alerts</h2>
       ${alerts.length ? `<ul class="alert-list">${alerts.map((a) => `<li><button class="alert-item status-${esc(a.color)} ${sel?.id === a.id ? 'sel' : ''}" data-act="vol-select" data-id="${esc(a.id)}"><span class="dot"></span><span>${a.severity === 'HIGH' ? '🔥 ' : ''}${esc(a.open ? pretty(a.status) : 'Ended')} · ${esc(a.distanceBand)}</span><small>${esc(fmtTime(a.createdAt))}${a.assignment ? ' · <b>assigned</b>' : ''}</small></button></li>`).join('')}</ul>` : '<p class="muted">No alerts. Stay on duty with a fresh location to receive them.</p>'}
     </section>
-    ${sel ? volunteerDetail(sel) : ''}
+    ${sel && !(sel.assignment && sel.open) ? volunteerDetail(sel) : ''}
     <details class="card" data-keep="conduct"><summary>Volunteer Code of Conduct</summary><ol>${CONDUCT.map((c) => `<li>${esc(c)}</li>`).join('')}</ol></details>
   `);
 }
@@ -702,8 +722,17 @@ async function viewVolunteer() {
 function volunteerDetail(a) {
   const asg = a.assignment;
   const next = { ACCEPTED: ['EN_ROUTE', "I'm on my way"], EN_ROUTE: ['ARRIVED', "I've arrived"], ARRIVED: ['ASSISTING', 'Assisting now'] }[asg?.status];
+  const steps = [['ACCEPTED', 'Accepted'], ['EN_ROUTE', 'On my way'], ['ARRIVED', 'Arrived'], ['ASSISTING', 'Assisting']];
+  const at = steps.findIndex((x) => x[0] === asg?.status);
+  if (asg) notifyChange('vol:' + a.id, `${a.status}|${a.open}|` + (a.team || []).map((x) => x.label + x.status).join(','), !a.open ? 'She has confirmed she is safe — you can stand down. Thank you.' : `SOS update: ${pretty(a.status)}`, a.open ? 'warn' : 'ok');
+  const stepper = asg && a.open ? `<section class="vol-steps" aria-label="Your status">
+      <p class="lu-label">Your status — update it as you go</p>
+      <ol class="stepper">${steps.map((x, i) => `<li class="${i < at ? 'done' : i === at ? 'now' : ''}">${i < at ? '✓ ' : ''}${esc(x[1])}</li>`).join('')}</ol>
+      ${next ? `<button class="btn btn-primary btn-lg btn-block" data-act="vol-status" data-aid="${esc(asg.id)}" data-status="${next[0]}">👉 Tap now: ${esc(next[1])}</button>` : '<p><strong>You are assisting.</strong> Stay with her until she confirms she is safe in her app.</p>'}
+    </section>` : '';
   return `<section class="card vol-detail status-border-${esc(a.color)}">
-    <h2>${a.severity === 'HIGH' ? '🔥 Immediate danger · ' : ''}${esc(a.open ? pretty(a.status) : 'Incident ended')}</h2>
+    <h2>${a.severity === 'HIGH' ? '🔥 Immediate danger · ' : ''}${esc(a.open ? pretty(a.status) : 'Incident ended — she is safe')}</h2>
+    ${stepper}
     <p>Distance: <strong>${esc(a.distanceBand)}</strong>${a.approxEtaMin ? ` · ≈${esc(a.approxEtaMin)} min (estimate)` : ''}</p>
     ${a.escalationStatus && a.escalationStatus !== 'NONE' ? `<p class="badge badge-warn">Escalation ${esc(a.escalationStatus)} — ${esc(st.cfg.simulatedLabel)}</p>` : ''}
     ${!asg && a.otherResponders?.length ? trackingCard(a.otherResponders, null, null, { title: 'Volunteers already responding', map: false, note: 'Exact positions are shown only to assigned responders.' }) : ''}
@@ -715,7 +744,7 @@ function volunteerDetail(a) {
       <h3>🧭 Route to her</h3>
       ${googleDirections(a.team?.find((x) => x.isYou)?.position, a.location, 'Route to her', 'route')}
       ${trackingCard(a.team, a.location, a.radiusStagesKm, { title: 'Responding team', key: 'team', viewer: 'volunteer' })}
-      <div class="row">${next ? `<button class="btn btn-primary" data-act="vol-status" data-aid="${esc(asg.id)}" data-status="${next[0]}">${esc(next[1])}</button>` : '<p>Stay with her until she confirms she is safe in the app.</p>'}
+      <div class="row">
         <button class="btn btn-warn" data-act="vol-escalate" data-id="${esc(a.id)}">Request emergency escalation</button>
         <button class="btn btn-ghost" data-act="vol-unable" data-aid="${esc(asg.id)}">Unable to help</button></div>
     ` : a.open && !a.alertResponse ? `
@@ -904,7 +933,7 @@ async function render() {
   const guard = (roles) => { if (!st.me) { go('#/login'); return false; } if (roles && !roles.includes(st.me.role)) { go(roleHome(st.me.role)); return false; } return true; };
   let html;
   clearInterval(st.pollTimer);
-  st.incident = null;
+  if (parts[0] !== 'incident' || st.incident?.id !== parts[1]) st.incident = null;
   if (isNative && !serverUrl() && parts[0] !== 'connect') { location.hash = '#/connect'; return; }
   if (st.me?.mustChangePassword && parts[0] !== 'change-password') { location.hash = '#/change-password'; return; }
   try {
@@ -1042,18 +1071,18 @@ const actions = {
   },
   async 'native-share'() { if (!(await nativeShare(sosMessage(geo.last || currentLoc())))) toast('Sharing not supported — use SMS/WhatsApp', 'warn'); },
   'are-you-safe'() { askSafe(); },
-  async 'more-help'() { try { await st.api.safety(st.incident.id, { response: 'NEED_MORE_HELP' }); toast('Escalated — search continues', 'warn'); render(); } catch (e) { showErr(e); } },
+  async 'more-help'() { try { await st.api.safety(incId(), { response: 'NEED_MORE_HELP' }); toast('Escalated — search continues', 'warn'); render(); } catch (e) { showErr(e); } },
   async 'report-danger'() {
     const r = await modal({ title: t('report_danger'), body: '<label>What is happening? (optional)<input name="reason" maxlength="200"></label>', actions: [{ id: 'go', label: t('report_danger'), kind: 'danger' }, { id: 'no', label: t('cancel') }] });
     if (r.id !== 'go') return;
-    try { await st.api.escalate(st.incident.id, { type: 'USER_REPORTED_DANGER', reason: r.data.reason || 'User reported danger' }); toast('Escalated', 'warn'); render(); } catch (e) { showErr(e); }
+    try { await st.api.escalate(incId(), { type: 'USER_REPORTED_DANGER', reason: r.data.reason || 'User reported danger' }); toast('Escalated', 'warn'); render(); } catch (e) { showErr(e); }
   },
   async 'cancel-sos'() {
     const hasPin = st.me.hasPins;
     const r = await modal({ title: t('cancel_sos'), body: hasPin ? `<label>${esc(t('enter_pin'))}<input name="pin" type="password" inputmode="numeric" maxlength="6" autocomplete="off"></label>` : '<p>Only cancel if this SOS was a mistake. If you are in danger, keep it open.</p>', actions: [{ id: 'go', label: t('cancel_sos'), kind: 'ghost' }, { id: 'no', label: 'Keep SOS open', kind: 'primary' }] });
     if (r.id !== 'go') return;
     try {
-      await st.api.cancel(st.incident.id, hasPin ? { pin: r.data.pin } : { confirm: true });
+      await st.api.cancel(incId(), hasPin ? { pin: r.data.pin } : { confirm: true });
       siren.stop(); keepAwake(false); geo.stop();
       if (native.available()) prefs.get().armed ? native.startSafety('armed') : native.stopSafety();
       toast(t('status_grey'), 'info'); go('#/home');
@@ -1214,7 +1243,7 @@ const forms = {
     if (!Number.isInteger(n)) return;
     const loc = currentLoc();
     if (!loc) return toast('Location needed first', 'warn');
-    try { await st.api.addLocation(st.incident.id, { ...loc, userFloor: n }); toast('Floor added (marked as user-provided)', 'ok'); render(); } catch (e) { showErr(e); }
+    try { await st.api.addLocation(incId(), { ...loc, userFloor: n }); toast('Floor added (marked as user-provided)', 'ok'); render(); } catch (e) { showErr(e); }
   },
   async config(f) {
     const nums = (s) => s.split(',').map((x) => parseInt(x.trim(), 10));

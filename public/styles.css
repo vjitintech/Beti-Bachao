@@ -406,3 +406,24 @@ body.blink-frame video { width: 100%; height: 100vh; object-fit: cover; transfor
 [hidden] { display: none !important; }
 .contact-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: end; }
 .contact-row .row-del[hidden] { display: inline-flex !important; visibility: hidden; }
+
+/* Latest update banner on her SOS screen: the one line she needs, always visible */
+.latest-update { display: flex; flex-direction: column; gap: 4px; background: #fff8e1; border: 3px solid var(--saffron); border-radius: var(--radius); padding: 14px 16px; margin: 12px 0; color: var(--ink); }
+.latest-update strong { font-size: 1.25rem; line-height: 1.3; }
+.lu-label { font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-2); }
+.lu-sub { font-size: .95rem; color: var(--ink-2); }
+/* Explanations only when asked for */
+.info-tip { margin: 8px 6px 4px; }
+.info-tip > summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: inherit; opacity: .85; min-height: 44px; }
+.info-tip > summary::-webkit-details-marker { display: none; }
+.info-tip > summary span { font-size: .85rem; text-decoration: underline; }
+.info-tip > div { padding: 4px 2px 8px; line-height: 1.45; }
+.track-card .info-tip { color: #b9e8c8; }
+/* Volunteer status stepper */
+.vol-steps { background: var(--chip); border-radius: var(--radius); padding: 12px; margin: 10px 0 14px; }
+.stepper { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; list-style: none; padding: 0; margin: 8px 0 12px; counter-reset: s; }
+.stepper li { text-align: center; padding: 10px 4px; border-radius: 10px; background: var(--surface); border: 2px solid var(--line); font-weight: 600; font-size: .9rem; color: var(--ink-2); }
+.stepper li.done { background: #e3f4ea; border-color: var(--safe); color: var(--safe); }
+.stepper li.now { background: var(--plum); border-color: var(--plum); color: #fff; }
+.btn-block { display: block; width: 100%; }
+.toast { font-size: 1.05rem; font-weight: 600; }

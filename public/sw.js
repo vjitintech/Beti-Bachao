@@ -1,6 +1,6 @@
 // Offline shell: the SOS screen, call buttons and SMS fallback must open even
 // with no network. API calls are never cached. VERSION is stamped by scripts/version.mjs.
-const VERSION = 'mwcw5b39';
+const VERSION = 'mwcy6y57';
 const CACHE = 'bb-shell-' + VERSION;
 self.addEventListener('install', (e) => { self.skipWaiting(); e.waitUntil(caches.open(CACHE).then((c) => c.addAll(['./', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/logo.webp']).catch(() => {}))); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
