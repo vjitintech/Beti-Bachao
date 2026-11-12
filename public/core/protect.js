@@ -5,9 +5,9 @@
 //  • "Track my travel" trips with auto-arrival and auto-SOS when overdue
 //  • SOS evidence (audio/video) metadata — bytes are stored encrypted by the server
 //  • dashboards: hers, admin impact, public impact counter
-import { haversineKm, isValidLatLng } from './geo.js?v=mwdjqued';
-import { COUNTRIES } from './config.js?v=mwdjqued';
-import { toE164, dialInfo } from './dial.js?v=mwdjqued';
+import { haversineKm, isValidLatLng } from './geo.js?v=mwdle3e0';
+import { COUNTRIES } from './config.js?v=mwdle3e0';
+import { toE164, dialInfo } from './dial.js?v=mwdle3e0';
 
 const SAFE_CLOSURES = new Set(['USER_CONFIRMED_SAFE', 'HANDED_TO_EMERGENCY_SERVICES_CONFIRMED_SAFE']);
 const median = (xs) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
@@ -62,10 +62,6 @@ export const protectMethods = {
       if (contacts.length < 1 || contacts.length > 3) this.fail(400, 'PLACE_CONTACTS', `"${label}" needs 1 to 3 contacts`);
       const dup = duplicateIn(contacts);
       if (dup) this.fail(400, 'DUPLICATE_CONTACT', `"${label}": ${dup.b.name} has the same number as ${dup.a.name}`);
-      const imp = contacts.find((c) => (u.contacts || []).some((x) => phoneKey(x.phone) === phoneKey(c.phone)));
-      if (imp) this.fail(400, 'DUPLICATE_CONTACT', `"${label}": ${imp.name} (${imp.phone}) is already an important contact — important contacts are told at every place`);
-      const self = contacts.find((c) => u.phone && phoneKey(c.phone) === phoneKey(u.phone));
-      if (self) this.fail(400, 'DUPLICATE_CONTACT', `"${label}": ${self.phone} is your own number`);
       const radiusM = Math.min(50000, Math.max(200, Math.round(Number(p.radiusM) || 2000)));
       return { id: p.id && /^[\w-]{4,40}$/.test(p.id) ? p.id : this.deps.uuid(), label, lat: +Number(p.lat).toFixed(5), lng: +Number(p.lng).toFixed(5), radiusM, contacts };
     });
@@ -184,16 +180,15 @@ export const protectMethods = {
     };
   },
 
-  // Who her phone calls automatically: nearest admin-loaded station within policeMaxKm,
-  // otherwise the women police helpline 1091 (India), otherwise the country emergency number.
+  // Who her phone calls automatically: ONLY the first phone number of the nearest admin-loaded
+  // police station within policeMaxKm. No station that close → no automatic call (she and the
+  // operators still have one-tap 112 / 1091 buttons).
   policeTarget(inc, loc) {
     const max = Number(this.cfg.policeMaxKm) || 30;
     const near = this.nearestStations(loc, 1)[0] || null;
     const st = near && near.distanceKm <= max ? near : null;
-    const emergency = COUNTRIES[inc.countryCode]?.emergency || '112';
     if (st) return { st, dial: { number: st.phone, target: 'station', label: `${st.name} (${st.distanceKm} km)` } };
-    if ((inc.countryCode || 'IN') === 'IN') return { st: null, dial: { number: '1091', target: 'women_helpline', label: `Women police helpline 1091 (no station within ${max} km)`, fallback: emergency } };
-    return { st: null, dial: { number: emergency, target: 'emergency', label: `Emergency ${emergency} (no station within ${max} km)` } };
+    return { st: null, dial: null };
   },
 
   // Connects the police: her phone calls the station / 1091 / 112 straight away, the server
@@ -203,14 +198,14 @@ export const protectMethods = {
     const loc = this.latestLocation(inc.id);
     const { st, dial } = this.policeTarget(inc, loc);
     const emergency = COUNTRIES[inc.countryCode]?.emergency || '112';
-    inc.policeConnect = { at: this.iso(), reason, status: 'PENDING', station: st ? { id: st.id, name: st.name, phone: st.phone, phone2: st.phone2 || null, distanceKm: st.distanceKm } : null, emergency, sms: null, call: null, dial: { ...dial, placedAt: null, result: null } };
-    const label = `Her phone is calling ${dial.label}`;
-    this.db.escalations.push({ id: this.deps.uuid(), incidentId: inc.id, type: 'POLICE_AUTO_CONNECT', status: 'ATTEMPTED', label, reason, attemptedAt: this.iso(), acknowledgedAt: null, recordedBy: 'system', metadata: { stationId: st?.id || null, number: dial.number } });
+    inc.policeConnect = { at: this.iso(), reason, status: dial ? 'PENDING' : 'NO_STATION', station: st ? { id: st.id, name: st.name, phone: st.phone, phone2: st.phone2 || null, distanceKm: st.distanceKm } : null, emergency, sms: null, call: null, dial: dial ? { ...dial, placedAt: null, result: null } : null };
+    const label = dial ? `Her phone is calling ${dial.label}` : `No police station loaded within ${Number(this.cfg.policeMaxKm) || 30} km — operators must call ${emergency}`;
+    this.db.escalations.push({ id: this.deps.uuid(), incidentId: inc.id, type: 'POLICE_AUTO_CONNECT', status: 'ATTEMPTED', label, reason, attemptedAt: this.iso(), acknowledgedAt: null, recordedBy: 'system', metadata: { stationId: st?.id || null, number: dial?.number || null } });
     inc.escalationStatus = 'ATTEMPTED';
     if (inc.status !== 'ESCALATION_REQUIRED' && inc.status !== 'EMERGENCY_HANDOFF') { try { this.transition(inc, 'ESCALATION_REQUIRED', 'system', `Police auto-connect: ${reason}`, 'scheduler'); } catch { /* keep current state */ } }
-    this.notify(inc.id, inc.requesterId, 'POLICE_CONNECTED', { station: st?.name || null, phone: dial.number, callNumber: dial.number, target: dial.target });
+    if (dial) this.notify(inc.id, inc.requesterId, 'POLICE_CONNECTED', { station: st.name, phone: dial.number, callNumber: dial.number, target: dial.target });
     for (const op of this.db.users.filter((u) => ['operator', 'admin'].includes(u.role) && u.status === 'ACTIVE')) this.notify(inc.id, op.id, 'ESCALATION', { type: 'POLICE_AUTO_CONNECT' });
-    this.audit('system', 'POLICE_AUTO_CONNECT', 'incident', inc.id, reason, { station: st?.name || null, number: dial.number, target: dial.target });
+    this.audit('system', 'POLICE_AUTO_CONNECT', 'incident', inc.id, reason, { station: st?.name || null, number: dial?.number || null });
     this.emit('police.connect_needed', inc.id);
     return inc.policeConnect;
   },
@@ -221,7 +216,7 @@ export const protectMethods = {
     const inc = this.incident(incidentId);
     if (inc.requesterId !== u.id) this.fail(403, 'FORBIDDEN');
     const pc = inc.policeConnect;
-    if (!pc) this.fail(409, 'NO_POLICE_CONNECT', 'Police auto-connect has not started for this SOS');
+    if (!pc?.dial) this.fail(409, 'NO_POLICE_CONNECT', 'No automatic police call for this SOS');
     const ok = result === 'placed';
     pc.dial = { ...(pc.dial || {}), number: String(number || pc.dial?.number || '').slice(0, 20), result: ok ? 'PLACED' : 'FAILED', placedAt: ok ? (pc.dial?.placedAt || this.iso()) : pc.dial?.placedAt || null };
     if (ok) pc.status = 'CONTACTED';

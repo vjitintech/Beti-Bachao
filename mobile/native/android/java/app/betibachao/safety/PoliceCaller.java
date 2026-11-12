@@ -15,7 +15,7 @@ import org.json.JSONObject;
 
 /**
  * Police auto-connect: her phone calls the nearest admin-loaded police station (≤ 30 km),
- * otherwise 1091 / 112 — straight away, without her tapping the dialler.
+ * — only its first number, straight away, without her tapping the dialler, on the default SIM.
  * TelecomManager.placeCall works from the background (push message, service), unlike
  * starting the dialler activity. Each incident + number is called once, and the result
  * is reported to the server (the impact dashboard counts only calls that went out).
@@ -40,6 +40,8 @@ public final class PoliceCaller {
                 if (tm != null && Build.VERSION.SDK_INT >= 23) {
                     Bundle extras = new Bundle();
                     extras.putBoolean(TelecomManager.EXTRA_START_CALL_WITH_SPEAKERPHONE, true); // she may not hold the phone
+                    android.telecom.PhoneAccountHandle sim = SimPicker.callAccount(app); // default calling SIM, no SIM pop-up
+                    if (sim != null) extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, sim);
                     tm.placeCall(uri, extras);
                 } else {
                     Intent i = new Intent(Intent.ACTION_CALL, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);

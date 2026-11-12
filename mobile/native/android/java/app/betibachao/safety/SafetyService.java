@@ -69,6 +69,7 @@ public class SafetyService extends Service implements SensorEventListener {
     @Override
     public void onCreate() {
         super.onCreate();
+        MainActivity.installCrashRecorder(getApplicationContext());
         Notify.channels(this);
         fused = LocationServices.getFusedLocationProviderClient(this);
         sensors = (SensorManager) getSystemService(SENSOR_SERVICE);

@@ -26,9 +26,7 @@ public final class SmsSender {
     /** @return number of recipients the message was handed to the radio for. */
     public static int send(Context ctx, List<String> numbers, String message) {
         if (!allowed(ctx) || numbers == null || numbers.isEmpty()) return 0;
-        SmsManager sms;
-        if (Build.VERSION.SDK_INT >= 31) sms = ctx.getSystemService(SmsManager.class);
-        else sms = SmsManager.getDefault();
+        SmsManager sms = SimPicker.smsManager(ctx); // default SIM, no "choose SIM" pop-up
         if (sms == null) return 0;
         int sent = 0;
         for (String n : numbers) {

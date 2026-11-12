@@ -1,12 +1,12 @@
-import { createApi, uuid } from './api.js?v=mwdjqued';
-import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang, ownSosWords, sosVoiceLang } from './i18n.js?v=mwdjqued';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwdjqued';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwdjqued';
-import { TRAINING_MODULES } from '../core/engine.js?v=mwdjqued';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwdjqued';
-import { initProtect } from './protect-ui.js?v=mwdjqued';
-import { a11y, announce, speakStatus } from './a11y.js?v=mwdjqued';
-import { phoneInput, readPhone, guessCountry, bindPhoneFields } from './phone.js?v=mwdjqued';
+import { createApi, uuid } from './api.js?v=mwdle3e0';
+import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang, ownSosWords, sosVoiceLang } from './i18n.js?v=mwdle3e0';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwdle3e0';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwdle3e0';
+import { TRAINING_MODULES } from '../core/engine.js?v=mwdle3e0';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwdle3e0';
+import { initProtect } from './protect-ui.js?v=mwdle3e0';
+import { a11y, announce, speakStatus } from './a11y.js?v=mwdle3e0';
+import { phoneInput, readPhone, guessCountry, bindPhoneFields } from './phone.js?v=mwdle3e0';
 let P = null; // autonomous-protection screens (protect-ui.js), set up in boot()
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'impact', volSel: null };
@@ -489,9 +489,23 @@ async function viewIncident(id, params) {
   try { tl = (await st.api.timeline(id)).items; } catch {}
   const silent = params.get('silent') === '1';
   if (v.role !== 'requester') return shell('<p>Not your incident.</p>');
+  // SOS over: no "ended" screen. Straight back to Home (after the optional volunteer rating).
+  if (v.closed) {
+    clearInterval(st.pollTimer); keepAwake(false);
+    const unrated = (v.rateable || []).filter((r) => !r.rated);
+    if (!unrated.length) {
+      if (!store.get('endedToast:' + v.id, false)) { store.set('endedToast:' + v.id, true); toast(v.closureReason === 'USER_CONFIRMED_SAFE' ? '💚 You are marked safe. Responders were released.' : 'Your SOS has ended.', 'ok', 5000); }
+      setTimeout(() => go('#/home'), 0);
+      return null;
+    }
+  }
   speakStatus(v);
-  // Police auto-connect: her phone calls the station (≤30 km), then 1091, then 112 — no dialler tap.
-  if (v.police?.dial?.number && !v.closed && !store.get('policeChain:' + v.id, null)) startPoliceChain(v);
+  // Police auto-connect: her phone calls the admin-loaded station's first number once — no dialler tap.
+  if (v.police?.dial?.number && v.police.dial.result !== 'PLACED' && !v.closed && !store.get('policeDial:' + v.id, false)) {
+    store.set('policeDial:' + v.id, true);
+    toast(`📞 Calling ${v.police.dial.label || v.police.dial.number}…`, 'warn', 6000);
+    setTimeout(() => placePoliceCall(v.id, v.police.dial.number), 400);
+  }
   const open = !v.closed;
   // Nobody has responded yet → her phone tells her contacts she is still waiting (when the server can't text them).
   if (open && !st.cfg?.features?.sms && native.available() && platform === 'android' && !v.operatorAcknowledged && !(v.responders || []).length
@@ -504,13 +518,13 @@ async function viewIncident(id, params) {
   const radii = st.cfg?.radiusStagesKm || [10, 20, 30];
   const stages = [0, 1, 2].map((i) => `<li class="${v.search?.stage === i ? 'on' : v.search?.stage > i ? 'done' : ''}">${esc(radii[i])} km</li>`).join('');
   return shell(`
-    <section class="status-hero status-${esc(v.color)} ${silent ? 'discreet' : ''}" aria-live="polite">
+    ${open ? `<section class="status-hero status-${esc(v.color)} ${silent ? 'discreet' : ''}" aria-live="polite">
       <div class="status-dot" aria-hidden="true"></div>
       <h1>${esc(statusText(v))}</h1>
       ${open && v.search?.radiusKm ? `<p>${esc(t('searching_within', { km: v.search.radiusKm }))} · ${esc(t('volunteers_alerted', { n: v.alertedCount }))}</p>` : ''}
       ${open && v.search?.secondsLeft != null && (v.responders?.length || 0) < 2 ? `<p class="small"><span data-live="stage-countdown" data-deadline="${esc(v.search.deadline)}"></span></p>` : ''}
       <ol class="stage-bar" aria-label="Search stages">${stages}</ol>
-    </section>
+    </section>` : ''}
     ${open ? (() => { const last = tl[tl.length - 1]; return last ? `<section class="latest-update" aria-live="assertive"><span class="lu-label">Latest update · ${esc(fmtTime(last.at))}</span><strong>${esc(tlText(last))}</strong>${(v.responders || []).length ? `<span class="lu-sub">${(v.responders || []).map((r) => `${esc(r.label)}: ${esc(pretty(r.status))}${r.approxEtaMin && r.status === 'EN_ROUTE' ? ` (≈${esc(r.approxEtaMin)} min)` : ''}`).join(' · ')}</span>` : ''}</section>` : ''; })() : ''}
     ${open ? `<section class="action-grid">
       <button class="btn btn-safe btn-lg" data-act="are-you-safe">✅ ${esc(t('are_you_safe'))}</button>
@@ -538,13 +552,12 @@ async function viewIncident(id, params) {
     ${locationCard(v.location, { live: true })}
     ${v.location ? `<section class="card"><h2>📍 Your live location (as shared)</h2>${googleMap(v.location, 'Your live location', 'mine')}</section>` : ''}
     <section class="cancel-zone"><button class="btn btn-cancel-sos btn-block" data-act="cancel-sos" data-id="${esc(v.id)}">✖ ${esc(t('cancel_sos'))} — false alarm</button><p class="small muted">Only if you are safe. ${st.me?.hasPins ? 'Needs your PIN.' : ''}</p></section>
-    ` : `<section class="card"><p>${v.closureReason === 'USER_CONFIRMED_SAFE' ? '💚 You confirmed you are safe. Responders have been released.' : 'This SOS has ended.'}</p><a class="btn btn-primary" href="#/home">${esc(t('home'))}</a></section>
+    ` : `
     ${(v.rateable || []).length ? `<section class="card"><h2>How did the volunteers do?</h2>${infoTip('More info', `Your rating is private and helps the trust team keep volunteers safe and accountable.`)}
       ${v.rateable.map((r) => r.rated ? `<p>${esc(r.label)}: ${'★'.repeat(r.stars || 0)} — thank you</p>` : `<form class="card form rate-form" data-form="rate" data-id="${esc(v.id)}" data-ref="${esc(r.ref)}"><strong>${esc(r.label)}</strong>
         <div class="stars" role="radiogroup" aria-label="Rating">${[1, 2, 3, 4, 5].map((n) => `<label class="star"><input type="radio" name="stars" value="${n}" required> ${'★'.repeat(n)}</label>`).join('')}</div>
         <label class="switch"><input type="checkbox" name="feltUnsafe"> I felt unsafe with this volunteer (the trust team will review)</label>
-        <label>Comment (optional)<input name="comment" maxlength="500"></label><button class="btn btn-primary btn-sm">Submit rating</button></form>`).join('')}</section>` : ''}
-    ${emergencyBar()}`}
+        <label>Comment (optional)<input name="comment" maxlength="500"></label><button class="btn btn-primary btn-sm">Submit rating</button></form>`).join('')}<button class="btn btn-ghost btn-sm" data-act="skip-rating" data-id="${esc(v.id)}">Skip</button></section>` : ''}`}
     <details class="card" data-keep="user-timeline"><summary>${esc(t('timeline'))} (${tl.length})</summary><ol class="timeline">${tl.map((x) => `<li><time>${esc(fmtTime(x.at))}</time> ${esc(pretty(x.text))}${x.reason ? ` <small class="muted">— ${esc(x.reason)}</small>` : ''}</li>`).join('')}</ol></details>
   `);
 }
@@ -953,7 +966,10 @@ async function viewAdmin() {
         <table class="tbl small"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Entity</th><th>Reason</th></tr></thead><tbody>${a.items.map((x) => `<tr><td>${esc(fmtTime(x.timestamp))}</td><td>${esc(x.actorId.slice(0, 8))}</td><td>${esc(x.action)}</td><td>${esc(x.entityType)}:${esc(String(x.entityId).slice(0, 8))}</td><td>${esc(x.reason || '')}</td></tr>`).join('')}</tbody></table></section>`;
     } else {
       const { items } = await st.api.integrations();
-      body = `<section class="card"><h2>Backup</h2>${infoTip('More info', `Download a full copy of the data (contains personal and location data — store it encrypted, delete old copies). Do this daily during the pilot.`)}<a class="btn btn-secondary" href="api/v1/admin/backup" download>⬇ Download backup</a></section><section class="card"><h2>Integration health</h2><ul class="history">${items.map((i) => `<li><strong>${esc(i.name)}</strong> <span class="badge ${i.status === 'SIMULATED' || i.status === 'MOCK' ? 'badge-warn' : 'badge-info'}">${esc(i.status)}</span><br><small>${esc(i.note)}</small></li>`).join('')}</ul></section>`;
+      let errs = []; try { errs = (await st.api.clientErrors()).items; } catch {}
+      const errCard = `<section class="card"><h2>App errors ${errs.length ? `<span class="badge badge-danger">${errs.length}</span>` : '<span class="badge badge-ok">none</span>'}</h2>${infoTip('More info', 'Crashes and unexpected errors from phones and browsers, newest first, with the screen they happened on. Send these to the developer to fix.')}
+        ${errs.slice(0, 30).map((x) => `<details class="err-item"><summary><b>${esc(x.kind)}</b> · ${esc(fmtTime(x.at))} · ${esc(x.message.slice(0, 90))}</summary><p class="small muted">${esc(x.app)} · ${esc(x.role || 'not signed in')} · ${esc(x.where)}</p><pre class="err-stack">${esc(x.stack)}</pre></details>`).join('')}</section>`;
+      body = errCard + `<section class="card"><h2>Backup</h2>${infoTip('More info', `Download a full copy of the data (contains personal and location data — store it encrypted, delete old copies). Do this daily during the pilot.`)}<a class="btn btn-secondary" href="api/v1/admin/backup" download>⬇ Download backup</a></section><section class="card"><h2>Integration health</h2><ul class="history">${items.map((i) => `<li><strong>${esc(i.name)}</strong> <span class="badge ${i.status === 'SIMULATED' || i.status === 'MOCK' ? 'badge-warn' : 'badge-info'}">${esc(i.status)}</span><br><small>${esc(i.note)}</small></li>`).join('')}</ul></section>`;
     }
   } catch (e) { body = `<div class="alert alert-danger">${esc(e.message)}</div>`; }
   return shell(`<h1>Admin & trust</h1><div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" aria-selected="${k === tab}" class="tab ${k === tab ? 'active' : ''}" data-act="adm-tab" data-tab="${k}">${esc(l)}</button>`).join('')}</div>${body}`);
@@ -985,14 +1001,28 @@ function backOnline() { if (st.offline) { st.offline = false; offlineDelay = 500
 // ------------------------------------------------------------------ router
 // Never leave a blank screen: if anything throws while drawing, show a recovery card
 // (with SOS still usable for her and emergency numbers for everyone).
-async function render() {
-  try { await renderScreen(); }
+// Renders never overlap: a refresh that arrives while one is drawing is folded into one
+// more pass afterwards. Each pass keeps its own "soft" flag — two overlapping background
+// refreshes used to clear each other's flag and redraw the whole screen (the flicker).
+let renderBusy = null, renderAgain = null;
+function render() {
+  const soft = !!st.softRefresh; st.softRefresh = false;
+  if (renderBusy) { renderAgain = { soft: (renderAgain ? renderAgain.soft : true) && soft }; return renderBusy; }
+  renderBusy = (async () => {
+    let next = { soft };
+    while (next) { renderAgain = null; await renderSafe(next.soft); next = renderAgain; }
+  })().finally(() => { renderBusy = null; });
+  return renderBusy;
+}
+async function renderSafe(soft) {
+  try { st.softRefresh = soft; await renderScreen(); }
   catch (e) {
-    console.error('[render]', e);
-    try { app().innerHTML = failView(e?.code ? e : { code: 'NETWORK' }); bindHold(); } catch { app().innerHTML = '<main id="main"><p style="padding:24px">Something went wrong. <a href="#/">Reload</a> · In danger call 112.</p></main>'; }
+    console.error('[render]', e); reportError('render', e?.message, e?.stack);
+    try { app().innerHTML = failView(e?.code ? e : { message: 'Something went wrong on this screen. Pull down or tap Home to try again. In danger, call 112.' }); bindHold(); } catch { app().innerHTML = '<main id="main"><p style="padding:24px">Something went wrong. <a href="#/">Reload</a> · In danger call 112.</p></main>'; }
   }
 }
 async function renderScreen() {
+  const soft = !!st.softRefresh; // read once, synchronously: later refreshes can't change this pass
   const [path, qs] = (location.hash.slice(1) || '/').split('?');
   const params = new URLSearchParams(qs || '');
   const parts = path.split('/').filter(Boolean);
@@ -1012,7 +1042,7 @@ async function renderScreen() {
     case 'register': html = viewRegister(params); break;
     case 'setup': html = viewSetup(params); break;
     case 'home': if (!guard(['user'])) return; html = await viewHome(); break;
-    case 'incident': if (!guard(['user'])) return; html = await viewIncident(parts[1], params); st.pollTimer = setInterval(refreshSoft, 3000); break;
+    case 'incident': if (!guard(['user'])) return; html = await viewIncident(parts[1], params); if (!html) return; if (!st.incident?.closed) st.pollTimer = setInterval(refreshSoft, 3000); break;
     case 'tools': if (!guard(['user'])) return; html = await viewTools(); break;
     case 'places': case 'trip': case 'help': case 'dashboard': case 'blink': if (!guard(['user'])) return; html = await P.views[parts[0]](); if (parts[0] === 'trip') st.pollTimer = setInterval(refreshSoft, 15000); break;
     case 'settings': if (!guard()) return; html = await viewSettings(); break;
@@ -1024,18 +1054,17 @@ async function renderScreen() {
   } catch (e) { html = failView(e); }
   if (html && !html.includes('offline-card')) backOnline();
   // Background refresh: only touch the screen when something actually changed.
-  if (st.softRefresh && html === st.lastHtml) { st.softRefresh = false; updateLive(); return; }
+  if (soft && html === st.lastHtml) { updateLive(); return; }
   st.lastHtml = html;
   const y = window.scrollY;
   const focusedForm = document.activeElement?.closest?.('form') && document.activeElement.name;
   const openKeys = new Set($$('details[data-keep][open]').map((d) => d.dataset.keep));
-  if (st.softRefresh && patchMain(html)) { for (const d of $$('details[data-keep]')) if (openKeys.has(d.dataset.keep)) d.open = true; st.softRefresh = false; bindHold(); updateLive(); return; }
+  if (soft && patchMain(html)) { for (const d of $$('details[data-keep]')) if (openKeys.has(d.dataset.keep)) d.open = true; bindHold(); updateLive(); return; }
   app().innerHTML = html;
   rememberMain();
   for (const d of $$('details[data-keep]')) if (openKeys.has(d.dataset.keep)) d.open = true;
-  if (st.softRefresh) window.scrollTo(0, y);
+  if (soft) window.scrollTo(0, y);
   if (focusedForm) document.querySelector(`[name="${focusedForm}"]`)?.focus();
-  st.softRefresh = false;
   bindHold();
   updateLive();
   P.afterRender(parts[0]);
@@ -1188,6 +1217,7 @@ const actions = {
     try { const l = await geo.once(10000); f.where.value = `${l.lat.toFixed(5)}, ${l.lng.toFixed(5)}`; f.requestSubmit(); } catch { toast('Could not get your location', 'error'); }
   },
   'users-clear'() { st.userFilter = {}; st.userResults = null; render(); },
+  'skip-rating'() { go('#/home'); },
   'perm-skip'() { store.set('permsDone:' + st.me.role, true); go(roleHome(st.me.role)); },
   'perm-setup'() { go('#/permissions'); },
   async 'native-perms'() { const r = await native.requestPermissions('all'); const s2 = await native.permissionStatus(); await modal({ title: 'Phone permissions', body: `<ul>${Object.entries(s2 || r || {}).map(([k, v]) => `<li>${esc(k)}: <b>${esc(v)}</b></li>`).join('')}</ul><p class="small muted">For background protection allow location <b>"All the time"</b>, SMS and notifications.</p>`, actions: [{ id: 'set', label: 'Open app settings', kind: 'secondary' }, { id: 'ok', label: 'OK', kind: 'primary' }] }).then((x) => { if (x.id === 'set') native.openSystemSettings('app'); }); },
@@ -1446,38 +1476,10 @@ function afterLogin() {
   go(permsDone() ? roleHome(st.me.role) : '#/permissions');
 }
 
-// ------------------------------------------------------------------ police call chain
-// Station → 1091 → 112. After each call, when she is back in the app, she is asked
-// "Did they answer?" — no answer (or no tap within 10 s) calls the next number.
-function policeChainNumbers(v) {
-  const d = v.police.dial; const cc = v.countryCode || st.me?.countryCode || 'IN';
-  return [...new Set([d.number, cc === 'IN' ? '1091' : null, v.police.emergency || country().emergency || '112'].filter(Boolean))];
-}
+// ------------------------------------------------------------------ police call
 async function placePoliceCall(id, number) {
-  if (native.available() && platform === 'android') await native.placeCall({ number, key: id }); // the phone reports each call to the server
+  if (native.available() && platform === 'android') await native.placeCall({ number, key: id }); // the phone reports the call to the server
   else openExternal(telHref(number));
-}
-function startPoliceChain(v) {
-  const nums = policeChainNumbers(v);
-  const chain = { id: v.id, nums, i: 0, at: Date.now(), done: false };
-  store.set('policeChain:' + v.id, chain);
-  toast(`📞 Calling ${v.police.dial.label || nums[0]}…`, 'warn', 6000);
-  setTimeout(() => placePoliceCall(v.id, nums[0]), 400);
-}
-async function policeChainResume() {
-  const id = st.incident?.id || incId?.();
-  const chain = id && store.get('policeChain:' + id, null);
-  if (!chain || chain.done || st.policeAsk || Date.now() - chain.at < 6000) return; // back too soon = the call screen hasn't really happened yet
-  const next = chain.nums[chain.i + 1];
-  if (!next) { chain.done = true; store.set('policeChain:' + id, chain); return; }
-  st.policeAsk = true;
-  let left = 10;
-  const p = modal({ title: `Did ${chain.nums[chain.i]} answer?`, body: `<p>If nobody answered, your phone calls <b>${esc(next)}</b> in <b data-ask-left>${left}</b> s.</p>`, actions: [{ id: 'yes', label: 'Yes, they answered', kind: 'primary' }, { id: 'next', label: `No — call ${next} now`, kind: 'danger' }], dismissable: false });
-  const iv = setInterval(() => { left -= 1; const b = document.querySelector('[data-ask-left]'); if (b) b.textContent = left; if (left <= 0) { clearInterval(iv); document.querySelector('[data-modal="next"]')?.click(); } }, 1000);
-  const r = await p; clearInterval(iv); st.policeAsk = false;
-  if (r.id === 'yes') { chain.done = true; store.set('policeChain:' + id, chain); toast('Good — stay on the line with them if you can', 'ok'); return; }
-  chain.i += 1; chain.at = Date.now(); store.set('policeChain:' + id, chain);
-  placePoliceCall(id, next);
 }
 
 // ------------------------------------------------------------------ phone permissions (first run in the app)
@@ -1516,12 +1518,23 @@ function viewPermissions() {
 function permsDone() { return !native.available() || store.get('permsDone:' + st.me?.role, false); }
 
 // ------------------------------------------------------------------ boot
+// Error tracking: every unexpected error in the app (and the last native crash) is sent to
+// the server, so it shows in Admin → Integrations → App errors with its stack trace.
+let errSent = 0;
+function reportError(kind, message, stack = '', where = location.hash) {
+  if (++errSent > 20 || !st.api) return;
+  st.api.reportError({ kind, message: String(message || ''), stack: String(stack || ''), where, app: `${platform} ${window.BB_APP_BUILD || 'web'}` }).catch(() => {});
+}
+window.addEventListener('error', (e) => reportError('js', e.message, e.error?.stack || `${e.filename}:${e.lineno}`));
+window.addEventListener('unhandledrejection', (e) => reportError('promise', e.reason?.message || String(e.reason), e.reason?.stack || ''));
+
 async function boot() {
   setLang(detectLang());
   mergeProtect();
   a11y.init(prefs.get());
   st.api = await createApi();
   st.offline = !!st.api.unreachable;
+  native.takeLastCrash?.().then((r) => { if (r?.crash) reportError('native_crash', r.crash.split('\n')[1] || 'crash', r.crash); });
   try { st.cfg = await st.api.publicConfig(); } catch { st.offline = true; st.cfg = { demo: false, countries: { IN: { name: 'India', emergency: '112', extra: [], verified: true } }, defaultCountry: 'IN', simulatedLabel: 'SIMULATED — NOT SENT TO EMERGENCY SERVICES' }; }
   try { st.me = (await st.api.me()).user; store.set('meCache', st.me); st.api.connect(); }
   catch (e) {
@@ -1548,7 +1561,6 @@ async function boot() {
   bindPhoneFields(document, (iso, sel) => { const c = sel.form?.countryCode; if (c && [...c.options].some((o) => o.value === iso)) c.value = iso; });
   document.addEventListener('change', (e) => { const c = e.target; if (c.name !== 'countryCode' || !c.form) return; const p = c.form.querySelector('[name="phone_cc"]'); if (p && !c.form.phone?.value) p.value = c.value; });
   window.addEventListener('hashchange', () => { render(); $('#main')?.focus({ preventScroll: true }); });
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && st.me?.role === 'user') setTimeout(policeChainResume, 800); });
   window.addEventListener('online', () => { if (store.get('pendingSos', null)) triggerSOS(store.get('pendingSos')); });
 
   st.api.subscribe((ev) => {

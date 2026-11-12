@@ -28,6 +28,7 @@ public class AlertMessagingService extends FirebaseMessagingService {
     @Override
     public void onMessageReceived(@NonNull RemoteMessage msg) {
         Map<String, String> d = msg.getData();
+        MainActivity.installCrashRecorder(getApplicationContext());
         // Police auto-connect reached her phone: call the station / 1091 / 112 now, even if the app is closed.
         if ("POLICE_CONNECTED".equals(d.get("kind")) && d.get("callNumber") != null && !d.get("callNumber").isEmpty() && "user".equals(Store.get(this, "role"))) {
             PoliceCaller.call(this, d.get("callNumber"), d.get("incidentId"));

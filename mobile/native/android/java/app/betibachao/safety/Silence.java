@@ -23,8 +23,7 @@ final class Silence {
             if (depth++ == 0) {
                 adjust(am, AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_MUTE);
                 adjust(am, AudioManager.STREAM_NOTIFICATION, AudioManager.ADJUST_MUTE);
-                mutedMusic = !am.isMusicActive(); // never silence her own music/call audio
-                if (mutedMusic) adjust(am, AudioManager.STREAM_MUSIC, AudioManager.ADJUST_MUTE);
+                mutedMusic = false; // her music / call audio is never touched
             }
         } catch (Exception ignored) {}
         MAIN.postDelayed(() -> {

@@ -32,6 +32,8 @@ public final class Store {
     public static String get(Context ctx, String key) { return prefs(ctx).getString(key, null); }
     public static boolean getBool(Context ctx, String key, boolean def) { return prefs(ctx).getBoolean(key, def); }
     public static void put(Context ctx, String key, String value) { prefs(ctx).edit().putString(key, value).apply(); }
+    /** Written to disk before returning (used by the crash recorder, the process is about to die). */
+    public static void putNow(Context ctx, String key, String value) { prefs(ctx).edit().putString(key, value).commit(); }
     public static void putBool(Context ctx, String key, boolean value) { prefs(ctx).edit().putBoolean(key, value).apply(); }
 
     public static void putSecret(Context ctx, String key, String value) {

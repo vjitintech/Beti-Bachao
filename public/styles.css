@@ -471,3 +471,4 @@ label small, .switch small { font-weight: 400; }
 label.switch { display: block; position: relative; padding-inline-start: 34px; min-height: 26px; line-height: 1.4; margin: 10px 0; }
 label.switch input { position: absolute; inset-inline-start: 0; top: 0; margin: 0; }
 .esc-list { margin: 0; padding-inline-start: 18px; } .esc-compact .info-tip { margin-top: 6px; }
+.err-stack { white-space: pre-wrap; font-size: .75rem; max-height: 260px; overflow: auto; background: var(--chip); padding: 8px; border-radius: 8px; } .err-item { border-bottom: 1px solid var(--line); padding: 6px 0; }

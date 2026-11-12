@@ -111,14 +111,14 @@ try {
   await user.click('[data-act="are-you-safe"]');
   await user.click('[data-modal="YES"]');
   await user.click('[data-modal="confirm"]');
-  await user.waitForFunction(() => document.querySelector('.status-hero')?.className.includes('GREEN'), null, { timeout: 10000 });
+  await user.waitForSelector('.rate-form', { timeout: 10000 });
   if (await user.$('.cancel-zone')) throw new Error('Cancel SOS must not show after the SOS ended');
-  await shot(user, '06-safe'); step('explicit YES → confirm closes incident GREEN');
-  await user.waitForSelector('.rate-form');
+  if (await user.$('.status-hero')) throw new Error('no "SOS ended" banner after the SOS ended');
+  await shot(user, '06-safe'); step('explicit YES → confirm closes the SOS; only the volunteer rating is shown');
   await user.check('.rate-form input[name="stars"][value="5"]');
   await user.click('.rate-form button');
-  await user.waitForFunction(() => document.body.innerText.includes('thank you'));
-  step('she rates the volunteer after closing');
+  await user.waitForSelector('#sos-btn', { timeout: 10000 });
+  step('she rates the volunteer → straight back to Home');
 
   const nv = await page('new-volunteer');
   await nv.goto(base + '#/register?as=volunteer');

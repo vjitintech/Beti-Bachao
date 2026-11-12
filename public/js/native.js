@@ -36,6 +36,7 @@ export const native = {
   screenReader() { return call('screenReader'); },
   listenOnce({ lang = 'en-IN', timeoutMs = 7000 } = {}) { return call('listenOnce', { lang, timeoutMs }); },
   // Android: silent 15 s evidence clip after the SOS is active (kept only if a voice is heard).
+  takeLastCrash() { return call('takeLastCrash'); },
   recordEvidence({ incidentId, seconds = 15 }) { return call('recordEvidence', { incidentId, seconds }); },
   // Android: places a phone call straight away (no dialler tap). Once per incident+number.
   placeCall({ number, key }) { return call('placeCall', { number, key }); },

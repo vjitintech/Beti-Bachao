@@ -2,12 +2,12 @@
 // places & location-based contacts, Track my travel, nearby help, dashboards,
 // police auto-connect status, operator acknowledgement, evidence, admin impact &
 // police-station import, blink trigger page, spoken guidance for blind users.
-import { sosWords, heardSosWord, lang as curLang } from './i18n.js?v=mwdjqued';
-import { pickContacts, duplicateIn, phoneKey } from '../core/protect.js?v=mwdjqued';
-import { announce, speakStatus, listenOnce, a11y } from './a11y.js?v=mwdjqued';
-import { blinkGuard } from './blink.js?v=mwdjqued';
-import { phoneInput, readPhone, guessCountry } from './phone.js?v=mwdjqued';
-import { DIAL, flag, countryName } from '../core/dial.js?v=mwdjqued';
+import { sosWords, heardSosWord, lang as curLang } from './i18n.js?v=mwdle3e0';
+import { pickContacts, duplicateIn, phoneKey } from '../core/protect.js?v=mwdle3e0';
+import { announce, speakStatus, listenOnce, a11y } from './a11y.js?v=mwdle3e0';
+import { blinkGuard } from './blink.js?v=mwdle3e0';
+import { phoneInput, readPhone, guessCountry } from './phone.js?v=mwdle3e0';
+import { DIAL, flag, countryName } from '../core/dial.js?v=mwdle3e0';
 
 export function initProtect(c) {
   const { st, esc, toast, modal, showErr, go, render, geo, contacts, prefs, store, native, platform, telHref, fmtTime, pretty, nativeShare, serverUrl, isNative, recorder } = c;
@@ -80,7 +80,7 @@ export function initProtect(c) {
     if (!name) return toast('Enter a name', 'error');
     if (ph.problem) return toast(ph.problem, 'error');
     const others = p.contacts.filter((_, k) => k !== j);
-    const pr = rowProblem([...others, { name, phone: ph.e164 }], { notIn: contacts.list(), what: 'important contact (they are told at every place)' });
+    const pr = rowProblem([...others, { name, phone: ph.e164 }]);
     if (pr) return toast(pr, 'error');
     const updated = j >= 0 ? p.contacts.map((q, k) => (k === j ? { name, phone: ph.e164 } : q)) : [...p.contacts, { name, phone: ph.e164 }];
     const next = list.map((q, k) => (k === i ? { ...q, contacts: updated } : q));
@@ -297,12 +297,11 @@ export function initProtect(c) {
     if (!v || v.closed) return '';
     const pc = v.police;
     if (pc) {
-      const d = pc.dial || {};
-      const who = pc.station ? `${esc(pc.station.name)} · ${esc(pc.station.distanceKm)} km` : d.target === 'women_helpline' ? 'Women police helpline 1091' : `Emergency ${esc(d.number || pc.emergency || '112')}`;
-      const state = d.result === 'PLACED' ? `📞 Your phone called ${esc(d.number)} at ${esc(fmtTime(d.placedAt))}` : d.result === 'FAILED' ? '⚠️ Your phone could not place the call — tap a number below now' : `📞 Calling ${esc(d.number || pc.emergency || '112')} now…`;
-      return `<section class="alert alert-danger police-card" role="alert"><h2>🚓 Police — ${who}</h2>
+      const d = pc.dial;
+      const state = !d ? `No police station loaded near you — call ${esc(pc.emergency || '112')} now` : d.result === 'PLACED' ? `📞 Your phone called ${esc(d.number)} at ${esc(fmtTime(d.placedAt))}` : d.result === 'FAILED' ? '⚠️ Your phone could not place the call — tap Call below' : `📞 Calling ${esc(d.number)} now…`;
+      return `<section class="alert alert-danger police-card" role="alert"><h2>🚓 Police${pc.station ? ` — ${esc(pc.station.name)} · ${esc(pc.station.distanceKm)} km` : ''}</h2>
         <p>${state}${pc.sms === 'SENT' ? ' · they also got your live location by SMS' : ''}</p>
-        <div class="row">${d.number ? `<a class="btn btn-call" href="${telHref(d.number)}">📞 Call ${esc(d.number)}</a>` : ''}${d.fallback && d.fallback !== d.number ? `<a class="btn btn-call-alt" href="${telHref(d.fallback)}">📞 ${esc(d.fallback)}</a>` : (pc.emergency && pc.emergency !== d.number ? `<a class="btn btn-call-alt" href="${telHref(pc.emergency)}">📞 ${esc(pc.emergency)}</a>` : '')}</div></section>`;
+        <div class="row">${d ? `<a class="btn btn-call" href="${telHref(d.number)}">📞 Call station</a>` : ''}<a class="btn btn-call-alt" href="${telHref(pc.emergency || '112')}">📞 ${esc(pc.emergency || '112')}</a></div></section>`;
     }
     return v.operatorAcknowledged
       ? '<p class="alert alert-info">👩‍💼 A Beti Bachao operator is handling your SOS.</p>'
@@ -313,7 +312,7 @@ export function initProtect(c) {
     const pc = d.policeConnect;
     return `${!d.opAckAt && !pc ? `<div class="alert alert-danger ack-box" role="alert"><strong>Acknowledge this SOS</strong> — otherwise her phone calls the nearest police station automatically in <b data-live="ack-countdown" data-deadline="${esc(d.ackDeadline)}"></b>.<button class="btn btn-danger btn-lg" data-act="op-ack" data-id="${esc(d.id)}">✋ I'm handling this</button></div>` : ''}
       ${d.opAckAt ? `<p class="small">✋ Acknowledged by ${esc(d.opAckBy || 'operator')} at ${esc(fmtTime(d.opAckAt))}</p>` : ''}
-      ${pc ? `<div class="alert alert-warn"><strong>🚓 Police auto-connect:</strong> ${pc.station ? `${esc(pc.station.name)} (${esc(pc.station.distanceKm)} km, ${esc(pc.station.phone)})` : `no station within ${esc(st.cfg?.policeMaxKm || 30)} km`} · her phone ${pc.dial?.result === 'PLACED' ? `called <b>${esc(pc.dial.number)}</b> at ${esc(fmtTime(pc.dial.placedAt))}` : pc.dial?.result === 'FAILED' ? `<b>could not call ${esc(pc.dial.number)}</b> — phone her and call police` : `is calling <b>${esc(pc.dial?.number || pc.emergency)}</b>`}${pc.sms ? ` · SMS ${esc(pretty(pc.sms))}` : ''}${pc.call ? ` · call ${esc(pretty(pc.call))}` : ''}<br><small>${esc(pc.reason)} · ${esc(fmtTime(pc.at))}</small></div>` : ''}
+      ${pc ? `<div class="alert alert-warn"><strong>🚓 Police auto-connect:</strong> ${pc.station ? `${esc(pc.station.name)} (${esc(pc.station.distanceKm)} km, ${esc(pc.station.phone)})` : `<b>no station within ${esc(st.cfg?.policeMaxKm || 30)} km — call ${esc(pc.emergency)} for her</b>`}${pc.dial ? ` · her phone ${pc.dial.result === 'PLACED' ? `called <b>${esc(pc.dial.number)}</b> at ${esc(fmtTime(pc.dial.placedAt))}` : pc.dial.result === 'FAILED' ? `<b>could not call ${esc(pc.dial.number)}</b> — phone her and call police` : `is calling <b>${esc(pc.dial.number)}</b>`}` : ''}${pc.sms ? ` · SMS ${esc(pretty(pc.sms))}` : ''}${pc.call ? ` · call ${esc(pretty(pc.call))}` : ''}<br><small>${esc(pc.reason)} · ${esc(fmtTime(pc.at))}</small></div>` : ''}
       ${d.sosPresses > 1 ? `<p class="badge badge-danger">She pressed SOS ${esc(d.sosPresses)} times</p>` : ''}
       ${d.contactsPlace ? `<p class="small">Contacts notified for place: <b>${esc(d.contactsPlace)}</b></p>` : ''}
       ${(d.nearestStations || []).length ? `<p class="small">Nearest stations: ${d.nearestStations.map((s) => `<a href="${telHref(s.phone)}">${esc(s.name)} (${esc(s.distanceKm)} km)</a>`).join(' · ')}</p>` : ''}
@@ -513,7 +512,6 @@ export function initProtect(c) {
     if (dup) return `${dup.b.name} has the same number as ${dup.a.name} — each contact needs a different number`;
     const clash = cs.find((x) => notIn.some((y) => phoneKey(y.phone) === phoneKey(x.phone)));
     if (clash) return `${clash.name} (${clash.phone}) is already an ${what}`;
-    if (st.me?.phone && cs.some((x) => phoneKey(x.phone) === phoneKey(st.me.phone))) return 'That is your own number — add someone who can help you';
     return null;
   };
   const clean = (cs) => cs.map(({ name, phone }) => ({ name, phone }));
@@ -533,7 +531,7 @@ export function initProtect(c) {
       const cs = readRows(f);
       if (cs.length < 1) return toast('Add at least 1 contact for this place', 'error');
       if (cs.length > 3) return toast('Up to 3 contacts per place', 'error');
-      { const pr = rowProblem(cs, { notIn: contacts.list(), what: 'important contact (they are told at every place)' }); if (pr) return toast(pr, 'error'); }
+      { const pr = rowProblem(cs); if (pr) return toast(pr, 'error'); }
       const p = { id: i >= 0 ? list[i].id : undefined, label: f.label.value.trim(), lat: where.lat, lng: where.lng, radiusM: Number(f.radiusM.value), contacts: clean(cs) };
       if (i >= 0) list[i] = p; else list.push(p);
       try { const r = await api().savePlaces(list); store.set('places', r.places); st.placeEdit = null; st.placeDraft = null; c.syncNative(); toast('Saved — contacts will switch automatically with your location', 'ok'); render(); } catch (e) { showErr(e); }

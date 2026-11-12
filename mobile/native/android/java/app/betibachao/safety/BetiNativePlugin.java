@@ -36,7 +36,7 @@ import java.util.List;
                 @Permission(alias = "sms", strings = { Manifest.permission.SEND_SMS }),
                 @Permission(alias = "notifications", strings = { "android.permission.POST_NOTIFICATIONS" }),
                 @Permission(alias = "microphone", strings = { Manifest.permission.RECORD_AUDIO }),
-                @Permission(alias = "phone", strings = { Manifest.permission.CALL_PHONE })
+                @Permission(alias = "phone", strings = { Manifest.permission.CALL_PHONE, Manifest.permission.READ_PHONE_STATE })
         }
 )
 public class BetiNativePlugin extends Plugin {
@@ -245,6 +245,16 @@ public class BetiNativePlugin extends Plugin {
         android.view.accessibility.AccessibilityManager am = (android.view.accessibility.AccessibilityManager) getContext().getSystemService(Context.ACCESSIBILITY_SERVICE);
         JSObject r = new JSObject();
         r.put("on", am != null && am.isEnabled() && am.isTouchExplorationEnabled());
+        call.resolve(r);
+    }
+
+    /** The last native crash (stack trace), once — then forgotten. */
+    @PluginMethod
+    public void takeLastCrash(PluginCall call) {
+        String v = Store.get(getContext(), "lastCrash");
+        Store.put(getContext(), "lastCrash", null);
+        JSObject r = new JSObject();
+        r.put("crash", v);
         call.resolve(r);
     }
 

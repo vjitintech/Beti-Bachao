@@ -34,7 +34,7 @@ let man = fs.readFileSync(manPath, 'utf8');
 const perms = [
   'ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION', 'ACCESS_BACKGROUND_LOCATION', 'FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_LOCATION', 'FOREGROUND_SERVICE_MICROPHONE',
   'POST_NOTIFICATIONS', 'SEND_SMS', 'VIBRATE', 'RECEIVE_BOOT_COMPLETED', 'USE_FULL_SCREEN_INTENT', 'WAKE_LOCK',
-  'RECORD_AUDIO', 'CAMERA', 'MODIFY_AUDIO_SETTINGS', 'CALL_PHONE',
+  'RECORD_AUDIO', 'CAMERA', 'MODIFY_AUDIO_SETTINGS', 'CALL_PHONE', 'READ_PHONE_STATE',
 ].filter((p) => !man.includes(`android.permission.${p}"`)).map((p) => `    <uses-permission android:name="android.permission.${p}" />`).join('\n');
 const features = ['android.hardware.telephony', 'android.hardware.location.gps', 'android.hardware.camera', 'android.hardware.sensor.accelerometer']
   .map((f) => `    <uses-feature android:name="${f}" android:required="false" />`).join('\n'); // tablets without SIM can install

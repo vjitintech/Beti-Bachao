@@ -72,6 +72,10 @@ public final class VoiceGuard implements RecognitionListener {
         i.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true);
         i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
         i.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
+        // Long listening sessions = far fewer restarts (each restart flickers the mic indicator).
+        i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 60000L);
+        i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 15000L);
+        i.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 15000L);
         Silence.mute(app); // the recogniser's start/stop beeps must not be heard
         try { rec.startListening(i); } catch (Exception e) { retry(); }
     }
@@ -96,11 +100,12 @@ public final class VoiceGuard implements RecognitionListener {
         return false;
     }
 
-    private void retry() { errors++; main.postDelayed(this::listen, Math.min(30000, 600L * errors)); }
+    // Exponential back-off when the recogniser fails (busy, no network…): 2 s, 4 s, 8 s … max 60 s.
+    private void retry() { errors++; main.postDelayed(this::listen, Math.min(60000, 1000L << Math.min(6, errors))); }
 
     @Override public void onPartialResults(Bundle b) { if (matches(b)) { errors = 0; release(); NativeSos.trigger(app, "voice"); main.postDelayed(this::listen, 15000); } }
-    @Override public void onResults(Bundle b) { if (matches(b)) { release(); NativeSos.trigger(app, "voice"); main.postDelayed(this::listen, 15000); } else { errors = 0; main.postDelayed(this::listen, 250); } }
-    @Override public void onError(int error) { if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) { errors = 0; main.postDelayed(this::listen, 250); } else retry(); }
+    @Override public void onResults(Bundle b) { if (matches(b)) { release(); NativeSos.trigger(app, "voice"); main.postDelayed(this::listen, 15000); } else { errors = 0; main.postDelayed(this::listen, 1000); } }
+    @Override public void onError(int error) { if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) { errors = 0; main.postDelayed(this::listen, 1000); } else retry(); }
     @Override public void onReadyForSpeech(Bundle params) {}
     @Override public void onBeginningOfSpeech() {}
     @Override public void onRmsChanged(float rmsdB) {}

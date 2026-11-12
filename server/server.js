@@ -442,6 +442,14 @@ export function createServer(opts = {}) {
     const storageKey = media.put(buf);
     try { return engine.addEvidence(actor, p.id, { kind: body.kind || mime.split('/')[0], mime, durationSec: body.durationSec, bytes: buf.length, storageKey }); } catch (e) { media.del(storageKey); throw e; }
   }, { maxBody: 6 * 1024 * 1024, limit: [30, 3600e3] });
+  // App error tracking: browser/WebView errors and native crash traces (sent on next start).
+  route('POST', '/client-errors', ({ actor, body, req }) => {
+    const e = { at: new Date().toISOString(), userId: actor?.id || null, role: actor?.role || null, kind: String(body.kind || 'js').slice(0, 20), message: String(body.message || '').slice(0, 500), stack: String(body.stack || '').slice(0, 6000), where: String(body.where || '').slice(0, 200), app: String(body.app || '').slice(0, 80), ua: String(req.headers['user-agent'] || '').slice(0, 200) };
+    console.error(JSON.stringify({ level: 'error', type: 'client_error', ...e, stack: e.stack.slice(0, 800) }));
+    store.db.clientErrors = [...(store.db.clientErrors || []), e].slice(-200); store.markDirty();
+    return { ok: true };
+  }, { auth: false, limit: [60, 3600e3], maxBody: 16 * 1024 });
+  route('GET', '/admin/client-errors', ({ actor }) => { engine.requireRole(actor, 'admin'); return { items: (store.db.clientErrors || []).slice().reverse() }; });
   route('POST', '/incidents/:id/evidence-log', ({ actor, p, body }) => engine.evidenceLog(actor, p.id, body), { limit: [120, 3600e3] });
   route('POST', '/incidents/:id/police-call', ({ actor, p, body }) => engine.recordPoliceCall(actor, p.id, body), { limit: [60, 3600e3] });
   route('GET', '/incidents/:id/evidence/:eid', ({ actor, p }) => { const e = engine.evidenceFor(actor, p.id, p.eid); return { __raw: true, type: e.mime.split(';')[0], body: media.get(e.storageKey) }; });

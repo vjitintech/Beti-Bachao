@@ -15,10 +15,10 @@
 //   • escalation adapter is SIMULATED until a real integration is approved
 //   • append-only, hash-chained audit log
 
-import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mwdjqued';
-import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mwdjqued';
-import { protectMethods, duplicateIn, phoneKey } from './protect.js?v=mwdjqued';
-import { toE164, dialInfo } from './dial.js?v=mwdjqued';
+import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mwdle3e0';
+import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mwdle3e0';
+import { protectMethods, duplicateIn, phoneKey } from './protect.js?v=mwdle3e0';
+import { toE164, dialInfo } from './dial.js?v=mwdle3e0';
 
 export const S = Object.freeze({
   CREATED: 'CREATED',
@@ -256,12 +256,7 @@ export class Engine {
       const next = contacts.map((c) => ({ ...this.cleanContact(c), always: true }));
       const dup = duplicateIn(next);
       if (dup) fail(400, 'DUPLICATE_CONTACT', `${dup.b.name} has the same number as ${dup.a.name}`);
-      const self = next.find((c) => u.phone && phoneKey(c.phone) === phoneKey(u.phone));
-      if (self) fail(400, 'DUPLICATE_CONTACT', `${self.phone} is your own number — add someone who can help you`);
       u.contacts = next;
-      // A number that is now important no longer needs to be a place contact as well.
-      const keys = new Set(next.map((c) => phoneKey(c.phone)));
-      for (const p of u.places || []) { const left = p.contacts.filter((c) => !keys.has(phoneKey(c.phone))); if (left.length) p.contacts = left; }
     }
     if (prefs) u.prefs = { ...(u.prefs || {}), serverSms: prefs.serverSms !== false };
     if (phone !== undefined) { const ph = normPhone(phone); if (phone && !ph) fail(400, 'INVALID_PHONE'); u.phone = ph; }

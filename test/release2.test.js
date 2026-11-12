@@ -37,7 +37,7 @@ test('uptime monitors: HEAD and /health work', async () => {
   }
 });
 
-test('contacts: duplicate numbers are refused (any format), own number refused, per-place clash with important', async () => {
+test('contacts: duplicate numbers refused inside the same group (any format); the same person may be in two groups', async () => {
   const u = W.user;
   let r = await u.call('PUT', '/me/contacts', { contacts: [{ name: 'Amma', phone: '+919000000101' }, { name: 'Akka', phone: '09000000101' }] });
   assert.equal(r.status, 400); assert.equal(r.body.error.code, 'DUPLICATE_CONTACT');
@@ -46,8 +46,8 @@ test('contacts: duplicate numbers are refused (any format), own number refused, 
   const place = (contacts) => ({ places: [{ label: 'Home', lat: HER.lat, lng: HER.lng, radiusM: 2000, contacts }] });
   r = await u.call('PUT', '/me/places', place([{ name: 'Neighbour', phone: '+919000000120' }, { name: 'Aunty', phone: '9000000120' }]));
   assert.equal(r.status, 400); assert.match(r.body.error.message, /same number/);
-  r = await u.call('PUT', '/me/places', place([{ name: 'Amma again', phone: '9000000101' }]));
-  assert.equal(r.status, 400); assert.match(r.body.error.message, /important contact/);
+  r = await u.call('PUT', '/me/places', place([{ name: 'Amma at home', phone: '9000000101' }]));
+  assert.equal(r.status, 200, 'an important contact may also be a place contact (different group)');
   r = await u.call('PUT', '/me/places', place([{ name: 'Neighbour', phone: '+919000000120' }, { name: 'Aunty', phone: '+919000000121' }]));
   assert.equal(r.status, 200, JSON.stringify(r.body));
   // Editing one contact of the place (the app sends the place back with that one contact changed).
@@ -55,27 +55,37 @@ test('contacts: duplicate numbers are refused (any format), own number refused, 
   assert.equal(r.status, 200); assert.equal(r.body.places[0].contacts.length, 1); assert.equal(r.body.places[0].contacts[0].name, 'Neighbour Uncle');
 });
 
-test('police auto-call: no station within 30 km → 1091; her phone reports the call; only placed calls are counted', async () => {
-  const a = W.admin;
-  await a.call('POST', '/admin/police-stations/one', { name: 'Far PS', country: 'IN', state: 'X', lat: HER.lat + 0.6, lng: HER.lng, phone: '08518 220100' }); // ~67 km away
+test('police auto-call: no station within 30 km → NO automatic call (no 1091 / 112)', async () => {
+  await W.admin.call('POST', '/admin/police-stations/one', { name: 'Far PS', country: 'IN', state: 'X', lat: HER.lat + 0.6, lng: HER.lng, phone: '08518 220100' }); // ~67 km away
   const sos = await W.user.call('POST', '/incidents', { idempotencyKey: 'r2-pol-1', location: { ...HER, accuracyM: 10, source: 'gps', observedAt: new Date().toISOString() } });
   const id = sos.body.incident.id;
-  const again = await W.user.call('POST', '/incidents', { idempotencyKey: 'r2-pol-2', location: { ...HER, accuracyM: 10, source: 'gps', observedAt: new Date().toISOString() } }); // second press → police now
-  assert.equal(again.body.incident.id, id);
-  let v = (await W.user.call('GET', `/incidents/${id}`)).body;
-  assert.equal(v.police.dial.number, '1091'); assert.equal(v.police.dial.target, 'women_helpline'); assert.equal(v.police.station, null);
-  // Her phone's location loop learns it must call.
+  await W.user.call('POST', '/incidents', { idempotencyKey: 'r2-pol-2', location: { ...HER, accuracyM: 10, source: 'gps', observedAt: new Date().toISOString() } }); // second press → police now
+  const v = (await W.user.call('GET', `/incidents/${id}`)).body;
+  assert.equal(v.police.dial, null); assert.equal(v.police.station, null); assert.equal(v.police.status, 'NO_STATION');
   const loc = await W.user.call('POST', '/me/location', { ...HER, accuracyM: 8, source: 'gps', observedAt: new Date().toISOString() });
-  assert.deepEqual(loc.body.policeCall, { incidentId: id, number: '1091' });
+  assert.equal(loc.body.policeCall, undefined, 'phone is not told to call anyone');
+  assert.equal((await W.user.call('POST', `/incidents/${id}/police-call`, { number: '1091', result: 'placed' })).status, 409);
+  await W.user.call('POST', `/incidents/${id}/cancel`, { confirm: true });
+});
+
+test('police auto-call: only the FIRST number of the nearest station within 30 km; counted only when placed', async () => {
+  const a = W.admin;
+  await a.call('POST', '/admin/police-stations/one', { name: 'Near PS', country: 'IN', state: 'X', lat: HER.lat + 0.02, lng: HER.lng, phone: '08518 220200', phone2: '08518 220201' });
+  const sos = await W.user.call('POST', '/incidents', { idempotencyKey: 'r2-pol-3', location: { ...HER, accuracyM: 10, source: 'gps', observedAt: new Date().toISOString() } });
+  const id = sos.body.incident.id;
+  await W.user.call('POST', '/incidents', { idempotencyKey: 'r2-pol-4', location: { ...HER, accuracyM: 10, source: 'gps', observedAt: new Date().toISOString() } });
+  let v = (await W.user.call('GET', `/incidents/${id}`)).body;
+  assert.equal(v.police.station.name, 'Near PS'); assert.equal(v.police.dial.number, '+918518220200'); assert.equal(v.police.dial.target, 'station');
+  const loc = await W.user.call('POST', '/me/location', { ...HER, accuracyM: 8, source: 'gps', observedAt: new Date().toISOString() });
+  assert.deepEqual(loc.body.policeCall, { incidentId: id, number: '+918518220200' });
+  assert.ok(await wait(() => smsTo('t-pol').includes('918518220200')), 'station also gets the SMS');
   let imp = (await a.call('GET', '/admin/dashboard?days=7')).body;
-  const before = imp.period.policeAutoConnects;
-  assert.equal(before, 0, 'not counted before a call is placed');
-  const pc = await W.user.call('POST', `/incidents/${id}/police-call`, { number: '1091', result: 'placed' });
-  assert.equal(pc.status, 200); assert.equal(pc.body.dial.result, 'PLACED');
+  assert.equal(imp.period.policeAutoConnects, 0, 'not counted before the call is placed');
+  const pc = await W.user.call('POST', `/incidents/${id}/police-call`, { number: '+918518220200', result: 'placed' });
+  assert.equal(pc.body.dial.result, 'PLACED');
   v = (await W.user.call('GET', `/incidents/${id}`)).body;
   assert.equal(v.police.status, 'CONTACTED');
-  const loc2 = await W.user.call('POST', '/me/location', { ...HER, accuracyM: 8, source: 'gps', observedAt: new Date().toISOString() });
-  assert.equal(loc2.body.policeCall, undefined, 'no more call requests once placed');
+  assert.equal((await W.user.call('POST', '/me/location', { ...HER, accuracyM: 8, source: 'gps', observedAt: new Date().toISOString() })).body.policeCall, undefined);
   imp = (await a.call('GET', '/admin/dashboard?days=7')).body;
   assert.equal(imp.period.policeAutoConnects, 1);
   const audit = (await a.call('GET', '/admin/audit-events?limit=500')).body.items || [];
@@ -83,14 +93,12 @@ test('police auto-call: no station within 30 km → 1091; her phone reports the 
   await W.user.call('POST', `/incidents/${id}/cancel`, { confirm: true });
 });
 
-test('police auto-call: station within 30 km is called', async () => {
-  await W.admin.call('POST', '/admin/police-stations/one', { name: 'Near PS', country: 'IN', state: 'X', lat: HER.lat + 0.02, lng: HER.lng, phone: '08518 220200' });
-  const sos = await W.user.call('POST', '/incidents', { idempotencyKey: 'r2-pol-3', location: { ...HER, accuracyM: 10, source: 'gps', observedAt: new Date().toISOString() } });
-  await W.user.call('POST', '/incidents', { idempotencyKey: 'r2-pol-4', location: { ...HER, accuracyM: 10, source: 'gps', observedAt: new Date().toISOString() } });
-  const v = (await W.user.call('GET', `/incidents/${sos.body.incident.id}`)).body;
-  assert.equal(v.police.station.name, 'Near PS'); assert.equal(v.police.dial.number, '+918518220200'); assert.equal(v.police.dial.target, 'station');
-  assert.ok(await wait(() => smsTo('t-pol').includes('918518220200')), 'station also gets the SMS');
-  await W.user.call('POST', `/incidents/${sos.body.incident.id}/cancel`, { confirm: true });
+test('app errors and native crashes are collected for the admin', async () => {
+  const r = await client(S.base).call('POST', '/client-errors', { kind: 'native_crash', message: 'NullPointerException', stack: 'java.lang.NullPointerException\n at X', where: '#/home', app: 'android 1.0.24' });
+  assert.equal(r.status, 200);
+  const list = (await W.admin.call('GET', '/admin/client-errors')).body.items;
+  assert.equal(list[0].kind, 'native_crash'); assert.match(list[0].stack, /NullPointerException/);
+  assert.equal((await W.user.call('GET', '/admin/client-errors')).status, 403);
 });
 
 test('evidence: every step is audited; operators are told when a clip arrives', async () => {
