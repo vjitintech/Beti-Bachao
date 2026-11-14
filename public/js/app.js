@@ -1,12 +1,12 @@
-import { createApi, uuid } from './api.js?v=mwdsq0ev';
-import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang, ownSosWords, sosVoiceLang } from './i18n.js?v=mwdsq0ev';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwdsq0ev';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwdsq0ev';
-import { TRAINING_MODULES } from '../core/engine.js?v=mwdsq0ev';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwdsq0ev';
-import { initProtect } from './protect-ui.js?v=mwdsq0ev';
-import { a11y, announce, speakStatus } from './a11y.js?v=mwdsq0ev';
-import { phoneInput, readPhone, guessCountry, bindPhoneFields } from './phone.js?v=mwdsq0ev';
+import { createApi, uuid } from './api.js?v=mwg8mqm2';
+import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang, ownSosWords, sosVoiceLang } from './i18n.js?v=mwg8mqm2';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwg8mqm2';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwg8mqm2';
+import { TRAINING_MODULES } from '../core/engine.js?v=mwg8mqm2';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwg8mqm2';
+import { initProtect } from './protect-ui.js?v=mwg8mqm2';
+import { a11y, announce, speakStatus } from './a11y.js?v=mwg8mqm2';
+import { phoneInput, readPhone, guessCountry, bindPhoneFields } from './phone.js?v=mwg8mqm2';
 let P = null; // autonomous-protection screens (protect-ui.js), set up in boot()
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'impact', volSel: null };
@@ -676,6 +676,7 @@ async function viewSettings() {
     <section class="card"><h2>👥 ${esc(t('contacts'))}</h2>
       <p>⭐ Important: ${contacts.list().map((x) => esc(x.name)).join(', ') || '<span class="danger-text">none yet — add at least 1</span>'}</p>
       <a class="btn btn-secondary" href="#/places">Edit important contacts & places</a>
+      <p class="small muted">🚓 Tip: add your nearest police station as a contact so it also gets your SOS SMS. <a href="#/places">Search my nearest police station</a></p>
     </section>
     <section class="card form"><h2>🔐 ${esc(t('your_safety_pin'))}</h2>
       ${infoTip('More info', `${me.hasPins ? 'PINs are set.' : 'Without a PIN, cancelling needs only a confirmation tap.'} The <strong>duress PIN</strong> makes the app show "cancelled" while it secretly keeps help coming — useful if someone forces you to cancel.`)}

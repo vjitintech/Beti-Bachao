@@ -2,12 +2,12 @@
 // places & location-based contacts, Track my travel, nearby help, dashboards,
 // police auto-connect status, operator acknowledgement, evidence, admin impact &
 // police-station import, blink trigger page, spoken guidance for blind users.
-import { sosWords, heardSosWord, lang as curLang } from './i18n.js?v=mwdsq0ev';
-import { pickContacts, duplicateIn, phoneKey } from '../core/protect.js?v=mwdsq0ev';
-import { announce, speakStatus, listenOnce, a11y } from './a11y.js?v=mwdsq0ev';
-import { blinkGuard } from './blink.js?v=mwdsq0ev';
-import { phoneInput, readPhone, guessCountry } from './phone.js?v=mwdsq0ev';
-import { DIAL, flag, countryName } from '../core/dial.js?v=mwdsq0ev';
+import { sosWords, heardSosWord, lang as curLang } from './i18n.js?v=mwg8mqm2';
+import { pickContacts, duplicateIn, phoneKey, stationName } from '../core/protect.js?v=mwg8mqm2';
+import { announce, speakStatus, listenOnce, a11y } from './a11y.js?v=mwg8mqm2';
+import { blinkGuard } from './blink.js?v=mwg8mqm2';
+import { phoneInput, readPhone, guessCountry } from './phone.js?v=mwg8mqm2';
+import { DIAL, flag, countryName } from '../core/dial.js?v=mwg8mqm2';
 
 export function initProtect(c) {
   const { st, esc, toast, modal, showErr, go, render, geo, contacts, prefs, store, native, platform, telHref, fmtTime, pretty, nativeShare, serverUrl, isNative, recorder } = c;
@@ -87,6 +87,55 @@ export function initProtect(c) {
     try { const res = await api().savePlaces(next); store.set('places', res.places); c.syncNative(); toast(j >= 0 ? `${name} updated` : `${name} added to ${p.label}`, 'ok'); render(); } catch (e) { showErr(e); }
   }
 
+
+  // Optional: put the nearest admin-listed police station into her contacts so it gets the SOS SMS too.
+  // Uses the same contact lists and SMS path as any other contact — nothing else changes.
+  const stationContactName = (x) => { const n = stationName(x.name); return (/police|\bps\b/i.test(n) ? n : `${n} Police Station`).slice(0, 40); };
+  const already = (cs, phone) => cs.find((y) => phoneKey(y.phone) === phoneKey(phone));
+  async function addNearestStation() {
+    let loc = geo.last;
+    if (!loc) { try { loc = await geo.once(10000); } catch { return toast('Turn on location so the app can find the police station near you', 'error'); } }
+    let res;
+    try { res = await api().nearby(loc); } catch (e) { return showErr(e); }
+    const stations = (res.stations || []).filter((x) => x.phone || x.phone2);
+    if (!stations.length) {
+      const g = (res.search || []).find((x) => /police/i.test(x.label));
+      await modal({ title: 'No police station listed near you yet', body: `<p>Your area's stations haven't been added by the Beti Bachao team yet.</p><p>You can still look up your local station${g ? ` on <a href="${esc(g.url)}" target="_blank" rel="noopener">Google Maps</a>` : ''} and add its number yourself as a contact.</p>` });
+      return;
+    }
+    const opts = stations.flatMap((x, i) => [x.phone, x.phone2].filter(Boolean).map((ph, k) => `<option value="${i}|${esc(ph)}">${esc(ph)} · ${esc(x.name)} (${esc(String(x.distanceKm))} km)${k ? ' · 2nd number' : ''}</option>`)).join('');
+    const imp = contacts.list(); const pl = places();
+    const dests = [imp.length < 5 ? '<option value="important">⭐ Important contacts (every SOS)</option>' : '', ...pl.map((q, i) => (q.contacts.length < 3 ? `<option value="${i}">📍 ${esc(q.label)} contacts</option>` : ''))].join('');
+    if (!dests) return toast('Your contact lists are full — remove one contact first, then try again', 'error');
+    const r = await modal({ title: '🚓 Nearest police stations', body: `<p class="small muted">From the official list loaded by the Beti Bachao team, nearest first.</p>
+      <label>Police station<select name="pick">${opts}</select></label>
+      <label>Add it to<select name="dest">${dests}</select></label>
+      <p class="small muted">The station will get your SOS SMS with your live location, along with your other contacts. Pick a mobile number if one is listed — landlines can't receive SMS.</p>`,
+      actions: [{ id: 'add', label: 'Add as contact', kind: 'primary' }, { id: 'no', label: 'Cancel' }] });
+    if (r.id !== 'add') return;
+    const [idx, phone] = String(r.data.pick).split('|'); const x = stations[Number(idx)];
+    if (!x || !phone) return;
+    const add = { name: stationContactName(x), phone };
+    try {
+      if (r.data.dest === 'important') {
+        const have = already(imp, phone); if (have) return toast(`This number is already in your important contacts as ${have.name}`, 'error');
+        const cs = [...clean(imp), add];
+        { const pr = rowProblem(cs); if (pr) return toast(pr, 'error'); }
+        const out = await api().saveContacts({ contacts: cs }); contacts.replace(out.contacts || cs);
+      } else {
+        const i = Number(r.data.dest); const q = pl[i]; if (!q) return;
+        const have = already(q.contacts, phone); if (have) return toast(`This number is already in ${q.label} as ${have.name}`, 'error');
+        const cs = [...q.contacts, add];
+        { const pr = rowProblem(cs); if (pr) return toast(pr, 'error'); }
+        const out = await api().savePlaces(pl.map((y, k) => (k === i ? { ...y, contacts: cs } : y))); store.set('places', out.places);
+      }
+      c.syncNative(); toast(`${add.name} added — it will get your SOS SMS`, 'ok'); render();
+    } catch (e) { showErr(e); }
+  }
+  const stationNote = () => `<section class="card station-note"><h2>🚓 Add your nearest police station <span class="badge">Optional</span></h2>
+      <p>Search the police stations near you and add one as a contact. It will get your SOS SMS with your live location, along with your family, while nearby volunteers are alerted as usual.</p>
+      <button class="btn btn-secondary" data-act="station-contact">🔍 Search my nearest police station</button></section>`;
+
   async function viewPlaces() {
     await pullPlaces();
     const list = places();
@@ -101,6 +150,7 @@ export function initProtect(c) {
         <p class="small muted">Within ${p.radiusM >= 1000 ? `${p.radiusM / 1000} km` : `${p.radiusM} m`} of ${esc(p.lat.toFixed(4))}, ${esc(p.lng.toFixed(4))}</p>
         <ul class="contact-list">${p.contacts.map((x, j) => `<li><span>${esc(x.name)} · ${esc(x.phone)}</span><span class="row-tight"><a class="btn btn-ghost btn-sm" href="${telHref(x.phone)}" aria-label="Call ${esc(x.name)}">📞</a><button class="btn btn-ghost btn-sm" data-act="pc-edit" data-i="${i}" data-j="${j}" aria-label="Edit ${esc(x.name)}">✏️</button><button class="btn btn-ghost btn-sm danger-text" data-act="pc-del" data-i="${i}" data-j="${j}" aria-label="Delete ${esc(x.name)}">🗑</button></span></li>`).join('')}</ul>
         <div class="row">${p.contacts.length < 3 ? `<button class="btn btn-secondary btn-sm" data-act="pc-add" data-i="${i}">＋ Add contact</button>` : ''}<button class="btn btn-ghost btn-sm" data-act="place-edit" data-i="${i}">Edit place</button><button class="btn btn-ghost btn-sm danger-text" data-act="place-del" data-i="${i}">Delete place</button></div></section>`).join('')}
+      ${stationNote()}
       ${list.length < 10 ? '<button class="btn btn-primary btn-lg" data-act="place-new">＋ Add a place (home, college, office…)</button>' : ''}
       ${importantForm()}`);
   }
@@ -431,6 +481,7 @@ export function initProtect(c) {
       try { const res = await api().savePlaces(list); store.set('places', res.places); c.syncNative(); render(); } catch (e) { showErr(e); }
     },
     // One contact of a place: add / edit / delete without touching the rest of the place.
+    async 'station-contact'() { await addNearestStation(); },
     async 'pc-add'(el) { await editPlaceContact(Number(el.dataset.i), -1); },
     async 'pc-edit'(el) { await editPlaceContact(Number(el.dataset.i), Number(el.dataset.j)); },
     async 'pc-del'(el) {
