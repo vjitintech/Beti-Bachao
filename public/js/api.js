@@ -5,7 +5,7 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xx
 export class ApiError extends Error { constructor(status, code, message) { super(message || code); this.status = status; this.code = code; } }
 
 // ------------------------------------------------------------------ server
-import { isNative, native, serverUrl } from './native.js?v=mwg8mqm2';
+import { isNative, native, serverUrl } from './native.js?v=mwga99lh';
 
 class ServerApi {
   constructor() { this.mode = isNative ? 'app' : 'server'; this.listeners = new Set(); this.es = null; this.token = null; }
@@ -77,6 +77,7 @@ class ServerApi {
   myDashboard() { return this.req('GET', '/me/dashboard'); }
   nearby(loc) { return this.req('GET', `/help/nearby${loc ? `?lat=${loc.lat}&lng=${loc.lng}` : ''}`); }
   impact() { return this.req('GET', '/impact'); }
+  appLatest() { return this.req('GET', '/app/latest'); }
   myTrip() { return this.req('GET', '/me/trip'); }
   startTrip(b) { return this.req('POST', '/me/trip', b); }
   endTrip(b) { return this.req('POST', '/me/trip/end', b); }

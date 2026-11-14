@@ -1,12 +1,12 @@
-import { createApi, uuid } from './api.js?v=mwg8mqm2';
-import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang, ownSosWords, sosVoiceLang } from './i18n.js?v=mwg8mqm2';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwg8mqm2';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwg8mqm2';
-import { TRAINING_MODULES } from '../core/engine.js?v=mwg8mqm2';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwg8mqm2';
-import { initProtect } from './protect-ui.js?v=mwg8mqm2';
-import { a11y, announce, speakStatus } from './a11y.js?v=mwg8mqm2';
-import { phoneInput, readPhone, guessCountry, bindPhoneFields } from './phone.js?v=mwg8mqm2';
+import { createApi, uuid } from './api.js?v=mwga99lh';
+import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang, ownSosWords, sosVoiceLang } from './i18n.js?v=mwga99lh';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwga99lh';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwga99lh';
+import { TRAINING_MODULES } from '../core/engine.js?v=mwga99lh';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwga99lh';
+import { initProtect } from './protect-ui.js?v=mwga99lh';
+import { a11y, announce, speakStatus } from './a11y.js?v=mwga99lh';
+import { phoneInput, readPhone, guessCountry, bindPhoneFields } from './phone.js?v=mwga99lh';
 let P = null; // autonomous-protection screens (protect-ui.js), set up in boot()
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'impact', volSel: null };
@@ -182,6 +182,50 @@ function shell(content, { nav = true } = {}) {
   `;
 }
 
+
+// ------------------------------------------------------------------ app updates (Android)
+// Installed build comes from the APK (BB_APP_BUILD = "1.0.<build> (sha)"); the newest from the server.
+const installedBuild = () => Number(String(window.BB_APP_BUILD || '').match(/^1\.0\.(\d+)/)?.[1]) || null;
+const onAndroidApp = () => isNative && platform === 'android';
+function appUpdate() {
+  const latest = st.appLatest?.android; const mine = installedBuild();
+  if (!onAndroidApp() || !latest?.build || !mine) return null;
+  return { old: latest.build > mine, latest, mine: `1.0.${mine}`, url: latest.url || st.appLatest.download };
+}
+async function checkAppUpdate() {
+  try { st.appLatest = await st.api.appLatest(); } catch { return; }
+  const u = appUpdate();
+  if (u?.old && store.get('updNotified', 0) !== u.latest.build) {
+    store.set('updNotified', u.latest.build);
+    toast(`New app version ${u.latest.version} is ready — update to get the latest features`, 'info');
+  }
+  refreshSoft();
+}
+// Amber banner on the main screens when this phone runs an older app.
+function updateBanner() {
+  const u = appUpdate();
+  return u?.old ? `<a class="alert alert-warn alert-link app-update" href="${esc(u.url)}" target="_blank" rel="noopener">⬆️ <span><b>Update available: version ${esc(u.latest.version)}</b><br><small>You have ${esc(u.mine)}. Update to get the latest features and fixes.</small></span><span class="btn btn-primary btn-sm">Update</span></a>` : '';
+}
+// Settings: green = latest, amber = old.
+function versionCard() {
+  const u = appUpdate();
+  if (!onAndroidApp()) return '';
+  const mine = installedBuild() ? `1.0.${installedBuild()}` : String(window.BB_APP_BUILD || 'dev');
+  return `<section class="card app-version ${u ? (u.old ? 'is-old' : 'is-new') : ''}"><h2>📱 App version</h2>
+    <p><span class="ver-chip ${u?.old ? 'ver-old' : u ? 'ver-new' : ''}">${esc(mine)}</span> ${u ? (u.old ? `<b class="ver-old-text">Update available: ${esc(u.latest.version)}</b>` : '<b class="ver-new-text">✓ You have the latest version</b>') : '<span class="muted">Checking for updates…</span>'}</p>
+    ${u?.old ? `<a class="btn btn-primary" href="${esc(u.url)}" target="_blank" rel="noopener">⬆️ Update to ${esc(u.latest.version)}</a><p class="small muted">Install it over this app — your account and contacts stay.</p>` : ''}
+  </section>`;
+}
+// Website home page: the newest APK to download.
+function apkCard() {
+  if (isNative) return updateBanner();
+  const l = st.appLatest?.android; const when = l?.publishedAt ? new Date(l.publishedAt).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+  return `<section class="card apk-card"><div><h2 class="h3">📱 Get the Android app</h2>
+    <p>${l ? `<span class="ver-chip ver-new">Latest: ${esc(l.version)}</span>${when ? ` <span class="muted small">updated ${esc(when)}</span>` : ''}` : '<span class="muted">Free · Android 8 or newer</span>'}</p>
+    <p class="small muted">Background SOS, voice SOS, automatic SMS to your contacts and the police-station call work best in the app. Already installed? Download again to update — your account stays.</p></div>
+    <div class="row"><a class="btn btn-primary" href="/apk">⬇️ Download${l?.sizeMb ? ` (${esc(String(Math.round(l.sizeMb)))} MB)` : ''}</a><a class="btn btn-ghost" href="/download">How to install</a></div></section>`;
+}
+
 // ------------------------------------------------------------------ landing / auth
 function viewLanding() {
   st.api?.impact?.().then((i) => { const was = JSON.stringify(st.impact); st.impact = i; if (was !== JSON.stringify(i) && !st.me && !location.hash.replace('#', '').replace('/', '')) render(); }).catch(() => {});
@@ -196,6 +240,7 @@ function viewLanding() {
         <a href="#/login?as=volunteer" class="btn btn-secondary btn-lg">${esc(t('want_volunteer'))}</a>
       </div>
     </section>
+    ${apkCard()}
     ${P?.landingImpact() || ''}
     ${emergencyBar()}
     <section class="cards-3">
@@ -323,6 +368,7 @@ async function viewHome() {
   const loc = currentLoc();
   return shell(`
     ${pending ? `<div class="alert alert-danger" role="alert"><strong>${esc(t('offline_queued'))}</strong><div class="row">${smsButtons()}</div></div>` : ''}
+    ${open ? '' : updateBanner()}
     ${open ? `<a class="alert alert-danger alert-link" href="#/incident/${esc(open.id)}">🔴 Active SOS — ${esc(pretty(open.status))}. Tap to view.</a>` : ''}
     ${sw ? `<div class="alert alert-info"><strong>⏱️ ${esc(t('safe_walk'))}:</strong> <span data-live="safewalk"></span> <button class="btn btn-primary btn-sm" data-act="safewalk-checkin">${esc(t('check_in'))}</button></div>` : ''}
     <h1 class="sr-only">Beti Bachao — SOS</h1>
@@ -704,6 +750,7 @@ async function viewSettings() {
       ${infoTip('More info', `Shake and voice triggers start a 5-second countdown you can cancel, then send SOS. They work while this app is open on screen; browsers pause sensors in the background.`)}
     </section>
     <section class="card"><h2>📜 ${esc(t('history'))}</h2><ul class="history">${history.map((h) => `<li><a href="#/incident/${esc(h.id)}">${esc(new Date(h.createdAt).toLocaleString())}</a> — ${esc(pretty(h.status))}</li>`).join('') || '<li class="muted">No SOS yet.</li>'}</ul></section>` : ''}
+    ${versionCard()}
     <section class="card"><h2>🛡️ ${esc(t('privacy'))}</h2>
       <p class="muted">Signed in as ${esc(me.displayName)} (${esc(me.role)}).${window.BB_APP_BUILD ? ` · App ${esc(String(window.BB_APP_BUILD).replace(/\((\w{7})\w*\)/, '($1)'))}` : ''}${isNative ? ` · Server ${esc(serverUrl().replace(/^https?:\/\//, ''))} <a href="#/connect">Change</a>` : ''}</p>
       <div class="row">${['user', 'volunteer'].includes(me.role) ? '<button class="btn btn-ghost" data-act="export">Download my data</button><button class="btn btn-ghost danger-text" data-act="delete-account">Delete my account</button>' : ''}<button class="btn btn-ghost" data-act="report-abuse">Report a concern</button></div>
@@ -760,6 +807,7 @@ async function viewVolunteer() {
   return shell(`
     ${fresh.length ? `<button class="alert alert-danger alert-link sos-incoming" data-act="vol-select" data-id="${esc(fresh[0].id)}">🚨 New SOS nearby (${esc(fresh[0].distanceBand)}) — tap to respond</button>` : ''}
     <h1>Volunteer</h1>
+    ${st.activeAsg ? '' : updateBanner()}
     ${sel?.assignment && sel.open ? volunteerDetail(sel) : ''}
     ${native.available() ? '' : pushCard('Get SOS alerts even when the app is closed')}
     ${native.available() && platform === 'android' ? '<button class="alert alert-info alert-link" data-act="native-alert-setup">🔔 Make SOS alerts ring loudly on the lock screen — tap to check settings</button>' : ''}
@@ -1041,7 +1089,7 @@ async function renderSafe(soft) {
   }
 }
 async function renderScreen() {
-  const soft = !!st.softRefresh; // read once, synchronously: later refreshes can't change this pass
+  let soft = !!st.softRefresh; // read once, synchronously: later refreshes can't change this pass
   const [path, qs] = (location.hash.slice(1) || '/').split('?');
   const params = new URLSearchParams(qs || '');
   const parts = path.split('/').filter(Boolean);
@@ -1073,6 +1121,11 @@ async function renderScreen() {
   } catch (e) { html = failView(e); }
   if (html && !html.includes('offline-card')) backOnline();
   // Background refresh: only touch the screen when something actually changed.
+  // A background refresh may only patch the same screen with the same header; a new screen,
+  // or a header that changed (logged in / out), always gets a full redraw.
+  const hdr = (h) => String(h || '').split('</header>')[0];
+  if (soft && (path !== st.lastPath || hdr(html) !== hdr(st.lastHtml))) soft = false;
+  st.lastPath = path;
   if (soft && html === st.lastHtml) { updateLive(); return; }
   st.lastHtml = html;
   const y = window.scrollY;
@@ -1570,6 +1623,7 @@ async function boot() {
     if (st.me) { st.offline = true; const retry = async () => { try { st.me = (await st.api.me()).user; store.set('meCache', st.me); st.api.connect(); st.offline = false; render(); } catch { setTimeout(retry, 8000); } }; setTimeout(retry, 5000); }
   }
   if (!st.me) { try { st.impact = await st.api.impact(); } catch {} }
+  checkAppUpdate(); setInterval(checkAppUpdate, 6 * 3600e3);
 
   document.addEventListener('click', (e) => {
     const el = e.target.closest('[data-act]');

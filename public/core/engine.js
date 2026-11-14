@@ -15,10 +15,10 @@
 //   • escalation adapter is SIMULATED until a real integration is approved
 //   • append-only, hash-chained audit log
 
-import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mwg8mqm2';
-import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mwg8mqm2';
-import { protectMethods, duplicateIn, phoneKey } from './protect.js?v=mwg8mqm2';
-import { toE164, dialInfo } from './dial.js?v=mwg8mqm2';
+import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mwga99lh';
+import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mwga99lh';
+import { protectMethods, duplicateIn, phoneKey } from './protect.js?v=mwga99lh';
+import { toE164, dialInfo } from './dial.js?v=mwga99lh';
 
 export const S = Object.freeze({
   CREATED: 'CREATED',

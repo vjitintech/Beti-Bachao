@@ -354,6 +354,29 @@ export function createServer(opts = {}) {
     engine.audit(u.id, 'ADMIN_SETUP', 'user', u.id);
     return { ok: true };
   }, { auth: false, limit: [10, 3600e3] });
+  // Newest Android app on our GitHub release ("android-latest"). versionName is 1.0.<build>, and the
+  // release title carries "#<build>". Cached 10 min so GitHub is asked at most ~6 times an hour.
+  const APK_DOWNLOAD = env.APK_URL || 'https://github.com/vjitintech/Beti-Bachao/releases/download/android-latest/BetiBachao24x7.apk';
+  const RELEASE_API = env.APK_RELEASE_API === undefined ? 'https://api.github.com/repos/vjitintech/Beti-Bachao/releases/tags/android-latest' : env.APK_RELEASE_API;
+  let latestApk = { at: 0, value: null, pending: null };
+  async function fetchLatestApk() {
+    if (env.APK_LATEST_BUILD) return { build: Number(env.APK_LATEST_BUILD), version: `1.0.${Number(env.APK_LATEST_BUILD)}`, url: APK_DOWNLOAD };
+    if (!RELEASE_API || RELEASE_API === 'off') return null;
+    const r = await fetchImpl(RELEASE_API, { headers: { accept: 'application/vnd.github+json', 'user-agent': 'beti-bachao-server' }, signal: AbortSignal.timeout(5000) });
+    if (!r.ok) throw new Error('release ' + r.status);
+    const j = await r.json();
+    const build = Number(String(j.name || '').match(/#(\d+)/)?.[1]);
+    if (!build) return null;
+    const apk = (j.assets || []).find((a) => a.name === 'BetiBachao24x7.apk') || (j.assets || []).find((a) => /\.apk$/.test(a.name));
+    return { build, version: `1.0.${build}`, sha: String(j.body || '').match(/Built from ([0-9a-f]{7})/)?.[1] || null, publishedAt: apk?.updated_at || j.published_at || null, sizeMb: apk ? +(apk.size / 1048576).toFixed(1) : null, url: APK_DOWNLOAD };
+  }
+  async function latestAndroid() {
+    if (Date.now() - latestApk.at < 600e3) return latestApk.value;
+    latestApk.pending ||= fetchLatestApk().then((v) => { latestApk = { at: Date.now(), value: v, pending: null }; return v; })
+      .catch((e) => { console.error('[app-latest]', e.message); latestApk = { at: Date.now() - 480e3, value: latestApk.value, pending: null }; return latestApk.value; });
+    return latestApk.pending;
+  }
+  route('GET', '/app/latest', async () => ({ android: await latestAndroid(), download: APK_DOWNLOAD }), { auth: false });
   route('GET', '/public-config', () => ({ setupNeeded: !store.db.users.some((u) => u.role === 'admin'), demo: false, mfaRequired: MFA_REQUIRED, countries: COUNTRIES, defaultCountry: engine.cfg.countryCode, simulatedLabel: SIMULATED_LABEL, radiusStagesKm: engine.cfg.radiusStagesKm, policeAutoConnectSec: engine.cfg.policeAutoConnectSec, policeMaxKm: engine.cfg.policeMaxKm, contactsWaitingSec: engine.cfg.contactsWaitingSec, vapidPublicKey: store.db.vapid.publicKey, features: { appPush: !!(fcm || apns), iosPush: !!(apns || fcm), policeCall: !!voice, sms: !!sms, smsReset: !!sms, roadEta: !!routing, ai: !!ai } }), { auth: false });
 
   route('POST', '/auth/register', async ({ body, res }) => {

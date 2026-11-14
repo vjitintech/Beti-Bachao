@@ -625,3 +625,19 @@ label { font-weight: 600; font-size: .92rem; color: var(--ink); }
 .dl-steps li { margin: 0 0 10px; line-height: 1.5; }
 .dl-share { text-align: center; }
 .dl-share img { background: #fff; padding: 8px; border-radius: 12px; }
+
+/* App version: green = latest, amber = needs update */
+.ver-chip { display: inline-block; font-weight: 700; font-size: .9rem; padding: 3px 10px; border-radius: 999px; background: var(--chip); color: var(--ink-2); }
+.ver-new { background: #DDF3E6; color: #0B5A32; }
+.ver-old { background: #FFE9C7; color: #7A4A00; }
+.ver-new-text { color: #0B6B3A; } .ver-old-text { color: #8A5300; }
+.app-version.is-new { border-inline-start: 5px solid #1E9E5A; }
+.app-version.is-old { border-inline-start: 5px solid var(--haldi); background: #FFFBF1; }
+.app-update { display: flex; align-items: center; gap: 10px; text-decoration: none; }
+.app-update > span:first-of-type { flex: 1; }
+.apk-card { display: flex; flex-direction: column; gap: 6px; border-inline-start: 5px solid var(--pea); }
+@media (prefers-color-scheme: dark) {
+  .ver-new { background: #123A25; color: #B7EFCF; } .ver-old { background: #3A2A0C; color: #FFDFA3; }
+  .ver-new-text { color: #8FE3B4; } .ver-old-text { color: #FFD37A; }
+  .app-version.is-old { background: #2A2210; }
+}
