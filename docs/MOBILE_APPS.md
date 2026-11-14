@@ -2,7 +2,7 @@
 
 | App | Who | Download / build |
 |---|---|---|
-| **Android** (phones + tablets, Android 8+) | Women & girls, volunteers | [Latest APK](https://github.com/vjitintech/Beti-Bachao/releases/download/android-latest/BetiBachao-debug.apk). Built automatically by GitHub Actions ("Android app" workflow) |
+| **Android** (phones + tablets, Android 8+) | Women & girls, volunteers | [Latest APK](https://github.com/vjitintech/Beti-Bachao/releases/download/android-latest/BetiBachao24x7.apk). Built automatically by GitHub Actions ("Android app" workflow) |
 | **iPhone / iPad** (iOS 16+) | Women & girls, volunteers | Built by the "iPhone/iPad app" workflow. Simulator build: [ios-latest](https://github.com/vjitintech/Beti-Bachao/releases/tag/ios-latest). A real iPhone needs an Apple Developer account and TestFlight (see below) |
 | **Web dashboard** (laptop/desktop browser) | Operators, admins | The server's address, e.g. `https://your-server/#/ops` |
 

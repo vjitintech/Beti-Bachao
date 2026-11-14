@@ -70,7 +70,9 @@ jobs:
       - name: Collect outputs
         run: |
           mkdir -p ../dist
-          cp android/app/build/outputs/apk/debug/app-debug.apk ../dist/BetiBachao-debug.apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk ../dist/BetiBachao24x7.apk
+          # Old name kept so links already shared keep working
+          cp ../dist/BetiBachao24x7.apk ../dist/BetiBachao-debug.apk
           [ -f android/app/build/outputs/apk/release/app-release.apk ] && cp android/app/build/outputs/apk/release/app-release.apk ../dist/BetiBachao-release.apk || true
           [ -f android/app/build/outputs/bundle/release/app-release.aab ] && cp android/app/build/outputs/bundle/release/app-release.aab ../dist/BetiBachao-release.aab || true
           ls -la ../dist
@@ -84,4 +86,4 @@ jobs:
           gh release delete android-latest --yes --cleanup-tag 2>/dev/null || true
           gh release create android-latest dist/* --prerelease --target "$GITHUB_SHA" \
             --title "Beti Bachao Android (latest build #${{ github.run_number }})" \
-            --notes "Install BetiBachao-debug.apk on an Android phone or tablet (allow 'Install unknown apps'). Server: ${BB_SERVER_URL:-asked on first launch}. Built from ${GITHUB_SHA::7}."
+            --notes "Install BetiBachao24x7.apk on an Android phone or tablet (allow 'Install unknown apps'). Download page: https://betibachao24x7.com/download. Built from ${GITHUB_SHA::7}."

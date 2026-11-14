@@ -10,7 +10,7 @@ Beti Bachao is not "another panic button". It coordinates the whole response: SO
 
 **➡ For 24×7 real use: [docs/DEPLOY.md](docs/DEPLOY.md)** (one-click Render deploy, about 10 minutes).
 
-**📱 Phone & tablet apps:** [Android APK](https://github.com/vjitintech/Beti-Bachao/releases/download/android-latest/BetiBachao-debug.apk) · iPhone/iPad (TestFlight build via GitHub Actions) — see [docs/MOBILE_APPS.md](docs/MOBILE_APPS.md). Women and volunteers use the apps; operators and admins use the web dashboard.
+**📱 Phone & tablet apps:** [Android APK](https://github.com/vjitintech/Beti-Bachao/releases/download/android-latest/BetiBachao24x7.apk) · iPhone/iPad (TestFlight build via GitHub Actions) — see [docs/MOBILE_APPS.md](docs/MOBILE_APPS.md). Women and volunteers use the apps; operators and admins use the web dashboard.
 
 ## Features
 
