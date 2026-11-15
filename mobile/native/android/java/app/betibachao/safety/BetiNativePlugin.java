@@ -36,7 +36,8 @@ import java.util.List;
                 @Permission(alias = "sms", strings = { Manifest.permission.SEND_SMS }),
                 @Permission(alias = "notifications", strings = { "android.permission.POST_NOTIFICATIONS" }),
                 @Permission(alias = "microphone", strings = { Manifest.permission.RECORD_AUDIO }),
-                @Permission(alias = "phone", strings = { Manifest.permission.CALL_PHONE, Manifest.permission.READ_PHONE_STATE })
+                @Permission(alias = "phone", strings = { Manifest.permission.CALL_PHONE, Manifest.permission.READ_PHONE_STATE }),
+                @Permission(alias = "bluetooth", strings = { "android.permission.BLUETOOTH_SCAN", "android.permission.BLUETOOTH_CONNECT" })
         }
 )
 public class BetiNativePlugin extends Plugin {
@@ -70,6 +71,9 @@ public class BetiNativePlugin extends Plugin {
         }
         if (call.hasOption("role")) Store.put(c, "role", call.getString("role"));
         if (call.hasOption("token") && call.getString("token") == null) SafetyService.stop(c);
+        // SOS button (only if she paired one): stop on sign-out, keep running while she is signed in.
+        if (call.hasOption("token") && call.getString("token") == null) ButtonService.stop(c);
+        else if ("user".equals(Store.get(c, "role")) && Store.token(c) != null) ButtonService.start(c);
         call.resolve();
     }
 
@@ -329,5 +333,151 @@ public class BetiNativePlugin extends Plugin {
             try { sr.startListening(i); } catch (Exception e) { finish.accept(""); }
             new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> finish.accept(""), call.getInt("timeoutMs", 7000) + 3000);
         }, 450);
+    }
+
+    // ---------------------------------------------------------------- Bluetooth SOS button
+    @Override
+    public void load() {
+        ButtonService.listener = (type, detail) -> {
+            JSObject e = new JSObject();
+            e.put("type", type);
+            e.put("detail", detail);
+            notifyListeners("sosButton", e);
+        };
+    }
+
+    private android.bluetooth.BluetoothAdapter btAdapter() {
+        android.bluetooth.BluetoothManager m = (android.bluetooth.BluetoothManager) getContext().getSystemService(Context.BLUETOOTH_SERVICE);
+        return m == null ? null : m.getAdapter();
+    }
+
+    private boolean btPermitted() {
+        Context c = getContext();
+        if (Build.VERSION.SDK_INT >= 31)
+            return ContextCompat.checkSelfPermission(c, "android.permission.BLUETOOTH_SCAN") == PackageManager.PERMISSION_GRANTED
+                    && ContextCompat.checkSelfPermission(c, "android.permission.BLUETOOTH_CONNECT") == PackageManager.PERMISSION_GRANTED;
+        return ContextCompat.checkSelfPermission(c, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    @PluginMethod
+    public void btState(PluginCall call) {
+        Context c = getContext();
+        android.bluetooth.BluetoothAdapter a = btAdapter();
+        JSObject r = new JSObject();
+        r.put("supported", a != null && c.getPackageManager().hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE));
+        r.put("bluetoothOn", a != null && a.isEnabled());
+        r.put("permission", btPermitted());
+        r.put("paired", ButtonService.paired(c));
+        r.put("address", Store.get(c, "btnAddr"));
+        r.put("name", Store.get(c, "btnName"));
+        r.put("connected", ButtonService.connected);
+        r.put("battery", ButtonService.battery);
+        call.resolve(r);
+    }
+
+    /** Asks for "Nearby devices" (Android 12+) or location (older), then scans for ~8 s. */
+    @PluginMethod
+    public void btScan(PluginCall call) {
+        if (btPermitted()) { doBtScan(call); return; }
+        requestPermissionForAlias(Build.VERSION.SDK_INT >= 31 ? "bluetooth" : "location", call, "btPermissionDone");
+    }
+
+    @PermissionCallback
+    private void btPermissionDone(PluginCall call) {
+        if (!btPermitted()) { JSObject r = new JSObject(); r.put("error", "permission"); call.resolve(r); return; }
+        doBtScan(call);
+    }
+
+    @android.annotation.SuppressLint("MissingPermission")
+    private void doBtScan(PluginCall call) {
+        android.bluetooth.BluetoothAdapter a = btAdapter();
+        JSObject r = new JSObject();
+        if (a == null) { r.put("error", "unsupported"); call.resolve(r); return; }
+        if (!a.isEnabled()) { r.put("error", "bluetooth-off"); call.resolve(r); return; }
+        android.bluetooth.le.BluetoothLeScanner sc = a.getBluetoothLeScanner();
+        if (sc == null) { r.put("error", "bluetooth-off"); call.resolve(r); return; }
+        final java.util.Map<String, JSObject> found = new java.util.LinkedHashMap<>();
+        final android.os.ParcelUuid ffe0 = new android.os.ParcelUuid(ButtonService.SVC_BUTTON);
+        final android.bluetooth.le.ScanCallback cb = new android.bluetooth.le.ScanCallback() {
+            @Override public void onScanResult(int type, android.bluetooth.le.ScanResult res) {
+                android.bluetooth.BluetoothDevice d = res.getDevice();
+                String name = null;
+                try { name = d.getName(); } catch (SecurityException ignored) {}
+                android.bluetooth.le.ScanRecord rec = res.getScanRecord();
+                if (name == null && rec != null) name = rec.getDeviceName();
+                boolean button = rec != null && rec.getServiceUuids() != null && rec.getServiceUuids().contains(ffe0);
+                if (name == null && !button) return; // nameless devices can't be told apart
+                String n = name == null ? "SOS button" : name;
+                boolean likely = button || n.toLowerCase(java.util.Locale.ROOT).matches(".*(itag|i-tag|tag|sos|button|key|finder|anti|lost|pendant|alarm).*");
+                JSObject o = new JSObject();
+                o.put("address", d.getAddress());
+                o.put("name", n);
+                o.put("rssi", res.getRssi());
+                o.put("likely", likely);
+                synchronized (found) { found.put(d.getAddress(), o); }
+            }
+        };
+        android.bluetooth.le.ScanSettings settings = new android.bluetooth.le.ScanSettings.Builder()
+                .setScanMode(android.bluetooth.le.ScanSettings.SCAN_MODE_LOW_LATENCY).build();
+        try { sc.startScan(null, settings, cb); } catch (Exception e) { r.put("error", "scan"); call.resolve(r); return; }
+        int ms = Math.max(3000, Math.min(15000, call.getInt("ms", 8000)));
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+            try { sc.stopScan(cb); } catch (Exception ignored) {}
+            java.util.List<JSObject> list;
+            synchronized (found) { list = new ArrayList<>(found.values()); }
+            list.sort((x, y) -> {
+                boolean lx = x.optBoolean("likely"), ly = y.optBoolean("likely");
+                if (lx != ly) return lx ? -1 : 1;
+                return Integer.compare(y.optInt("rssi"), x.optInt("rssi"));
+            });
+            JSArray arr = new JSArray();
+            for (JSObject o : list) arr.put(o);
+            JSObject out = new JSObject();
+            out.put("devices", arr);
+            call.resolve(out);
+        }, ms);
+    }
+
+    /** Opens Android's "Turn on Bluetooth?" prompt. */
+    @PluginMethod
+    public void btEnable(PluginCall call) {
+        try {
+            Intent i = new Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_ENABLE);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+        } catch (Exception e) {
+            try { Intent i = new Intent(Settings.ACTION_BLUETOOTH_SETTINGS); i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); getContext().startActivity(i); } catch (Exception ignored) {}
+        }
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void btPair(PluginCall call) {
+        Context c = getContext();
+        String addr = call.getString("address");
+        if (addr == null || !android.bluetooth.BluetoothAdapter.checkBluetoothAddress(addr)) { call.reject("Invalid address"); return; }
+        Store.putNow(c, "btnAddr", addr);
+        Store.putNow(c, "btnName", call.getString("name", "SOS button"));
+        ButtonService.connected = false;
+        ButtonService.battery = -1;
+        ButtonService.start(c);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void btForget(PluginCall call) {
+        Context c = getContext();
+        ButtonService.stop(c);
+        Store.putNow(c, "btnAddr", null);
+        Store.putNow(c, "btnName", null);
+        ButtonService.battery = -1;
+        call.resolve();
+    }
+
+    /** Test mode: a double press is reported to the app instead of starting an SOS. */
+    @PluginMethod
+    public void btTest(PluginCall call) {
+        ButtonService.testUntil = Boolean.TRUE.equals(call.getBoolean("on", false)) ? System.currentTimeMillis() + 60_000 : 0;
+        call.resolve();
     }
 }

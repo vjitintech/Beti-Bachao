@@ -35,13 +35,16 @@ const perms = [
   'ACCESS_FINE_LOCATION', 'ACCESS_COARSE_LOCATION', 'ACCESS_BACKGROUND_LOCATION', 'FOREGROUND_SERVICE', 'FOREGROUND_SERVICE_LOCATION', 'FOREGROUND_SERVICE_MICROPHONE',
   'POST_NOTIFICATIONS', 'SEND_SMS', 'VIBRATE', 'RECEIVE_BOOT_COMPLETED', 'USE_FULL_SCREEN_INTENT', 'WAKE_LOCK',
   'RECORD_AUDIO', 'CAMERA', 'MODIFY_AUDIO_SETTINGS', 'CALL_PHONE', 'READ_PHONE_STATE',
-].filter((p) => !man.includes(`android.permission.${p}"`)).map((p) => `    <uses-permission android:name="android.permission.${p}" />`).join('\n');
-const features = ['android.hardware.telephony', 'android.hardware.location.gps', 'android.hardware.camera', 'android.hardware.sensor.accelerometer']
+  'BLUETOOTH_SCAN', 'BLUETOOTH_CONNECT', 'FOREGROUND_SERVICE_CONNECTED_DEVICE', // optional Bluetooth SOS button (asked only when she pairs one)
+].filter((p) => !man.includes(`android.permission.${p}"`)).map((p) => `    <uses-permission android:name="android.permission.${p}" />`).join('\n')
+  + (man.includes('android.permission.BLUETOOTH"') ? '' : '\n    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />\n    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />');
+const features = ['android.hardware.telephony', 'android.hardware.location.gps', 'android.hardware.camera', 'android.hardware.sensor.accelerometer', 'android.hardware.bluetooth_le']
   .map((f) => `    <uses-feature android:name="${f}" android:required="false" />`).join('\n'); // tablets without SIM can install
 must(man, '<application', 'AndroidManifest.xml');
 man = man.replace('<application', `${perms}\n${features}\n\n    <application`);
 const components = `
         <service android:name=".SafetyService" android:exported="false" android:foregroundServiceType="location|microphone" />
+        <service android:name=".ButtonService" android:exported="false" android:foregroundServiceType="connectedDevice" />
         <receiver android:name=".SosReceiver" android:exported="false" />
         <receiver android:name=".BootReceiver" android:exported="true">
             <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" /></intent-filter>

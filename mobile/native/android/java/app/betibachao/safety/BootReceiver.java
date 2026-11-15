@@ -14,6 +14,8 @@ public class BootReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context ctx, Intent intent) {
         if (!Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) return;
+        // Paired SOS button: reconnect after a restart (only for a signed-in woman).
+        if ("user".equals(Store.get(ctx, "role")) && Store.token(ctx) != null) ButtonService.start(ctx);
         if (!Store.getBool(ctx, "armed", false) && Store.get(ctx, "safetyMode") == null) return;
         Notify.channels(ctx);
         NotificationCompat.Builder b = new NotificationCompat.Builder(ctx, Notify.CH_UPDATES)
