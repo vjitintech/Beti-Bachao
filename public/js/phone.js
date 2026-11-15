@@ -1,8 +1,8 @@
 // Country-code picker for phone number fields. Every phone input in the app is a pair:
 // <select name="X_cc"> (country + dial code) and <input name="X"> (the number as typed).
 // readPhone() joins them into +E.164 so SMS gateways and the native SMS sender get one format.
-import { DIAL, dialInfo, flag, toE164, phoneProblem, splitE164, countryName } from '../core/dial.js?v=mwga99lh';
-import { esc } from './ui.js?v=mwga99lh';
+import { DIAL, dialInfo, flag, toE164, phoneProblem, splitE164, countryName } from '../core/dial.js?v=mwh6w8vk';
+import { esc } from './ui.js?v=mwh6w8vk';
 
 let fallback = null;
 // Best guess for a new user: chosen country > device locale region > India.

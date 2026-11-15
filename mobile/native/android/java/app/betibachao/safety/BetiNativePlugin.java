@@ -134,7 +134,8 @@ public class BetiNativePlugin extends Plugin {
             return;
         }
         if ("microphone".equals(call.getString("which"))) { requestPermissionForAlias("microphone", call, "allPermissionsDone"); return; }
-        requestAllPermissions(call, "allPermissionsDone");
+        // The same set as before the SOS button existed: Bluetooth is asked only when she pairs a button.
+        requestPermissionForAliases(new String[]{ "location", "sms", "notifications", "microphone", "phone" }, call, "allPermissionsDone");
     }
 
     @PermissionCallback

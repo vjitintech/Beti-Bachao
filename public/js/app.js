@@ -1,12 +1,12 @@
-import { createApi, uuid } from './api.js?v=mwga99lh';
-import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang, ownSosWords, sosVoiceLang } from './i18n.js?v=mwga99lh';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwga99lh';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwga99lh';
-import { TRAINING_MODULES } from '../core/engine.js?v=mwga99lh';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwga99lh';
-import { initProtect } from './protect-ui.js?v=mwga99lh';
-import { a11y, announce, speakStatus } from './a11y.js?v=mwga99lh';
-import { phoneInput, readPhone, guessCountry, bindPhoneFields } from './phone.js?v=mwga99lh';
+import { createApi, uuid } from './api.js?v=mwh6w8vk';
+import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang, ownSosWords, sosVoiceLang } from './i18n.js?v=mwh6w8vk';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwh6w8vk';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwh6w8vk';
+import { TRAINING_MODULES } from '../core/engine.js?v=mwh6w8vk';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwh6w8vk';
+import { initProtect } from './protect-ui.js?v=mwh6w8vk';
+import { a11y, announce, speakStatus } from './a11y.js?v=mwh6w8vk';
+import { phoneInput, readPhone, guessCountry, bindPhoneFields } from './phone.js?v=mwh6w8vk';
 let P = null; // autonomous-protection screens (protect-ui.js), set up in boot()
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'impact', volSel: null };
@@ -183,6 +183,34 @@ function shell(content, { nav = true } = {}) {
 }
 
 
+
+// ------------------------------------------------------------------ Bluetooth SOS button (Android, optional)
+function btCard(bt) {
+  if (!bt) return '';
+  if (!bt.supported) return '';
+  const status = !bt.paired ? '' : !bt.bluetoothOn ? '<span class="ver-chip ver-old">Bluetooth is off</span>'
+    : bt.connected ? `<span class="ver-chip ver-new">● Connected</span>${bt.battery >= 0 ? ` <span class="muted small">battery ${esc(String(bt.battery))}%</span>` : ''}`
+    : '<span class="ver-chip ver-old">Not connected</span> <span class="muted small">keep it near your phone</span>';
+  return `<section class="card bt-card"><h2>🔘 SOS button <span class="badge">Optional</span></h2>
+    ${bt.paired ? `<p><b>${esc(bt.name || 'SOS button')}</b> ${status}</p>
+      <p class="small">Press your button <b>twice quickly</b> for SOS. Your phone vibrates and gives you 5 seconds to cancel, then sends your SOS as usual.</p>
+      <div class="row">${bt.bluetoothOn ? '<button class="btn btn-secondary btn-sm" data-act="bt-test">Test my button</button>' : '<button class="btn btn-primary btn-sm" data-act="bt-enable">Turn on Bluetooth</button>'}<button class="btn btn-ghost btn-sm" data-act="bt-forget">Remove button</button></div>`
+    : `<p>Use a small Bluetooth button on your keychain, pendant or bracelet. Press it twice quickly and your SOS starts, even with your phone in your bag.</p>
+      <button class="btn btn-secondary" data-act="bt-pair">🔍 Pair my SOS button</button>`}
+    ${infoTip('More info', '<p>Works with common Bluetooth "iTag" key-finder tags (sold as anti-lost trackers). The button must stay within about 10 metres of your phone, with Bluetooth on.</p><p>A single press does nothing, so a bump in your bag won\'t start an SOS.</p>')}
+  </section>`;
+}
+let btListening = false;
+async function listenButton() {
+  if (btListening || !native.available() || platform !== 'android') return;
+  btListening = true;
+  await native.onButton((e) => {
+    if (e?.type === 'test-ok') { native.btTest(false); st.btTesting = false; modalClose?.(); toast('✓ Your SOS button works. A real double press will start an SOS.', 'ok'); }
+    else if (e?.type === 'press' && st.btTesting) toast('Press detected — now press twice quickly', 'info');
+    else if (['connected', 'disconnected', 'battery'].includes(e?.type) && location.hash.startsWith('#/settings')) refreshSoft();
+  });
+}
+let modalClose = null;
 // ------------------------------------------------------------------ app updates (Android)
 // Installed build comes from the APK (BB_APP_BUILD = "1.0.<build> (sha)"); the newest from the server.
 const installedBuild = () => Number(String(window.BB_APP_BUILD || '').match(/^1\.0\.(\d+)/)?.[1]) || null;
@@ -710,6 +738,8 @@ async function viewSettings() {
   let history = [];
   if (me.role === 'user') { try { history = (await st.api.myIncidents()).items; } catch {} }
   const c = country();
+  const bt = me.role === 'user' && platform === 'android' && native.available() ? await native.btState() : null;
+  if (bt) listenButton();
   return shell(`
     <h1>${esc(t('settings'))}</h1>
     <section class="card form"><h2>🌐 ${esc(t('language'))} & country</h2>
@@ -728,6 +758,7 @@ async function viewSettings() {
       ${infoTip('More info', `${me.hasPins ? 'PINs are set.' : 'Without a PIN, cancelling needs only a confirmation tap.'} The <strong>duress PIN</strong> makes the app show "cancelled" while it secretly keeps help coming — useful if someone forces you to cancel.`)}
       <form data-form="pins" class="inline-form"><label>${esc(t('cancel_pin'))}<input name="cancelPin" inputmode="numeric" pattern="\\d{4,6}" required maxlength="6" type="password"></label><label>${esc(t('duress_pin'))}<input name="duressPin" inputmode="numeric" pattern="\\d{4,6}" maxlength="6" type="password"></label><button class="btn btn-secondary">${esc(t('save'))}</button></form>
     </section>
+    ${btCard(bt)}
     <section class="card form"><h2>⚡ ${esc(t('triggers'))}</h2>
       <label class="switch"><input type="checkbox" data-change="autoSms" ${p.autoSms !== false ? 'checked' : ''}> ${esc(t('auto_sms'))}${platform === 'android' ? ' <small>(sent automatically by this phone)</small>' : ''}</label>
       ${platform === 'android' ? `<label class="switch"><input type="checkbox" data-change="sms112" ${p.sms112 ? 'checked' : ''}> Also send an SOS SMS with my location to <b>112</b> (India ERSS accepts SMS)</label>` : ''}
@@ -1301,6 +1332,42 @@ const actions = {
   'perm-skip'() { store.set('permsDone:' + st.me.role, true); go(roleHome(st.me.role)); },
   'perm-setup'() { go('#/permissions'); },
   async 'native-perms'() { const r = await native.requestPermissions('all'); const s2 = await native.permissionStatus(); await modal({ title: 'Phone permissions', body: `<ul>${Object.entries(s2 || r || {}).map(([k, v]) => `<li>${esc(k)}: <b>${esc(v)}</b></li>`).join('')}</ul><p class="small muted">For background protection allow location <b>"All the time"</b>, SMS and notifications.</p>`, actions: [{ id: 'set', label: 'Open app settings', kind: 'secondary' }, { id: 'ok', label: 'OK', kind: 'primary' }] }).then((x) => { if (x.id === 'set') native.openSystemSettings('app'); }); },
+  async 'bt-pair'(el) {
+    let st0 = await native.btState();
+    if (st0 && !st0.bluetoothOn) { await native.btEnable(); return toast('Turn on Bluetooth, then tap Pair again', 'info'); }
+    el.disabled = true; el.textContent = '🔍 Searching… press your button once';
+    const r = await native.btScan(9000);
+    el.disabled = false; el.textContent = '🔍 Pair my SOS button';
+    if (!r || r.error === 'permission') return toast('Allow "Nearby devices" so the app can find your button', 'error');
+    if (r.error === 'bluetooth-off') { await native.btEnable(); return toast('Turn on Bluetooth, then tap Pair again', 'info'); }
+    if (r.error) return toast('This phone can\'t search for Bluetooth buttons', 'error');
+    const list = (r.devices || []).slice(0, 12);
+    if (!list.length) return modal({ title: 'No button found', body: '<p>Make sure the button is next to your phone and press it once to wake it up, then tap <b>Pair</b> again.</p><p class="small muted">If it is paired with another app (such as the iTag app), remove it there first.</p>' });
+    const m = await modal({ title: 'Choose your SOS button', body: `<p class="small muted">Buttons found near you, best match first.</p>
+      <label>Button<select name="addr">${list.map((d) => `<option value="${esc(d.address)}|${esc(d.name)}">${d.likely ? '🔘 ' : ''}${esc(d.name)} · ${esc(d.address.slice(-5))}${d.rssi > -65 ? ' · very close' : ''}</option>`).join('')}</select></label>`,
+      actions: [{ id: 'pair', label: 'Pair', kind: 'primary' }, { id: 'no', label: 'Cancel' }] });
+    if (m.id !== 'pair') return;
+    const [address, ...rest] = String(m.data.addr).split('|');
+    await native.btPair({ address, name: rest.join('|') || 'SOS button' });
+    listenButton();
+    toast('Connecting to your button…', 'info');
+    for (let i = 0; i < 12; i++) { await new Promise((ok) => setTimeout(ok, 1000)); st0 = await native.btState(); if (st0?.connected) break; }
+    toast(st0?.connected ? '✓ SOS button connected. Tap "Test my button" to try it.' : 'Paired. It will connect as soon as the button is near your phone.', st0?.connected ? 'ok' : 'info');
+    render();
+  },
+  async 'bt-test'() {
+    await listenButton();
+    await native.btTest(true); st.btTesting = true;
+    const done = modal({ title: 'Test my SOS button', body: '<p>Press your button <b>twice quickly</b>.</p><p class="small muted">Test mode: no SOS will be sent. It ends by itself after 1 minute.</p>', actions: [{ id: 'stop', label: 'Stop test' }] });
+    modalClose = () => document.querySelector('.modal [data-modal="stop"]')?.click();
+    await done; modalClose = null; st.btTesting = false; native.btTest(false);
+  },
+  async 'bt-enable'() { await native.btEnable(); setTimeout(refreshSoft, 4000); },
+  async 'bt-forget'() {
+    const m = await modal({ title: 'Remove SOS button?', body: '<p>Pressing the button will no longer start an SOS. Your other SOS options stay the same.</p>', actions: [{ id: 'rm', label: 'Remove', kind: 'danger' }, { id: 'no', label: 'Keep it' }] });
+    if (m.id !== 'rm') return;
+    await native.btForget(); toast('SOS button removed', 'ok'); render();
+  },
   async 'enable-push'() { if (await enablePush()) { toast('Alerts enabled on this phone', 'ok'); render(); } },
   // volunteer
   async 'vol-avail'(el) {

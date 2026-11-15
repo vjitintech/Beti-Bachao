@@ -2,12 +2,12 @@
 // places & location-based contacts, Track my travel, nearby help, dashboards,
 // police auto-connect status, operator acknowledgement, evidence, admin impact &
 // police-station import, blink trigger page, spoken guidance for blind users.
-import { sosWords, heardSosWord, lang as curLang } from './i18n.js?v=mwga99lh';
-import { pickContacts, duplicateIn, phoneKey, stationName } from '../core/protect.js?v=mwga99lh';
-import { announce, speakStatus, listenOnce, a11y } from './a11y.js?v=mwga99lh';
-import { blinkGuard } from './blink.js?v=mwga99lh';
-import { phoneInput, readPhone, guessCountry } from './phone.js?v=mwga99lh';
-import { DIAL, flag, countryName } from '../core/dial.js?v=mwga99lh';
+import { sosWords, heardSosWord, lang as curLang } from './i18n.js?v=mwh6w8vk';
+import { pickContacts, duplicateIn, phoneKey, stationName } from '../core/protect.js?v=mwh6w8vk';
+import { announce, speakStatus, listenOnce, a11y } from './a11y.js?v=mwh6w8vk';
+import { blinkGuard } from './blink.js?v=mwh6w8vk';
+import { phoneInput, readPhone, guessCountry } from './phone.js?v=mwh6w8vk';
+import { DIAL, flag, countryName } from '../core/dial.js?v=mwh6w8vk';
 
 export function initProtect(c) {
   const { st, esc, toast, modal, showErr, go, render, geo, contacts, prefs, store, native, platform, telHref, fmtTime, pretty, nativeShare, serverUrl, isNative, recorder } = c;

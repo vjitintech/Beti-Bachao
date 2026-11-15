@@ -38,6 +38,14 @@ export const native = {
   // Android: silent 15 s evidence clip after the SOS is active (kept only if a voice is heard).
   takeLastCrash() { return call('takeLastCrash'); },
   recordEvidence({ incidentId, seconds = 15 }) { return call('recordEvidence', { incidentId, seconds }); },
+  // Android: optional Bluetooth SOS button (iTag-style keychain / pendant). Double press = SOS.
+  btState() { return call('btState'); },
+  btScan(ms = 8000) { return call('btScan', { ms }); },
+  btEnable() { return call('btEnable'); },
+  btPair({ address, name }) { return call('btPair', { address, name }); },
+  btForget() { return call('btForget'); },
+  btTest(on) { return call('btTest', { on: !!on }); },
+  async onButton(cb) { try { const p = plugin(); return p?.addListener ? await p.addListener('sosButton', cb) : null; } catch { return null; } },
   // Android: places a phone call straight away (no dialler tap). Once per incident+number.
   placeCall({ number, key }) { return call('placeCall', { number, key }); },
 };
