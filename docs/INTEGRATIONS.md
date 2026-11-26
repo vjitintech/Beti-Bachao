@@ -4,7 +4,7 @@ Each one is **off until its environment variables are set**, and the app works w
 
 ## Database (PostgreSQL) — recommended
 `DATABASE_URL=postgres://user:password@host:5432/dbname` (add `?sslmode=require` for managed databases; this is the default for remote hosts).
-Every change is also written to PostgreSQL. On start, the latest data is loaded from it, so accounts and incidents survive redeploys on hosts that wipe the disk. Works with Neon, Supabase, Render Postgres, AWS RDS and similar. The server creates its own table (`bb_state`). Without it, data lives in `DATA_FILE` on a persistent disk.
+Changes are also written to PostgreSQL, at most once every 15 seconds (`PG_WRITE_INTERVAL_MS`; each write replaces the whole document, so writing more often fills a small database with WAL). On start, the latest data is loaded from it — unless the disk copy is newer (the database was down while the app kept running), in which case the disk copy is kept and copied up, so accounts and incidents survive redeploys on hosts that wipe the disk. Works with Neon, Supabase, Render Postgres, AWS RDS and similar. The server creates its own table (`bb_state`). Without it, data lives in `DATA_FILE` on a persistent disk.
 
 ## Police auto-connect: station list + call gateway
 - **Station list**: Admin → Police stations → paste CSV `name,district,lat,lng,phone,phone2`.

@@ -55,3 +55,41 @@ test('server state survives a wiped disk when DATABASE_URL is set', { skip }, as
   await new Promise((r) => b.server.close(r));
   await b.store.pg.flush(); b.store.pg.close();
 });
+
+test('mirror writes are spaced out and identical snapshots are skipped', { skip }, async () => {
+  const { attachPostgres } = await import('../server/pgstore.js');
+  const pg = await new PgClient(URL_).connect();
+  await pg.query('DROP TABLE IF EXISTS bb_state');
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bbpg-')), 'db.json');
+  const pgc = await openPostgres(URL_, file);
+  const store = { db: { n: 0 }, save() {} };
+  attachPostgres(store, pgc, { url: URL_, intervalMs: 300 });
+  for (let i = 0; i < 50; i++) { store.db.n = i; store.save(); await new Promise((r) => setTimeout(r, 10)); }
+  await store.pg.flush();
+  assert.ok(store.pg.status.writes <= 4, `expected few writes, got ${store.pg.status.writes}`);
+  const [row] = await pg.query("SELECT doc->>'n' AS n FROM bb_state WHERE id = 1");
+  assert.equal(row.n, '49'); // latest state always lands
+  const before = store.pg.status.writes;
+  await store.pg.flush(); // nothing changed → no write
+  assert.equal(store.pg.status.writes, before);
+  store.pg.close(); pg.end();
+});
+
+test('a newer disk copy is kept (and copied up) instead of being rolled back', { skip }, async () => {
+  const pg = await new PgClient(URL_).connect();
+  await pg.query('DROP TABLE IF EXISTS bb_state');
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bbpg-')), 'db.json');
+  fs.writeFileSync(file, JSON.stringify({ v: 'old' }));
+  (await openPostgres(URL_, file)).end(); // PostgreSQL now holds "old"
+  await pg.query("UPDATE bb_state SET updated_at = now() - interval '1 hour'");
+  fs.writeFileSync(file, JSON.stringify({ v: 'new' })); // saved to disk while the database was down
+  (await openPostgres(URL_, file)).end();
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).v, 'new');
+  const [row] = await pg.query("SELECT doc->>'v' AS v FROM bb_state WHERE id = 1");
+  assert.equal(row.v, 'new');
+  // And a fresh, empty disk still restores from PostgreSQL.
+  const file2 = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bbpg-')), 'db.json');
+  (await openPostgres(URL_, file2)).end();
+  assert.equal(JSON.parse(fs.readFileSync(file2, 'utf8')).v, 'new');
+  pg.end();
+});
