@@ -15,10 +15,10 @@
 //   • escalation adapter is SIMULATED until a real integration is approved
 //   • append-only, hash-chained audit log
 
-import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mwh6w8vk';
-import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mwh6w8vk';
-import { protectMethods, duplicateIn, phoneKey } from './protect.js?v=mwh6w8vk';
-import { toE164, dialInfo } from './dial.js?v=mwh6w8vk';
+import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mwxgp6x0';
+import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mwxgp6x0';
+import { protectMethods, duplicateIn, phoneKey } from './protect.js?v=mwxgp6x0';
+import { toE164, dialInfo } from './dial.js?v=mwxgp6x0';
 
 export const S = Object.freeze({
   CREATED: 'CREATED',
@@ -972,7 +972,7 @@ export class Engine {
         const v = this.vol(a.volunteerId);
         const d = loc && v?.lastLocation ? haversineKm(loc, v.lastLocation) : null;
         const active = ACTIVE_ASG.has(a.status);
-        return { ...a, volunteerName: this.user(a.volunteerId)?.displayName, position: active ? v?.lastLocation : null, distanceKm: d != null ? +d.toFixed(2) : null, ...(active ? this.etaFor(a, d, ['ARRIVED', 'ASSISTING'].includes(a.status)) : { approxEtaMin: approxEtaMinutes(d, this.cfg) }), ...(active ? this.motion(a, loc, true) : {}) };
+        return { ...a, volunteerName: this.user(a.volunteerId)?.displayName, position: active ? v?.lastLocation : null, locationUpdatedAt: active ? v?.lastLocationAt || null : null, distanceKm: d != null ? +d.toFixed(2) : null, ...(active ? this.etaFor(a, d, ['ARRIVED', 'ASSISTING'].includes(a.status)) : { approxEtaMin: approxEtaMinutes(d, this.cfg) }), ...(active ? this.motion(a, loc, true) : {}) };
       }),
       alertedPositions: this.db.notifications.filter((n) => n.incidentId === inc.id && n.kind === 'ALERT').map((n) => ({ response: n.response, distanceKm: n.meta?.distanceKm ?? null, position: this.vol(n.recipientId)?.lastLocation || null })),
       notifications: this.db.notifications.filter((n) => n.incidentId === inc.id).map((n) => ({ id: n.id, kind: n.kind, recipient: this.user(n.recipientId)?.displayName, status: n.status, channel: n.channel, attemptCount: n.attemptCount, response: n.response })),

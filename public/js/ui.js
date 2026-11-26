@@ -89,7 +89,7 @@ export const niceRange = (km) => NICE.find((n) => n >= km) || Math.ceil(km / 50)
 export function stepRange(km, steps) { const i = Math.max(0, NICE.indexOf(niceRange(km))); return NICE[Math.max(0, Math.min(NICE.length - 1, i + steps))]; }
 const fmtKm = (km) => (km < 1 ? `${Math.round(km * 1000)} m` : `${+km.toFixed(km < 10 ? 1 : 0)} km`);
 
-export function ppiSvg({ center, rangeKm, rings = null, activeRing = null, targets = [], title = 'PPI' }) {
+export function ppiSvg({ center, rangeKm, rings = null, activeRing = null, targets = [], title = 'PPI', scope = '' }) {
   const V = 360, C = V / 2, R = 150;
   const range = rangeKm || 1;
   const ringKms = rings || [range / 4, range / 2, (3 * range) / 4, range];
@@ -143,16 +143,19 @@ export function ppiSvg({ center, rangeKm, rings = null, activeRing = null, targe
     if (t.id) {
       const parts = [t.id, t.distText, t.etaText].filter(Boolean);
       const txt = parts.join(' · ');
+      // The ETA part counts down every second between server updates (see updateLive in app.js).
+      const etaLive = t.ref && t.etaMin != null && t.etaText ? `<tspan data-live="eta" data-k="${esc(t.ref)}" data-min="${esc(t.etaMin)}">${esc(t.etaText)}</tspan>` : null;
       const w = Math.max(30, txt.length * 5.9 + 12), h = 17;
       let bx = x - w / 2, by = y - 14 - h;
       bx = Math.max(4, Math.min(V - w - 4, bx)); if (by < 4) by = y + 12;
       box = `<g class="ppi-box-lbl"><line x1="${x.toFixed(1)}" y1="${(by + h > y ? by : by + h).toFixed(1)}" x2="${x.toFixed(1)}" y2="${(by + h > y ? y + 5 : y - 5).toFixed(1)}" class="ppi-leader"/>`
         + `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${w.toFixed(1)}" height="${h}" rx="3" class="ppi-tag ${t.moving ? 'ppi-tag-moving' : ''}"/>`
-        + `<text x="${(bx + w / 2).toFixed(1)}" y="${(by + 12).toFixed(1)}" class="ppi-tag-txt"><tspan class="ppi-tag-id">${esc(t.id)}</tspan>${parts.slice(1).map((p) => ` · ${esc(p)}`).join('')}</text></g>`;
+        + `<text x="${(bx + w / 2).toFixed(1)}" y="${(by + 12).toFixed(1)}" class="ppi-tag-txt"><tspan class="ppi-tag-id">${esc(t.id)}</tspan>${parts.slice(1).map((p) => (etaLive && p === t.etaText ? ` · ${etaLive}` : ` · ${esc(p)}`)).join('')}</text></g>`;
     }
-    tgts += `<g class="ppi-tgt ppi-${esc(t.kind || 'responder')} ${t.moving ? 'ppi-moving' : ''}"><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="9" class="ppi-halo"/><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4.6" class="ppi-dot"><title>${esc(t.title || t.id)}</title></circle></g>${box}`;
+    const mv = t.ref ? ` data-mv="${esc(t.ref)}" data-x="${x.toFixed(1)}" data-y="${y.toFixed(1)}"` : '';
+    tgts += `<g class="ppi-tgt ppi-${esc(t.kind || 'responder')} ${t.moving ? 'ppi-moving' : ''} ${t.stale ? 'ppi-stale' : ''} ${t.onScene ? 'ppi-onscene' : ''}"${mv}><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="9" class="ppi-halo"/><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4.6" class="ppi-dot"><title>${esc(t.title || t.id)}</title></circle>${box}</g>`;
   }
-  return `<svg viewBox="0 0 ${V} ${V}" class="ppi" role="img" aria-label="Radar plan position indicator: her location at centre, volunteers by range and bearing">
+  return `<svg viewBox="0 0 ${V} ${V}" class="ppi" data-scope="${esc(scope)}" role="img" aria-label="Radar plan position indicator: her location at centre, volunteers by range and bearing">
     <defs><radialGradient id="ppiBg"><stop offset="0" stop-color="#03200f"/><stop offset="1" stop-color="#000"/></radialGradient>
       <filter id="ppiGlow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
     <rect width="${V}" height="${V}" rx="18" class="ppi-bezel"/>
@@ -170,5 +173,5 @@ const STATE_CODE = { ACCEPTED: 'ACPT', 'EN ROUTE': 'ENRT', ARRIVED: 'ONSC', ASSI
 // Multi-target readout table (track id, range, bearing, speed, ETA, state).
 export function ppiTable(rows) {
   if (!rows.length) return '';
-  return `<div class="ppi-table-wrap"><table class="ppi-table"><thead><tr><th>TRK</th><th>RNG</th><th>BRG</th><th>SPD</th><th>ETA</th><th>STATE</th></tr></thead><tbody>${rows.map((r) => `<tr class="${r.you ? 'ppi-row-you' : ''}"><td>${esc(r.id)}</td><td>${r.km != null ? esc(fmtKm(r.km)) : '—'}</td><td>${r.brg != null ? esc(String(r.brg).padStart(3, '0')) + '°' : '—'}</td><td>${r.spd != null ? esc(r.spd) + ' km/h' : '—'}</td><td>${r.eta != null ? (r.eta === 0 ? 'ON SCENE' : '≈' + esc(r.eta) + 'm') : '—'}</td><td>${esc(STATE_CODE[r.state] || r.state || '')}${r.closing ? ` <span class="ppi-${esc(r.closing.toLowerCase())}">${r.closing === 'CLOSING' ? '▼CLS' : r.closing === 'OPENING' ? '▲OPN' : '■STD'}</span>` : ''}</td></tr>`).join('')}</tbody></table><p class="ppi-key">ACPT accepted · ENRT en route · ONSC on scene · ▼CLS closing in · ▲OPN moving away</p></div>`;
+  return `<div class="ppi-table-wrap"><table class="ppi-table"><thead><tr><th>TRK</th><th>RNG</th><th>BRG</th><th>SPD</th><th>ETA</th><th>STATE</th></tr></thead><tbody>${rows.map((r) => `<tr class="${r.you ? 'ppi-row-you' : ''}"><td>${esc(r.id)}</td><td>${r.km != null ? esc(fmtKm(r.km)) : '—'}</td><td>${r.brg != null ? esc(String(r.brg).padStart(3, '0')) + '°' : '—'}</td><td>${r.spd != null ? esc(r.spd) + ' km/h' : '—'}</td><td>${r.eta != null ? (r.eta === 0 ? 'ON SCENE' : r.ref ? `<span data-live="eta" data-k="${esc(r.ref)}" data-min="${esc(r.eta)}" data-fmt="table">≈${esc(r.eta)}m</span>` : '≈' + esc(r.eta) + 'm') : '—'}</td><td>${esc(STATE_CODE[r.state] || r.state || '')}${r.closing ? ` <span class="ppi-${esc(r.closing.toLowerCase())}">${r.closing === 'CLOSING' ? '▼CLS' : r.closing === 'OPENING' ? '▲OPN' : '■STD'}</span>` : ''}</td></tr>`).join('')}</tbody></table><p class="ppi-key">ACPT accepted · ENRT en route · ONSC on scene · ▼CLS closing in · ▲OPN moving away</p></div>`;
 }

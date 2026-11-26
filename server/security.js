@@ -73,9 +73,15 @@ export function blinkFrameHeaders(secure) {
   return h;
 }
 
+// Live-map tiles are images from the tile server (OpenStreetMap unless MAP_TILE_URL says otherwise).
+const TILE_HOSTS = (() => {
+  const hosts = ['https://tile.openstreetmap.org'];
+  try { if (process.env.MAP_TILE_URL) hosts.push(new URL(process.env.MAP_TILE_URL.replace(/\{[a-z]\}/g, 'a')).origin.replace('://a.', '://*.')); } catch {}
+  return hosts.join(' ');
+})();
 export function securityHeaders(secure) {
   const h = {
-    'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; frame-src 'self' https://maps.google.com https://www.google.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
+    'Content-Security-Policy': `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: ${TILE_HOSTS}; media-src 'self' blob:; frame-src 'self' https://maps.google.com https://www.google.com; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
     'X-Frame-Options': 'DENY',

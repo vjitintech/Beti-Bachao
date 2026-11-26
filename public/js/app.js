@@ -1,12 +1,13 @@
-import { createApi, uuid } from './api.js?v=mwh6w8vk';
-import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang, ownSosWords, sosVoiceLang } from './i18n.js?v=mwh6w8vk';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwh6w8vk';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwh6w8vk';
-import { TRAINING_MODULES } from '../core/engine.js?v=mwh6w8vk';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwh6w8vk';
-import { initProtect } from './protect-ui.js?v=mwh6w8vk';
-import { a11y, announce, speakStatus } from './a11y.js?v=mwh6w8vk';
-import { phoneInput, readPhone, guessCountry, bindPhoneFields } from './phone.js?v=mwh6w8vk';
+import { createApi, uuid } from './api.js?v=mwxgp6x0';
+import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang, ownSosWords, sosVoiceLang } from './i18n.js?v=mwxgp6x0';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwxgp6x0';
+import { liveMapHtml, syncMaps, animateMaps, recentre } from './livemap.js?v=mwxgp6x0';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwxgp6x0';
+import { TRAINING_MODULES } from '../core/engine.js?v=mwxgp6x0';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwxgp6x0';
+import { initProtect } from './protect-ui.js?v=mwxgp6x0';
+import { a11y, announce, speakStatus } from './a11y.js?v=mwxgp6x0';
+import { phoneInput, readPhone, guessCountry, bindPhoneFields } from './phone.js?v=mwxgp6x0';
 let P = null; // autonomous-protection screens (protect-ui.js), set up in boot()
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'impact', volSel: null };
@@ -94,6 +95,21 @@ const infoTip = (label, html) => `<details class="info-tip"><summary aria-label=
 // Live tracking of every accepted responder on a PPI radar scope + multi-target readout.
 const distText = (km) => (km == null ? '' : km < 1 ? `${Math.round(km * 1000)} m` : `${km} km`);
 const etaText = (status, eta) => (status === 'ARRIVED' || status === 'ASSISTING' ? 'on scene' : eta == null ? '' : eta <= 1 ? '<1 min' : `${eta} min`);
+// A responder's location older than this is shown faded with "last seen".
+const STALE_SEC = 45;
+const isStale = (iso) => !!iso && (Date.now() + (st.skew || 0) - Date.parse(iso)) / 1000 > STALE_SEC;
+const onSceneSt = (status) => status === 'ARRIVED' || status === 'ASSISTING';
+const mapTiles = () => st.cfg?.map || { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: '© OpenStreetMap contributors' };
+// Real-map view of the same people the radar shows (her, responders, optionally alerted volunteers).
+function liveMap(key, center, people, { fallbackTitle = 'Her live location', tall = false } = {}) {
+  if (!center) return '';
+  const items = people.filter((p) => p.position).map((p) => ({ ref: p.ref || null, kind: p.kind || 'responder', lat: p.position.lat, lng: p.position.lng, id: p.id, dist: p.distText || '', etaMin: p.etaMin ?? null, etaText: p.etaText || '', stale: !!p.stale, onScene: !!p.onScene, track: (p.track || []).map((q) => [q.lat, q.lng]) }));
+  return liveMapHtml(key, { her: { lat: center.lat, lng: center.lng, accuracyM: center.accuracyM || null }, items, fallback: googleMap(center, fallbackTitle, key) }, { tall });
+}
+// Map | Radar switch for a tracking card (remembered per card).
+const trackView = (key) => (st.trackView ||= {})[key] || 'map';
+const viewSwitch = (key) => `<div class="viewsw" role="tablist" aria-label="Map or radar">${[['map', '🗺️ Map'], ['radar', '📡 Radar']].map(([v, l]) => `<button type="button" role="tab" class="viewsw-btn ${trackView(key) === v ? 'on' : ''}" aria-selected="${trackView(key) === v}" data-act="track-view" data-key="${esc(key)}" data-v="${v}">${l}</button>`).join('')}</div>`;
+
 // One line under the radar saying what the ETA is based on.
 const etaBasisNote = (list) => {
   const live = (list || []).filter((r) => !['ARRIVED', 'ASSISTING'].includes(r.status) && r.approxEtaMin != null);
@@ -106,12 +122,13 @@ const etaBasisNote = (list) => {
 const trkId = (r) => (r.isYou ? 'YOU' : (r.label.match(/ ([A-Z])$/) || [])[1] || r.label.slice(0, 3).toUpperCase());
 function trackingCard(list, center, radii, { title = 'Live tracking', map = true, note = '', key = 'track', viewer = 'her' } = {}) {
   list = list || [];
-  const rows = list.map((r) => ({ id: trkId(r), you: r.isYou, km: r.distanceKm, brg: r.bearingDeg, spd: r.speedKmh, eta: r.status === 'ARRIVED' || r.status === 'ASSISTING' ? 0 : r.approxEtaMin, state: pretty(r.status).toUpperCase(), closing: r.status === 'EN_ROUTE' ? r.closing : null }));
-  const targets = list.filter((r) => r.position).map((r) => ({ id: trkId(r), kind: r.isYou ? 'you' : 'responder', position: r.position, track: r.track, distText: distText(r.distanceKm), etaText: etaText(r.status, r.approxEtaMin), moving: r.status === 'EN_ROUTE' && r.closing !== 'OPENING', title: `${r.label} · ${pretty(r.status)}` }));
+  const rows = list.map((r) => ({ id: trkId(r), ref: r.ref, you: r.isYou, km: r.distanceKm, brg: r.bearingDeg, spd: r.speedKmh, eta: r.status === 'ARRIVED' || r.status === 'ASSISTING' ? 0 : r.approxEtaMin, state: pretty(r.status).toUpperCase(), closing: r.status === 'EN_ROUTE' ? r.closing : null }));
+  const targets = list.filter((r) => r.position).map((r) => ({ id: trkId(r), ref: r.ref, kind: r.isYou ? 'you' : 'responder', position: r.position, track: r.track, distText: distText(r.distanceKm), etaMin: onSceneSt(r.status) ? null : r.approxEtaMin, onScene: onSceneSt(r.status), stale: isStale(r.locationUpdatedAt), etaText: etaText(r.status, r.approxEtaMin), moving: r.status === 'EN_ROUTE' && r.closing !== 'OPENING', title: `${r.label} · ${pretty(r.status)}` }));
   const range = ppiRange(key, niceRange(Math.max(0.5, ...list.map((r) => r.distanceKm || 0)) * 1.15));
   return `<section class="card track-card"><h2>🛰️ ${esc(title)}</h2>
-    ${list.length ? `<div class="ppi-wrap">${map && center && targets.length ? `<div class="ppi-box">${ppiSvg({ center, rangeKm: range, targets, title: 'PPI · LIVE' })}${zoomBar('ppi-zoom', key, 'Radar')}</div>
-      <div class="ppi-legend"><span><i class="l-her"></i>HER</span><span><i class="l-vol"></i>VOLUNTEER</span>${viewer === 'volunteer' ? '<span><i class="l-you"></i>YOU</span>' : ''}<span><i class="l-trk"></i>TRACK</span></div>
+    ${list.length && map && center && targets.length ? `${viewSwitch(key)}<div class="track-map" ${trackView(key) === 'map' ? '' : 'hidden'}>${liveMap(`tm-${key}`, center, targets)}</div>` : ''}
+    ${list.length ? `<div class="ppi-wrap">${map && center && targets.length ? `<div class="ppi-box" ${trackView(key) === 'radar' ? '' : 'hidden'}>${ppiSvg({ center, rangeKm: range, targets, title: 'PPI · LIVE', scope: key })}${zoomBar('ppi-zoom', key, 'Radar')}</div>
+      <div class="ppi-legend" ${trackView(key) === 'radar' ? '' : 'hidden'}><span><i class="l-her"></i>HER</span><span><i class="l-vol"></i>VOLUNTEER</span>${viewer === 'volunteer' ? '<span><i class="l-you"></i>YOU</span>' : ''}<span><i class="l-trk"></i>TRACK</span></div>
       ${infoTip('What do the radar and table show?', `<p>Each box shows that volunteer's distance and ETA; it counts down as they get closer. A blinking dot is on the move towards her.</p><p>${viewer === 'volunteer'
         ? 'She is the red dot in the centre. Blue dots are the volunteers who accepted (you are the light-blue dot); green lines show the path each one has travelled.'
         : 'You are the red dot in the centre. Blue dots are verified volunteers who accepted your SOS; green lines show the path each one has travelled.'} Distance from the centre = how far away; the angle = direction (000° = north). The rotating line only shows the scope is live.</p><p>RNG straight-line range · BRG bearing · SPD speed · ETA travel time by road (with live traffic when available). ACPT accepted · ENRT en route · ONSC on scene · ▼CLS closing in · ▲OPN moving away.</p><p>Live from each responder's phone GPS. ${esc(note)}</p>`)}` : ''}
@@ -642,7 +659,7 @@ async function viewIncident(id, params) {
     ${contacts.list().length ? `<div class="card"><h2>📞 ${esc(t('contacts'))}</h2><p class="small muted">${esc(t('text_contacts'))}: <a href="${esc(smsHref(P.activeContacts(v.location || geo.last).contacts.map((c) => c.phone), sosMessage(v.location || geo.last, v.liveSharePath?.slice(3))))}">💬 SMS with live tracking link</a></p><div class="row">${contacts.list().map((c) => `<a class="btn btn-secondary" href="${telHref(c.phone)}">📞 ${esc(c.name)}</a>`).join('')}</div></div>` : ''}
     <div class="card"><div class="row">${smsButtons()}<button class="btn btn-ghost" data-act="native-share">📤 Share…</button></div></div>
     ${locationCard(v.location, { live: true })}
-    ${v.location ? `<section class="card"><h2>📍 Your live location (as shared)</h2>${googleMap(v.location, 'Your live location', 'mine')}</section>` : ''}
+    ${v.location && !(v.responders || []).some((r) => r.position) ? `<section class="card"><h2>📍 Your live location (as shared)</h2>${googleMap(v.location, 'Your live location', 'mine')}</section>` : ''}
     <section class="cancel-zone"><button class="btn btn-cancel-sos btn-block" data-act="cancel-sos" data-id="${esc(v.id)}">✖ ${esc(t('cancel_sos'))} — false alarm</button><p class="small muted">Only if you are safe. ${st.me?.hasPins ? 'Needs your PIN.' : ''}</p></section>
     ` : `
     ${(v.rateable || []).length ? `<section class="card"><h2>How did the volunteers do?</h2>${infoTip('More info', `Your rating is private and helps the trust team keep volunteers safe and accountable.`)}
@@ -932,18 +949,18 @@ function opsDetail(d, tl, cfg) {
   const live = d.assignments.filter((a) => a.position);
   const targets = [
     ...(d.alertedPositions || []).filter((p) => p.response !== 'ACCEPTED').map((p) => ({ kind: p.response === 'DECLINED' ? 'declined' : 'alerted', position: p.position, title: `${p.response || 'alerted'} ${p.distanceKm ?? ''} km` })),
-    ...live.map((a) => ({ id: a.volunteerName.split(' ')[0].toUpperCase(), kind: 'responder', position: a.position, track: a.track, distText: distText(a.distanceKm), etaText: etaText(a.status, a.approxEtaMin), moving: a.status === 'EN_ROUTE' && a.closing !== 'OPENING', title: `${a.volunteerName} ${a.status}` })),
+    ...live.map((a) => ({ id: a.volunteerName.split(' ')[0].toUpperCase(), ref: a.id, kind: 'responder', position: a.position, track: a.track, distText: distText(a.distanceKm), etaMin: onSceneSt(a.status) ? null : a.approxEtaMin, onScene: onSceneSt(a.status), stale: isStale(a.locationUpdatedAt), etaText: etaText(a.status, a.approxEtaMin), moving: a.status === 'EN_ROUTE' && a.closing !== 'OPENING', title: `${a.volunteerName} ${a.status}` })),
   ];
   const near = live.length ? ppiRange('ops-approach', niceRange(Math.max(0.5, ...live.map((a) => a.distanceKm || 0)) * 1.15)) : null;
   const searchRange = ppiRange('ops-search', radii[2]);
-  const rows = live.map((a) => ({ id: a.volunteerName.split(' ')[0].toUpperCase(), km: a.distanceKm, brg: a.bearingDeg, spd: a.speedKmh, eta: a.status === 'ARRIVED' || a.status === 'ASSISTING' ? 0 : a.approxEtaMin, state: pretty(a.status).toUpperCase(), closing: a.status === 'EN_ROUTE' ? a.closing : null }));
+  const rows = live.map((a) => ({ id: a.volunteerName.split(' ')[0].toUpperCase(), ref: a.id, km: a.distanceKm, brg: a.bearingDeg, spd: a.speedKmh, eta: a.status === 'ARRIVED' || a.status === 'ASSISTING' ? 0 : a.approxEtaMin, state: pretty(a.status).toUpperCase(), closing: a.status === 'EN_ROUTE' ? a.closing : null }));
   const scope = d.location ? `<div class="ppi-grid">
       <div class="ppi-wrap"><h3 class="ppi-title">① SEARCH radar — who was alerted</h3>
-        <div class="ppi-box">${ppiSvg({ center: d.location, rangeKm: searchRange, rings: radii.filter((r) => r <= searchRange), activeRing: d.search?.stage ?? null, targets, title: 'PPI · SEARCH' })}${zoomBar('ppi-zoom', 'ops-search', 'Search radar')}</div>
+        <div class="ppi-box">${ppiSvg({ center: d.location, rangeKm: searchRange, rings: radii.filter((r) => r <= searchRange), activeRing: d.search?.stage ?? null, targets, title: 'PPI · SEARCH', scope: 'ops-search' })}${zoomBar('ppi-zoom', 'ops-search', 'Search radar')}</div>
         <div class="ppi-legend"><span><i class="l-her"></i>HER</span><span><i class="l-vol"></i>ACCEPTED</span><span><i class="l-alert"></i>ALERTED</span><span><i class="l-decl"></i>DECLINED</span></div>
         <p class="ppi-explain">The whole search area around her. Rings are the ${radii.join(' / ')} km search stages; the <b>bright ring</b> is the stage being searched now. Hollow circles = volunteers alerted but not yet accepted; grey = declined; solid blue = accepted. Use it to see if the search is reaching enough people.</p></div>
       ${near ? `<div class="ppi-wrap"><h3 class="ppi-title">② APPROACH radar — who is coming</h3>
-        <div class="ppi-box">${ppiSvg({ center: d.location, rangeKm: near, targets: targets.filter((x) => x.kind === 'responder'), title: 'PPI · APPROACH' })}${zoomBar('ppi-zoom', 'ops-approach', 'Approach radar')}</div>
+        <div class="ppi-box">${ppiSvg({ center: d.location, rangeKm: near, targets: targets.filter((x) => x.kind === 'responder'), title: 'PPI · APPROACH', scope: 'ops-approach' })}${zoomBar('ppi-zoom', 'ops-approach', 'Approach radar')}</div>
         <p class="ppi-explain">Zoomed in on only the volunteers who accepted, with their travelled path (green). The table gives each one's range (distance), bearing (direction from her), speed, ETA and whether they are closing in. Use it to spot a responder who has stopped or is moving away.</p>${ppiTable(rows)}${etaBasisNote(live)}</div>`
       : `<div class="ppi-wrap"><h3 class="ppi-title">② APPROACH radar</h3><p class="ppi-explain">Appears when a volunteer accepts. It zooms in on accepted volunteers and tracks them closing in on her.</p></div>`}
     </div>` : '';
@@ -953,7 +970,8 @@ function opsDetail(d, tl, cfg) {
     ${d.duress ? '<div class="alert alert-danger"><strong>🚩 DURESS PIN USED.</strong> The user\'s app shows "cancelled". Treat as active danger. Do not contact her in a way that could reveal this.</div>' : ''}
     <p>Trigger: ${esc(pretty(String(d.trigger || "").toUpperCase()))}${d.silent ? ' (silent)' : ''} · Escalation: <strong>${esc(pretty(d.escalationStatus))}</strong> · Alerted: ${esc(d.alertedCount)} · Battery: ${d.battery ? Math.round(d.battery.level * 100) + '%' : 'unknown'}</p>
     ${d.location ? `${scope}
-      <h3>📍 Her live location</h3>${googleMap(d.location, 'Her live location', 'ops')}
+      <h3>🗺️ Live map — her and the responders</h3>${liveMap('ops', d.location, targets, { tall: true })}
+      <p class="small"><a href="https://maps.google.com/?q=${esc(d.location.lat.toFixed(5))},${esc(d.location.lng.toFixed(5))}" target="_blank" rel="noopener">Open her location in Google Maps</a></p>
       <p>📍 ${esc(d.location.lat.toFixed(5))}, ${esc(d.location.lng.toFixed(5))} · ±${esc(d.location.accuracyM)} m · ${esc(d.location.source)} · <span data-live="age" data-fmt="short" data-at="${esc(d.location.observedAt)}"></span> old ${d.location.stale ? '<span class="badge badge-warn">STALE</span>' : ''} · ${esc(d.location.vertical)}</p>
       ${d.locationHistory.some((l) => l.suspect) ? `<p class="badge badge-warn">Suspect location jumps ignored: ${d.locationHistory.filter((l) => l.suspect).map((l) => esc(l.suspectReason)).join('; ')}</p>` : ''}` : '<div class="alert alert-warn">No usable location. Contact the user through official channels if possible.</div>'}
     ${d.search?.secondsLeft != null ? `<p>Search stage ${d.search.stage + 1}/3 (${esc(d.search.radiusKm)} km) · next expansion in <span data-live="stage-countdown-raw" data-deadline="${esc(d.search.deadline)}"></span></p>` : ''}
@@ -1190,7 +1208,7 @@ function patchMain(html) {
 // Minimal DOM diff: walks old and new trees together and changes only the text
 // and attributes that differ. Maps (iframes) are never reloaded unless their
 // address changes; the radar sweep keeps spinning; open panels stay open.
-const KEEP_ATTRS = new Set(['style', 'data-sync', 'open']);
+const KEEP_ATTRS = new Set(['style', 'data-sync', 'open', 'transform']);
 function morph(a, b) {
   if (a.nodeType !== b.nodeType || a.nodeName !== b.nodeName) { a.replaceWith(b.cloneNode(true)); return; }
   if (a.nodeType === 3 || a.nodeType === 8) { if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue; return; }
@@ -1228,6 +1246,24 @@ function updateLive() {
     el.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
   }
   for (const el of $$('.ppi-sweep:not([data-sync])')) { el.style.animationDelay = `-${(Date.now() % 4000) / 1000}s`; el.dataset.sync = '1'; }
+  // ETA counts down every second between server updates; a new server value only resets the
+  // countdown when it differs by more than a minute (so it never jumps back up needlessly).
+  const clock = (st.etaClock ||= {}), tnow = Date.now();
+  for (const el of $$('[data-live="eta"]')) {
+    const k = el.dataset.k, min = Number(el.dataset.min);
+    if (!k || !Number.isFinite(min)) continue;
+    let c = clock[k];
+    const left = c ? c.sec - (tnow - c.at) / 1000 : null;
+    if (!c || c.min !== min) {
+      const fresh = min * 60;
+      c = clock[k] = { min, sec: left != null && Math.abs(left - fresh) <= 60 ? left : fresh, at: tnow };
+    }
+    const sec = Math.max(0, Math.round(c.sec - (tnow - c.at) / 1000));
+    const txt = sec <= 0 ? 'arriving' : sec < 600 ? `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}` : `${Math.round(sec / 60)} min`;
+    const out = el.dataset.fmt === 'table' ? (sec <= 0 ? 'ARRIVING' : txt) : txt;
+    if (el.textContent !== out) el.textContent = out;
+  }
+  syncMaps(mapTiles());
   const now = Date.now() + (st.skew || 0);
   for (const el of $$('[data-live="age"]')) {
     const s = Math.max(0, Math.round((now - Date.parse(el.dataset.at)) / 1000));
@@ -1404,6 +1440,8 @@ const actions = {
   async 'vol-escalate'(el) { try { await st.api.escalate(el.dataset.id, { type: 'RESPONDER_REQUEST', reason: 'Responder requested emergency services' }); toast(`Escalation recorded — ${st.cfg.simulatedLabel}. Call ${country().emergency} yourself if needed.`, 'warn', 7000); render(); } catch (e) { showErr(e); } },
   // ops
   'map-zoom'(el) { const m = (st.mapZoom ||= {}); const k = el.dataset.key; m[k] = Math.max(3, Math.min(20, (m[k] ?? (k === 'route' ? 13 : 16)) + Number(el.dataset.d))); st.softRefresh = true; render(); },
+  'track-view'(el) { (st.trackView ||= {})[el.dataset.key] = el.dataset.v; render(); },
+  'map-recentre'(el) { recentre(el.dataset.key); },
   'ppi-zoom'(el) { const z = (st.ppiZoom ||= {}); const k = el.dataset.key; z[k] = Math.max(-4, Math.min(6, (z[k] || 0) + Number(el.dataset.d))); st.softRefresh = true; render(); },
   async 'ai-summary'(el) { el.disabled = true; el.textContent = '🤖 Thinking…'; try { await st.api.aiSummary(el.dataset.id); } catch (e) { showErr(e); } st.softRefresh = false; render(); },
   async 'ai-translate'(el) {
@@ -1719,6 +1757,25 @@ async function boot() {
     if (['incident', 'volunteer', 'ops', 'trip'].includes(route)) refreshSoft();
   });
 
+  // Glide radar dots and map markers smoothly towards each new position (≈4.5 s per update).
+  const glide = (now) => {
+    if (!document.hidden) {
+      const mv = (st.mv ||= {});
+      for (const el of $$('[data-mv]')) {
+        const k = `${el.closest('svg')?.dataset.scope || ''}:${el.dataset.mv}`, tx = +el.dataset.x, ty = +el.dataset.y;
+        let m = mv[k];
+        if (!m) m = mv[k] = { fx: tx, fy: ty, tx, ty, t0: now };
+        else if (m.tx !== tx || m.ty !== ty) { const p = Math.min(1, (now - m.t0) / 4500); m.fx += (m.tx - m.fx) * p; m.fy += (m.ty - m.fy) * p; m.tx = tx; m.ty = ty; m.t0 = now; }
+        const p = Math.min(1, (now - m.t0) / 4500);
+        const dx = (m.fx + (m.tx - m.fx) * p) - tx, dy = (m.fy + (m.ty - m.fy) * p) - ty;
+        const tr = Math.abs(dx) < 0.05 && Math.abs(dy) < 0.05 ? '' : `translate(${dx.toFixed(2)} ${dy.toFixed(2)})`;
+        if ((el.getAttribute('transform') || '') !== tr) { if (tr) el.setAttribute('transform', tr); else el.removeAttribute('transform'); }
+      }
+      animateMaps(now);
+    }
+    requestAnimationFrame(glide);
+  };
+  requestAnimationFrame(glide);
   setInterval(() => {
     updateLive();
     streamLocation();

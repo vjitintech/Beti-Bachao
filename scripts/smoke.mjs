@@ -98,7 +98,7 @@ try {
   await vol.click('[data-act="vol-accept"]');
   await vol.waitForSelector('.precise');
   await vol.click('[data-act="vol-status"]');
-  await vol.waitForSelector('.ppi');
+  await vol.waitForSelector('.ppi', { state: 'attached' }); await vol.waitForSelector('.track-card .leaflet-container, .track-card .livemap iframe', { state: 'attached', timeout: 15000 });
   await shot(vol, '04-volunteer'); step('approved volunteer gets alert, accepts, sees route + radar');
 
   const op = await page('operator', { viewport: { width: 1280, height: 900 } });

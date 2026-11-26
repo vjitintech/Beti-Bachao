@@ -377,7 +377,9 @@ export function createServer(opts = {}) {
     return latestApk.pending;
   }
   route('GET', '/app/latest', async () => ({ android: await latestAndroid(), download: APK_DOWNLOAD }), { auth: false });
-  route('GET', '/public-config', () => ({ setupNeeded: !store.db.users.some((u) => u.role === 'admin'), demo: false, mfaRequired: MFA_REQUIRED, countries: COUNTRIES, defaultCountry: engine.cfg.countryCode, simulatedLabel: SIMULATED_LABEL, radiusStagesKm: engine.cfg.radiusStagesKm, policeAutoConnectSec: engine.cfg.policeAutoConnectSec, policeMaxKm: engine.cfg.policeMaxKm, contactsWaitingSec: engine.cfg.contactsWaitingSec, vapidPublicKey: store.db.vapid.publicKey, features: { appPush: !!(fcm || apns), iosPush: !!(apns || fcm), policeCall: !!voice, sms: !!sms, smsReset: !!sms, roadEta: !!routing, ai: !!ai } }), { auth: false });
+  // Street-map tiles for the live map (OpenStreetMap by default; any {z}/{x}/{y} provider via MAP_TILE_URL).
+  const MAP_TILES = { url: env.MAP_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: env.MAP_TILE_ATTRIBUTION || '© OpenStreetMap contributors' };
+  route('GET', '/public-config', () => ({ setupNeeded: !store.db.users.some((u) => u.role === 'admin'), demo: false, mfaRequired: MFA_REQUIRED, countries: COUNTRIES, defaultCountry: engine.cfg.countryCode, simulatedLabel: SIMULATED_LABEL, radiusStagesKm: engine.cfg.radiusStagesKm, policeAutoConnectSec: engine.cfg.policeAutoConnectSec, policeMaxKm: engine.cfg.policeMaxKm, contactsWaitingSec: engine.cfg.contactsWaitingSec, map: MAP_TILES, vapidPublicKey: store.db.vapid.publicKey, features: { appPush: !!(fcm || apns), iosPush: !!(apns || fcm), policeCall: !!voice, sms: !!sms, smsReset: !!sms, roadEta: !!routing, ai: !!ai } }), { auth: false });
 
   route('POST', '/auth/register', async ({ body, res }) => {
     if (!['user', 'volunteer'].includes(body.role)) throw new EngineError(400, 'INVALID_ROLE', 'Only user or volunteer accounts can self-register');

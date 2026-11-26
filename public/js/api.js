@@ -5,7 +5,7 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xx
 export class ApiError extends Error { constructor(status, code, message) { super(message || code); this.status = status; this.code = code; } }
 
 // ------------------------------------------------------------------ server
-import { isNative, native, serverUrl } from './native.js?v=mwh6w8vk';
+import { isNative, native, serverUrl } from './native.js?v=mwxgp6x0';
 
 class ServerApi {
   constructor() { this.mode = isNative ? 'app' : 'server'; this.listeners = new Set(); this.es = null; this.token = null; }

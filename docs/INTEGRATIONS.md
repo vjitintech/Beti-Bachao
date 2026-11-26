@@ -49,6 +49,17 @@ India requires a DLT registration (sender ID + templates) with an operator porta
 ## Road-route ETA (OSRM)
 `ROUTING_URL=https://your-osrm-server` (self-host OSRM with the India extract from Geofabrik, about 8 GB RAM). Volunteers' ETAs then follow real roads, refreshed every 30 s. Without it, the app uses a straight-line estimate.
 
+### Live map tiles (moving responder dots)
+
+The live map (woman's SOS screen, volunteer team view, operator console) draws her and the responders on a street map with Leaflet, bundled in `public/vendor/leaflet`. Tiles come from OpenStreetMap by default, which is fine for a pilot but its [tile usage policy](https://operations.osmfoundation.org/policies/tiles/) does not allow heavy production use. For production, get a key from a tile provider (for example MapTiler or Stadia Maps, both with free tiers) and set:
+
+```
+MAP_TILE_URL=https://api.maptiler.com/maps/streets-v2/256/{z}/{x}/{y}.png?key=YOUR_KEY
+MAP_TILE_ATTRIBUTION=© MapTiler © OpenStreetMap contributors
+```
+
+The server adds the tile host to the page's Content-Security-Policy automatically. If tiles can't load, each map falls back to the embedded Google map.
+
 ## Local AI — Colibri (free, runs on your own server)
 `AI_BASE_URL=http://your-colibri-host:PORT/v1` (any OpenAI-compatible server), and optionally `AI_MODEL` and `AI_API_KEY`.
 - **Operator assistant**: a one-tap summary of an open SOS with suggested next steps.
