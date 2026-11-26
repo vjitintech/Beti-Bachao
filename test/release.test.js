@@ -142,3 +142,16 @@ test('radar ETA uses the road route with live traffic once a volunteer accepts',
   const body = JSON.parse(calls.find((c) => c.url.includes('routes.googleapis.com')).body);
   assert.equal(body.routingPreference, 'TRAFFIC_AWARE');
 });
+
+test('closed incidents never call the routing provider, even with a stray active assignment', async () => {
+  const db = S.app.store.db;
+  const a = db.assignments.find((x) => ['ACCEPTED', 'EN_ROUTE'].includes(x.status));
+  assert.ok(a, 'an active assignment from the previous test');
+  const inc = db.incidents.find((i) => i.id === a.incidentId);
+  inc.status = 'CLOSED'; a.routeEta = null; // closed, but the assignment row was left active
+  const v = db.volunteers.find((x) => x.userId === a.volunteerId);
+  v.lastLocation = { ...v.lastLocation, lat: v.lastLocation.lat + 0.01 }; // new route cell, so no cache hit
+  const before = calls.filter((c) => c.url.includes('routes.googleapis.com')).length;
+  await new Promise((r) => setTimeout(r, 5600)); // one scheduler tick (5 s here)
+  assert.equal(calls.filter((c) => c.url.includes('routes.googleapis.com')).length, before);
+});

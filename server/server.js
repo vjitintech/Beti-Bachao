@@ -247,6 +247,10 @@ export function createServer(opts = {}) {
     //    (or sooner if they moved > 300 m). Provider results are cached in routing.js.
     if (routing && !routingBusy && now - lastRouting > 2000) {
       const due = store.db.assignments.filter((a) => ['ACCEPTED', 'EN_ROUTE'].includes(a.status)).map((a) => {
+        // Only for incidents that are still open: a stray ACCEPTED/EN_ROUTE row on a closed incident
+        // must never keep calling the (paid) routing provider.
+        const inc = store.db.incidents.find((i) => i.id === a.incidentId);
+        if (!inc || !engine.isOpen(inc)) return null;
         const v = engine.vol(a.volunteerId); const her = engine.latestLocation(a.incidentId);
         if (!v?.lastLocation || !her) return null;
         const d = haversineKm(v.lastLocation, her);
