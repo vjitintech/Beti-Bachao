@@ -1,13 +1,13 @@
-import { createApi, uuid } from './api.js?v=mwxgp6x0';
-import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang, ownSosWords, sosVoiceLang } from './i18n.js?v=mwxgp6x0';
-import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwxgp6x0';
-import { liveMapHtml, syncMaps, animateMaps, recentre } from './livemap.js?v=mwxgp6x0';
-import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwxgp6x0';
-import { TRAINING_MODULES } from '../core/engine.js?v=mwxgp6x0';
-import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwxgp6x0';
-import { initProtect } from './protect-ui.js?v=mwxgp6x0';
-import { a11y, announce, speakStatus } from './a11y.js?v=mwxgp6x0';
-import { phoneInput, readPhone, guessCountry, bindPhoneFields } from './phone.js?v=mwxgp6x0';
+import { createApi, uuid } from './api.js?v=mwxjyzqb';
+import { t, setLang, detectLang, LANGS, lang, sosWords, speechLang, ownSosWords, sosVoiceLang } from './i18n.js?v=mwxjyzqb';
+import { esc, $, $$, toast, modal, fmtTime, ago, radarSvg, ppiSvg, ppiTable, niceRange, stepRange } from './ui.js?v=mwxjyzqb';
+import { liveMapHtml, syncMaps, animateMaps, recentre } from './livemap.js?v=mwxjyzqb';
+import { geo, battery, keepAwake, vibrate, siren, ringer, shake, voice, recorder, contacts, mapsLink, smsHref, whatsappHref, nativeShare, safeWalk, prefs, store } from './safety.js?v=mwxjyzqb';
+import { TRAINING_MODULES } from '../core/engine.js?v=mwxjyzqb';
+import { isNative, platform, native, serverUrl, setServerUrl } from './native.js?v=mwxjyzqb';
+import { initProtect } from './protect-ui.js?v=mwxjyzqb';
+import { a11y, announce, speakStatus } from './a11y.js?v=mwxjyzqb';
+import { phoneInput, readPhone, guessCountry, bindPhoneFields } from './phone.js?v=mwxjyzqb';
 let P = null; // autonomous-protection screens (protect-ui.js), set up in boot()
 
 const st = { api: null, cfg: null, me: null, incident: null, timeline: [], pollTimer: null, countdown: null, sendingSos: false, lastLocPost: 0, opSel: null, adminTab: 'impact', volSel: null };
@@ -258,7 +258,7 @@ function versionCard() {
   const mine = installedBuild() ? `1.0.${installedBuild()}` : String(window.BB_APP_BUILD || 'dev');
   return `<section class="card app-version ${u ? (u.old ? 'is-old' : 'is-new') : ''}"><h2>📱 App version</h2>
     <p><span class="ver-chip ${u?.old ? 'ver-old' : u ? 'ver-new' : ''}">${esc(mine)}</span> ${u ? (u.old ? `<b class="ver-old-text">Update available: ${esc(u.latest.version)}</b>` : '<b class="ver-new-text">✓ You have the latest version</b>') : '<span class="muted">Checking for updates…</span>'}</p>
-    ${u?.old ? `<a class="btn btn-primary" href="${esc(u.url)}" target="_blank" rel="noopener">⬆️ Update to ${esc(u.latest.version)}</a><p class="small muted">Install it over this app — your account and contacts stay.</p>` : ''}
+    ${u?.old ? `<a class="btn btn-primary" href="${esc(u.url)}" target="_blank" rel="noopener">⬆️ Update to ${esc(u.latest.version)}</a><p class="small muted">Install it over this app — your account and contacts stay.${installedBuild() <= 34 ? ' <b>One time only:</b> if Android says "App not installed", uninstall Beti Bachao first, then install the new version and sign in again (the app is now signed with Beti Bachao\'s own secure key).' : ''}</p>` : ''}
   </section>`;
 }
 // Website home page: the newest APK to download.

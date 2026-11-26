@@ -2,7 +2,7 @@
 // street map. Leaflet is bundled in /vendor/leaflet and only loaded when a live map is on
 // screen. Map tiles default to OpenStreetMap; set MAP_TILE_URL on the server for a paid
 // or keyed provider. If Leaflet or the tiles can't load, the old Google map is shown instead.
-import { esc } from './ui.js?v=mwxgp6x0';
+import { esc } from './ui.js?v=mwxjyzqb';
 
 const GLIDE_MS = 4500;      // a dot travels from its old to its new position over this long
 let leaflet = null, loading = null, failed = false;

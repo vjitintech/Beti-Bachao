@@ -5,7 +5,7 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xx
 export class ApiError extends Error { constructor(status, code, message) { super(message || code); this.status = status; this.code = code; } }
 
 // ------------------------------------------------------------------ server
-import { isNative, native, serverUrl } from './native.js?v=mwxgp6x0';
+import { isNative, native, serverUrl } from './native.js?v=mwxjyzqb';
 
 class ServerApi {
   constructor() { this.mode = isNative ? 'app' : 'server'; this.listeners = new Set(); this.es = null; this.token = null; }
@@ -39,14 +39,22 @@ class ServerApi {
     }
     return data;
   }
-  connect() {
+  // Live updates. In the phone app the login token never goes in the URL: it is swapped for a
+  // one-time ticket (valid 60 s), and a fresh ticket is fetched whenever the stream reconnects.
+  async connect() {
     if (this.es) this.es.close();
-    const url = this.base() + '/events' + (isNative && this.token ? `?access_token=${encodeURIComponent(this.token)}` : '');
-    this.es = new EventSource(url);
-    this.es.addEventListener('incident', (e) => { const d = JSON.parse(e.data); this.listeners.forEach((f) => f(d)); });
-    this.es.addEventListener('hello', () => this.listeners.forEach((f) => f({ type: 'resync' })));
+    clearTimeout(this.esRetry);
+    let q = '';
+    if (isNative && this.token) {
+      try { q = `?ticket=${encodeURIComponent((await this.req('POST', '/events/ticket')).ticket)}`; }
+      catch { this.esRetry = setTimeout(() => this.connect(), 10000); return; }
+    }
+    const es = this.es = new EventSource(this.base() + '/events' + q);
+    es.addEventListener('incident', (e) => { const d = JSON.parse(e.data); this.listeners.forEach((f) => f(d)); });
+    es.addEventListener('hello', () => this.listeners.forEach((f) => f({ type: 'resync' })));
+    es.onerror = () => { if (isNative && es.readyState === 2 && this.es === es) this.esRetry = setTimeout(() => this.connect(), 3000); };
   }
-  disconnect() { this.es?.close(); this.es = null; }
+  disconnect() { clearTimeout(this.esRetry); this.es?.close(); this.es = null; }
   subscribe(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
 
   publicConfig() { return this.req('GET', '/public-config'); }

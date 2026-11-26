@@ -15,10 +15,10 @@
 //   • escalation adapter is SIMULATED until a real integration is approved
 //   • append-only, hash-chained audit log
 
-import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mwxgp6x0';
-import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mwxgp6x0';
-import { protectMethods, duplicateIn, phoneKey } from './protect.js?v=mwxgp6x0';
-import { toE164, dialInfo } from './dial.js?v=mwxgp6x0';
+import { haversineKm, isValidLatLng, approxPoint, distanceBand, approxEtaMinutes, impliedSpeedKmh, bearingDeg } from './geo.js?v=mwxjyzqb';
+import { DEFAULT_CONFIG, COUNTRIES, validateConfig } from './config.js?v=mwxjyzqb';
+import { protectMethods, duplicateIn, phoneKey } from './protect.js?v=mwxjyzqb';
+import { toE164, dialInfo } from './dial.js?v=mwxjyzqb';
 
 export const S = Object.freeze({
   CREATED: 'CREATED',
@@ -372,7 +372,8 @@ export class Engine {
       this.addLocation(actor, open.id, loc);
       // The phone's background location loop also learns about police auto-connect (works without push).
       const d = open.policeConnect?.dial;
-      return { routed: 'incident', incidentId: open.id, ...(d && d.result !== 'PLACED' && d.number ? { policeCall: { incidentId: open.id, number: d.number } } : {}) };
+      // Never ask her phone to dial during a duress incident: whoever holds it would see the call.
+      return { routed: 'incident', incidentId: open.id, ...(d && !open.duress && d.result !== 'PLACED' && d.number ? { policeCall: { incidentId: open.id, number: d.number } } : {}) };
     }
     const asg = this.db.assignments.find((a) => a.volunteerId === u.id && ACTIVE_ASG.has(a.status));
     if (asg) { this.updateResponderLocation(actor, asg.id, loc); return { routed: 'assignment' }; }
@@ -507,6 +508,10 @@ export class Engine {
   notify(incidentId, recipientId, kind, meta = {}) {
     const n = { id: this.deps.uuid(), incidentId, recipientId, kind, channel: 'in_app', status: 'PENDING', attemptCount: 0, createdAt: this.iso(), acknowledgedAt: null, respondedAt: null, response: null, providerReference: null, meta };
     this.db.notifications.push(n);
+    // Duress PIN: her phone must keep looking cancelled, so nothing is sent to it
+    // (no "volunteer is coming", no police call). Operators and volunteers still get everything.
+    const inc = incidentId ? this.db.incidents.find((x) => x.id === incidentId) : null;
+    if (inc?.duress && recipientId === inc.requesterId) { n.status = 'SUPPRESSED_DURESS'; return n; }
     this.deliver(n);
     return n;
   }

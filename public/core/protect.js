@@ -5,9 +5,9 @@
 //  • "Track my travel" trips with auto-arrival and auto-SOS when overdue
 //  • SOS evidence (audio/video) metadata — bytes are stored encrypted by the server
 //  • dashboards: hers, admin impact, public impact counter
-import { haversineKm, isValidLatLng } from './geo.js?v=mwxgp6x0';
-import { COUNTRIES } from './config.js?v=mwxgp6x0';
-import { toE164, dialInfo } from './dial.js?v=mwxgp6x0';
+import { haversineKm, isValidLatLng } from './geo.js?v=mwxjyzqb';
+import { COUNTRIES } from './config.js?v=mwxjyzqb';
+import { toE164, dialInfo } from './dial.js?v=mwxjyzqb';
 
 const SAFE_CLOSURES = new Set(['USER_CONFIRMED_SAFE', 'HANDED_TO_EMERGENCY_SERVICES_CONFIRMED_SAFE']);
 const median = (xs) => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
@@ -203,10 +203,13 @@ export const protectMethods = {
   autoPolice(inc, reason) {
     if (inc.policeConnect || !this.isOpen(inc)) return null;
     const loc = this.latestLocation(inc.id);
-    const { st, dial } = this.policeTarget(inc, loc);
+    const { st, dial: target } = this.policeTarget(inc, loc);
+    // Duress: her phone must not place the call (it would reveal the SOS is still live);
+    // operators phone the station instead.
+    const dial = inc.duress ? null : target;
     const emergency = COUNTRIES[inc.countryCode]?.emergency || '112';
-    inc.policeConnect = { at: this.iso(), reason, status: dial ? 'PENDING' : 'NO_STATION', station: st ? { id: st.id, name: st.name, phone: st.phone, phone2: st.phone2 || null, distanceKm: st.distanceKm } : null, emergency, sms: null, call: null, dial: dial ? { ...dial, placedAt: null, result: null } : null };
-    const label = dial ? `Her phone is calling ${dial.label}` : `No police station loaded within ${Number(this.cfg.policeMaxKm) || 30} km — operators must call ${emergency}`;
+    inc.policeConnect = { at: this.iso(), reason, status: dial || (inc.duress && target) ? 'PENDING' : 'NO_STATION', station: st ? { id: st.id, name: st.name, phone: st.phone, phone2: st.phone2 || null, distanceKm: st.distanceKm } : null, emergency, sms: null, call: null, dial: dial ? { ...dial, placedAt: null, result: null } : null };
+    const label = dial ? `Her phone is calling ${dial.label}` : inc.duress && target ? `Duress PIN used — station gets her location by SMS; operators must phone ${target.label} (her phone will not call)` : `No police station loaded within ${Number(this.cfg.policeMaxKm) || 30} km — operators must call ${emergency}`;
     this.db.escalations.push({ id: this.deps.uuid(), incidentId: inc.id, type: 'POLICE_AUTO_CONNECT', status: 'ATTEMPTED', label, reason, attemptedAt: this.iso(), acknowledgedAt: null, recordedBy: 'system', metadata: { stationId: st?.id || null, number: dial?.number || null } });
     inc.escalationStatus = 'ATTEMPTED';
     if (inc.status !== 'ESCALATION_REQUIRED' && inc.status !== 'EMERGENCY_HANDOFF') { try { this.transition(inc, 'ESCALATION_REQUIRED', 'system', `Police auto-connect: ${reason}`, 'scheduler'); } catch { /* keep current state */ } }

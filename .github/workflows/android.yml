@@ -1,7 +1,9 @@
 name: Android app
 # Builds the Beti Bachao Android app (phones + tablets).
-#  - Always: a debug APK you can install directly ("android-latest" release on GitHub).
-#  - With signing secrets: a signed release APK + Play Store bundle (.aab).
+#  - With signing secrets (normal): the public download ("android-latest") is the RELEASE APK,
+#    signed with the private Beti Bachao key, not debuggable; plus the Play Store bundle (.aab).
+#    The debug APK is kept only as a private workflow artifact for testing.
+#  - Without signing secrets: falls back to the debug APK (public test key) and says so.
 # Optional repository settings:
 #   Variables: BB_SERVER_URL (server address baked into the app)
 #   Secrets:   GOOGLE_SERVICES_JSON (Firebase, for push alerts)
@@ -69,15 +71,27 @@ jobs:
           BB_KEYSTORE_FILE="$RUNNER_TEMP/release.jks" $G assembleRelease bundleRelease --no-daemon
       - name: Collect outputs
         run: |
-          mkdir -p ../dist
-          cp android/app/build/outputs/apk/debug/app-debug.apk ../dist/BetiBachao24x7.apk
+          mkdir -p ../dist ../private
+          cp android/app/build/outputs/apk/debug/app-debug.apk ../private/BetiBachao-test-debug.apk
+          if [ -f android/app/build/outputs/apk/release/app-release.apk ]; then
+            # Public download = release build, signed with the private key, not debuggable.
+            cp android/app/build/outputs/apk/release/app-release.apk ../dist/BetiBachao24x7.apk
+            echo "release" > ../dist-kind
+          else
+            echo "::warning::No signing secrets: publishing the TEST build (public test key, debuggable). Add BB_KEYSTORE_* secrets."
+            cp ../private/BetiBachao-test-debug.apk ../dist/BetiBachao24x7.apk
+            echo "test" > ../dist-kind
+          fi
           # Old name kept so links already shared keep working
           cp ../dist/BetiBachao24x7.apk ../dist/BetiBachao-debug.apk
-          [ -f android/app/build/outputs/apk/release/app-release.apk ] && cp android/app/build/outputs/apk/release/app-release.apk ../dist/BetiBachao-release.apk || true
-          [ -f android/app/build/outputs/bundle/release/app-release.aab ] && cp android/app/build/outputs/bundle/release/app-release.aab ../dist/BetiBachao-release.aab || true
-          ls -la ../dist
+          [ -f android/app/build/outputs/bundle/release/app-release.aab ] && cp android/app/build/outputs/bundle/release/app-release.aab ../private/BetiBachao-release.aab || true
+          ls -la ../dist ../private
       - uses: actions/upload-artifact@v4
-        with: { name: beti-bachao-android, path: dist/ }
+        with:
+          name: beti-bachao-android
+          path: |
+            dist/
+            private/
       - name: Publish "android-latest" download
         if: github.ref == 'refs/heads/main'
         env: { GH_TOKEN: '${{ github.token }}' }
@@ -86,4 +100,4 @@ jobs:
           gh release delete android-latest --yes --cleanup-tag 2>/dev/null || true
           gh release create android-latest dist/* --prerelease --target "$GITHUB_SHA" \
             --title "Beti Bachao Android (latest build #${{ github.run_number }})" \
-            --notes "Install BetiBachao24x7.apk on an Android phone or tablet (allow 'Install unknown apps'). Download page: https://betibachao24x7.com/download. Built from ${GITHUB_SHA::7}."
+            --notes "Install BetiBachao24x7.apk on an Android phone or tablet (allow 'Install unknown apps'). Download page: https://betibachao24x7.com/download. $( [ "$(cat dist-kind)" = release ] && echo 'Signed release build.' || echo 'TEST build (public test key).' ) Built from ${GITHUB_SHA::7}."

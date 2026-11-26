@@ -49,7 +49,10 @@ export function createServer(opts = {}) {
   const routing = createRouting(env, { fetchImpl });
   const voice = (() => { try { return createVoice(env, { fetchImpl }); } catch (e) { console.error('[voice]', e.message); return null; } })();
   const media = createMediaStore({ dir: env.MEDIA_DIR || path.join(path.dirname(store.file), 'evidence'), keyHex: env.MEDIA_KEY || null });
-  let publicOrigin = (env.PUBLIC_URL || '').replace(/\/$/, '');
+  // Address used in SMS links. Never taken from a request's Host header on Render (anyone can
+  // send any Host); there PUBLIC_URL, else Render's own RENDER_EXTERNAL_URL, is used.
+  let publicOrigin = (env.PUBLIC_URL || env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
+  const originFromHost = !env.PUBLIC_URL && !env.RENDER_EXTERNAL_URL && env.RENDER !== 'true';
   const ai = createAi(env, { fetchImpl });
   const backups = env.BACKUP_DIR === 'off' ? null : createBackups({ dir: env.BACKUP_DIR || path.join(path.dirname(store.file), 'backups'), keep: Number(env.BACKUP_KEEP) || 14, keyHex: env.BACKUP_KEY || null });
   store.db.devices ||= [];
@@ -206,7 +209,8 @@ export function createServer(opts = {}) {
       const vars = { name: u?.displayName || 'A woman', phone: u?.phone || 'unknown', link: loc ? mapsLink(loc) : 'location pending', ref: inc.id.slice(0, 8) };
       const jobs = [];
       if (sms) jobs.push(Promise.all([pc.station.phone, pc.station.phone2].filter(Boolean).map((ph) => sms.send(ph, 'POLICE', vars))).then((rs) => ({ sms: rs.some((r) => r.ok) ? 'SENT' : 'FAILED' })));
-      if (voice && u?.phone) jobs.push(voice.bridge({ first: pc.station.phone, second: u.phone, message: `Emergency from Beti Bachao. ${vars.name} raised an SOS near your station and needs police help. Her location has been sent to you by SMS. Reference ${vars.ref.split('').join(' ')}.` }).then((r) => ({ call: r.ok ? 'PLACED' : 'FAILED' })));
+      // No call bridge during duress: it would ring her phone in front of whoever holds it.
+      if (voice && u?.phone && !inc.duress) jobs.push(voice.bridge({ first: pc.station.phone, second: u.phone, message: `Emergency from Beti Bachao. ${vars.name} raised an SOS near your station and needs police help. Her location has been sent to you by SMS. Reference ${vars.ref.split('').join(' ')}.` }).then((r) => ({ call: r.ok ? 'PLACED' : 'FAILED' })));
       if (!jobs.length) { engine.setPoliceResult(inc.id, { status: 'NO_GATEWAY' }); continue; }
       Promise.all(jobs).then((parts) => {
         const patch = Object.assign({}, ...parts);
@@ -296,9 +300,22 @@ export function createServer(opts = {}) {
   const bearer = (req, url) => {
     const h = String(req.headers.authorization || '');
     if (h.startsWith('Bearer ')) return h.slice(7).trim();
+    // Older app builds (≤ 1.0.34) still pass the login token in the URL; newer ones use a ticket.
     if (url && url.pathname === '/api/v1/events') return url.searchParams.get('access_token');
     return null;
   };
+  // Live updates from the phone app: EventSource can't send headers, so the app swaps its login
+  // token for a one-time ticket valid 60 s, and only that ticket appears in the URL (and logs).
+  const eventTickets = new Map();
+  function ticketUser(url) {
+    const t = url.searchParams.get('ticket');
+    if (!t) return null;
+    const h = sha256(t); const e = eventTickets.get(h); eventTickets.delete(h);
+    if (!e || Date.now() > e.exp) return null;
+    const s = store.db.sessions.find((x) => x.tokenHash === e.tokenHash);
+    const u = s && Date.now() < s.expiresAt ? engine.user(s.userId) : null;
+    return u && u.status === 'ACTIVE' ? { id: u.id, role: u.role } : null;
+  }
   function sessionUser(req, url = null) {
     const tok = bearer(req, url) || parseCookies(req).bb_session;
     if (!tok) return null;
@@ -325,7 +342,18 @@ export function createServer(opts = {}) {
     return `bb_session=${tok}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_TTL_MS / 1000}${SECURE ? '; Secure' : ''}`;
   }
   const TRUST_PROXY = env.TRUST_PROXY === 'true' || (env.RENDER === 'true' && env.TRUST_PROXY !== 'false'); // Render's proxy sets X-Forwarded-For
-  const ip = (req) => (TRUST_PROXY ? String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : '') || req.socket.remoteAddress || 'unknown';
+  // Client IP for rate limits. Behind Render (Cloudflare in front) the caller can add its own
+  // X-Forwarded-For entries, so the leftmost one is never trusted: use Cloudflare's
+  // True-Client-IP / CF-Connecting-IP, else the entry our own proxy appended (the last one).
+  const ip = (req) => {
+    if (TRUST_PROXY) {
+      const cf = String(req.headers['true-client-ip'] || req.headers['cf-connecting-ip'] || '').trim();
+      if (cf) return cf;
+      const xff = String(req.headers['x-forwarded-for'] || '').split(',').map((x) => x.trim()).filter(Boolean);
+      if (xff.length) return xff[xff.length - 1];
+    }
+    return req.socket.remoteAddress || 'unknown';
+  };
   const meView = (u) => ({ id: u.id, displayName: u.displayName, email: u.email, phone: u.phone || null, role: u.role, countryCode: u.countryCode, hasPins: !!u.pins, hasDuressPin: !!u.pins?.duress, mustChangePassword: !!u.mustChangePassword });
 
   // ---------- routes ----------
@@ -424,6 +452,14 @@ export function createServer(opts = {}) {
     return { user: meView(u), ...(res.bbToken ? { token: res.bbToken } : {}) };
   }, { auth: false, limit: [10, 600e3] });
 
+  route('POST', '/events/ticket', ({ actor }) => {
+    const t = crypto.randomBytes(24).toString('base64url');
+    const now = Date.now();
+    for (const [k, v] of eventTickets) if (now > v.exp) eventTickets.delete(k);
+    if (eventTickets.size > 20000) eventTickets.delete(eventTickets.keys().next().value);
+    eventTickets.set(sha256(t), { tokenHash: actor.session.tokenHash, exp: now + 60000 });
+    return { ticket: t };
+  }, { limit: [240, 3600e3] });
   route('POST', '/auth/logout', ({ actor, res }) => {
     store.db.sessions = store.db.sessions.filter((s) => s !== actor.session);
     res.setHeader('Set-Cookie', `bb_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${SECURE ? '; Secure' : ''}`);
@@ -534,9 +570,19 @@ export function createServer(opts = {}) {
     return { ok: true };
   }, { limit: [10, 3600e3] });
   // Self-service reset with a 6-digit code by SMS (needs an SMS gateway).
+  // Per-account limits (whatever the caller's IP): at most 3 reset codes and 10 wrong guesses an hour.
+  const resetHits = new Map();
+  const perAccount = (key, max) => {
+    const now = Date.now(); const list = (resetHits.get(key) || []).filter((t) => now - t < 3600e3);
+    if (list.length >= max) return false;
+    list.push(now); resetHits.set(key, list);
+    if (resetHits.size > 10000) resetHits.delete(resetHits.keys().next().value);
+    return true;
+  };
   route('POST', '/auth/reset/request', ({ body }) => {
     const u = store.db.users.find((x) => x.email === String(body.email || '').trim().toLowerCase() && x.status === 'ACTIVE');
     if (!sms) throw new EngineError(503, 'NO_SMS', 'Password reset by SMS is not set up. Ask the Beti Bachao admin to reset your password.');
+    if (u?.phone && !perAccount('req:' + u.id, 3)) { engine.audit(u.id, 'RESET_CODE_THROTTLED', 'user', u.id); return { ok: true, note: 'If the account exists, a code was sent to its mobile number.' }; }
     if (u?.phone) {
       const code = String(crypto.randomInt(100000, 999999));
       store.db.otps = store.db.otps.filter((o) => o.userId !== u.id && Date.now() < o.exp);
@@ -550,6 +596,7 @@ export function createServer(opts = {}) {
     const u = store.db.users.find((x) => x.email === String(body.email || '').trim().toLowerCase() && x.status === 'ACTIVE');
     const o = u && store.db.otps.find((x) => x.userId === u.id && Date.now() < x.exp);
     if (!o) throw new EngineError(400, 'INVALID_CODE', 'Code is wrong or expired');
+    if (!perAccount('try:' + u.id, 10)) { store.db.otps = store.db.otps.filter((x) => x !== o); throw new EngineError(429, 'RATE_LIMITED', 'Too many attempts. Request a new code in an hour, or ask the admin to reset your password.'); }
     o.tries += 1;
     if (o.tries > 5 || o.hash !== sha256(u.id + String(body.code || ''))) { if (o.tries > 5) store.db.otps = store.db.otps.filter((x) => x !== o); throw new EngineError(400, 'INVALID_CODE', 'Code is wrong or expired'); }
     const min = ['operator', 'admin'].includes(u.role) ? 12 : 10;
@@ -698,7 +745,7 @@ export function createServer(opts = {}) {
       if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
     }
     if (url.pathname === '/api/v1/events' && req.method === 'GET') {
-      const actor = sessionUser(req, url);
+      const actor = ticketUser(url) || sessionUser(req, url);
       if (!actor) return err(res, 401, 'UNAUTHENTICATED');
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive', ...securityHeaders(SECURE) });
       const c = { res, userId: actor.id };
@@ -725,7 +772,7 @@ export function createServer(opts = {}) {
       const m = url.pathname.match(r.re);
       const p = Object.fromEntries(r.keys.map((k, i) => [k, m[i + 1]]));
       const body = method === 'GET' ? {} : await readBody(req, r.maxBody);
-      if (!env.PUBLIC_URL && req.headers.host) publicOrigin = `${TRUST_PROXY ? String(req.headers['x-forwarded-proto'] || 'https').split(',')[0] : (SECURE ? 'https' : 'http')}://${req.headers.host}`;
+      if (originFromHost && req.headers.host) publicOrigin = `${TRUST_PROXY ? String(req.headers['x-forwarded-proto'] || 'https').split(',')[0] : (SECURE ? 'https' : 'http')}://${req.headers.host}`;
       const result = await r.handler({ req, res, actor, body, p, q: url.searchParams });
       if (result && result.__raw) {
         res.writeHead(200, { 'Content-Type': result.type, 'Content-Length': result.body.length, 'Cache-Control': 'no-store', ...securityHeaders(SECURE), ...(origin && APP_ORIGINS.includes(origin) ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin' } : {}) });

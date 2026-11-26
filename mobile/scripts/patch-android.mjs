@@ -41,6 +41,10 @@ const perms = [
 const features = ['android.hardware.telephony', 'android.hardware.location.gps', 'android.hardware.camera', 'android.hardware.sensor.accelerometer', 'android.hardware.bluetooth_le']
   .map((f) => `    <uses-feature android:name="${f}" android:required="false" />`).join('\n'); // tablets without SIM can install
 must(man, '<application', 'AndroidManifest.xml');
+// No Android backup / device-transfer of her data (login, contacts, places, SOS state).
+man = man.replace(/android:allowBackup="true"/, 'android:allowBackup="false"');
+if (!man.includes('android:allowBackup=')) man = man.replace('<application', '<application android:allowBackup="false"');
+if (!man.includes('android:fullBackupContent=')) man = man.replace('<application', '<application android:fullBackupContent="false" android:dataExtractionRules="@xml/data_extraction_rules"');
 man = man.replace('<application', `${perms}\n${features}\n\n    <application`);
 const components = `
         <service android:name=".SafetyService" android:exported="false" android:foregroundServiceType="location|microphone" />
