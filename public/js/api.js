@@ -72,6 +72,7 @@ class ServerApi {
   scheduleCall(id, scheduledAt) { return this.req('POST', `/admin/volunteers/${id}/schedule-call`, { scheduledAt }); }
   findUsers(q, f = {}) { const p = new URLSearchParams({ q: q || '' }); for (const [k, v] of Object.entries(f)) if (v !== '' && v != null) p.set(k, v); return this.req('GET', `/admin/users?${p}`); }
   resetUserPassword(id) { return this.req('POST', `/admin/users/${id}/reset-password`); }
+  resetAllData(body) { return this.req('POST', '/admin/reset-data', body); }
   aiSummary(id) { return this.req('POST', `/operator/incidents/${id}/ai-summary`); }
   translate(text, target) { return this.req('POST', '/ai/translate', { text, target }); }
   setPins(b) { return this.req('PATCH', '/me/pins', b); }

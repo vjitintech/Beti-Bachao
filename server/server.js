@@ -644,6 +644,30 @@ export function createServer(opts = {}) {
     const { sessions, ...rest } = store.db; // never export live session tokens
     return rest;
   }, { limit: [10, 3600e3] });
+  // Wipe women, volunteers and every SOS record before launch. Keeps admins, operators,
+  // police stations and settings. Takes a backup first; the audit chain restarts with one
+  // DATA_RESET entry. Needs the admin's password and the typed word RESET.
+  route('POST', '/admin/reset-data', ({ actor, body }) => {
+    engine.requireRole(actor, 'admin');
+    if (body.confirm !== 'RESET') throw new EngineError(400, 'CONFIRM_REQUIRED', 'Type RESET to confirm');
+    if (!verifyPassword(String(body.password || ''), engine.user(actor.id).passwordHash)) throw new EngineError(400, 'WRONG_CURRENT_PASSWORD', 'Password is incorrect');
+    const db = store.db;
+    let backup = null;
+    if (backups) backup = path.basename(backups.run(db));
+    const keep = new Set(db.users.filter((u) => ['admin', 'operator'].includes(u.role)).map((u) => u.id));
+    const counts = { users: db.users.filter((u) => u.role === 'user').length, volunteers: db.users.filter((u) => u.role === 'volunteer').length, incidents: db.incidents.length, trips: (db.trips || []).length, evidence: (db.evidence || []).length };
+    for (const e of db.evidence || []) if (e.storageKey) { try { media.del(e.storageKey); } catch {} }
+    db.users = db.users.filter((u) => keep.has(u.id));
+    for (const k of ['volunteers', 'verifications', 'incidents', 'locations', 'assignments', 'responderLocations', 'notifications', 'escalations', 'confirmations', 'transitions', 'abuseReports', 'trips', 'evidence', 'events', 'otps', 'clientErrors', 'audit']) db[k] = [];
+    db.eventSeq = 0; lastBroadcastSeq = 0;
+    db.sessions = (db.sessions || []).filter((x) => keep.has(x.userId));
+    db.devices = (db.devices || []).filter((x) => keep.has(x.userId));
+    db.pushSubs = (db.pushSubs || []).filter((x) => keep.has(x.userId));
+    for (const c of [...clients]) if (!keep.has(c.userId)) { try { c.res.end(); } catch {} clients.delete(c); }
+    engine.audit(actor.id, 'DATA_RESET', 'system', 'db', 'All women, volunteers and SOS records cleared', { ...counts, backup });
+    store.save();
+    return { ok: true, removed: counts, backup };
+  }, { limit: [3, 3600e3] });
   route('POST', '/admin/staff', ({ actor, body }) => {
     if (typeof body.password !== 'string' || body.password.length < 12) throw new EngineError(400, 'WEAK_PASSWORD', 'Temporary password must be at least 12 characters');
     return engine.createStaff(actor, { displayName: body.displayName, email: body.email, role: body.role, passwordHash: hashPassword(body.password) });

@@ -703,3 +703,4 @@ label { font-weight: 600; font-size: .92rem; color: var(--ink); }
 .site-foot nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 14px; margin-bottom: 8px; }
 .site-foot p { margin: 0; }
 .landing-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 14px; padding: 8px 0 4px; font-size: .92rem; }
+.danger-zone { border-color: color-mix(in srgb, var(--sos) 40%, var(--line)); }
