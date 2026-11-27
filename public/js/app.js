@@ -302,6 +302,7 @@ function viewLanding() {
         <li>Volunteers are verified people, not police. They are trained to help you reach safety and to call emergency services — never to fight.</li>
       </ul>
     </section>
+    ${isNative ? '' : '<nav class="landing-links" aria-label="About Beti Bachao"><a href="/about">About us</a><a href="/vision">Vision &amp; mission</a><a href="/press">Press</a><a href="/contact">Contact us</a></nav>'}
   `);
 }
 

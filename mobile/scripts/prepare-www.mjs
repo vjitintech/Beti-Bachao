@@ -8,6 +8,8 @@ const out = path.resolve(here, '../www');
 fs.rmSync(out, { recursive: true, force: true });
 fs.cpSync(src, out, { recursive: true });
 fs.rmSync(path.join(out, 'sw.js'), { force: true }); // apps ship their files; no web service worker
+// Website-only pages (About us, Vision & mission, Press, Contact) are not part of the apps.
+for (const f of ['about.html', 'vision.html', 'press.html', 'contact.html', 'js/contact.js']) fs.rmSync(path.join(out, f), { force: true });
 const server = (process.env.BB_SERVER_URL || '').replace(/\/$/, '');
 fs.writeFileSync(path.join(out, 'config.js'), `window.BB_SERVER_URL = ${JSON.stringify(server)};\nwindow.BB_APP_BUILD = ${JSON.stringify(process.env.BB_APP_VERSION || 'dev')};\n`);
 const idx = path.join(out, 'index.html');

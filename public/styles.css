@@ -672,3 +672,34 @@ label { font-weight: 600; font-size: .92rem; color: var(--ink); }
 .ppi-stale { opacity: .45; }
 .ppi-onscene .ppi-dot { fill: #3ee07f; }
 @media (prefers-reduced-motion: reduce) { .lm-her .lm-pulse { animation: none; } }
+
+/* Website pages: About us, Vision & mission, Press, Contact (web only, not in the apps) */
+.site-page { padding-bottom: 0; }
+.site-nav { display: flex; gap: 4px; overflow-x: auto; padding: 8px 16px; background: var(--surface); border-bottom: 1px solid var(--line); scrollbar-width: none; }
+.site-nav a { white-space: nowrap; padding: 8px 12px; border-radius: 999px; text-decoration: none; color: var(--ink-2); font-weight: 600; font-size: .92rem; }
+.site-nav a[aria-current="page"] { background: var(--chip); color: var(--ink); }
+.site-open { color: #fff; border: 1px solid rgba(255,255,255,.35); background: transparent; text-decoration: none; }
+.site-main { max-width: 760px; padding-top: 8px; }
+.site-hero { text-align: center; padding: 20px 0 4px; }
+.site-hero .lead { max-width: 60ch; margin-inline: auto; }
+.site-logo { width: min(100%, 420px); height: auto; border-radius: var(--radius); }
+.site-list { padding-inline-start: 1.2rem; margin: .4rem 0; }
+.site-list li { margin: .45rem 0; }
+.site-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.founder-head { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+.founder-mark { flex: none; width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; background: var(--plum); color: #fff; font-weight: 700; letter-spacing: .02em; }
+.founder-name { font-size: 1.15rem; font-weight: 700; margin: 0; }
+.founder-head .muted { margin: 2px 0 0; }
+.press h1 { font-size: 1.45rem; line-height: 1.25; }
+.press h2 { margin-top: 1.2rem; }
+.press-tag { color: var(--ink-2); font-size: .85rem; font-weight: 600; margin: 0; }
+.press-quote { margin: 1rem 0; padding: 4px 0 4px 16px; border-inline-start: 4px solid var(--plum); }
+.press-quote p { font-size: 1.05rem; }
+.press-quote footer { color: var(--ink-2); font-size: .9rem; }
+.contact-form { display: grid; gap: 12px; }
+.form-error { color: var(--sos); font-weight: 600; margin: 0; }
+.alert-callout { border-color: color-mix(in srgb, var(--sos) 35%, var(--line)); }
+.site-foot { border-top: 1px solid var(--line); margin-top: 24px; padding: 16px; text-align: center; color: var(--ink-2); font-size: .85rem; }
+.site-foot nav { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 14px; margin-bottom: 8px; }
+.site-foot p { margin: 0; }
+.landing-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 14px; padding: 8px 0 4px; font-size: .92rem; }
